@@ -1,0 +1,15 @@
+node_modules/
+dist/
+dist-server/
+release/
+.local/
+.env
+.env.*
+!.env.example
+*.sqlite*
+*.log
+test-results/
+playwright-report/
+coverage/
+audit-private/
+.browser-runtime/

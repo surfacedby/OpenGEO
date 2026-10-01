@@ -1,0 +1,19 @@
+# Development and packaging
+
+The interface is React/TypeScript with Vite. Fastify owns workflows, SQLite, credentials and spending. Electron and Docker run the same backend. CLI and MCP access existing backend operations with the local session file.
+
+For development, start `npm run dev` with `OPENGEO_SECRET_FILE` set, then `npm run web` in another terminal. The Vite server proxies `/api` to the local backend. Do not expose either server remotely.
+
+`npm run build` compiles the interface and backend, CLI and MCP. `npm run desktop` starts Electron after building. `npm run package:desktop` bundles Chromium, rebuilds SQLite for the installed Electron runtime and verifies that native binding before packaging. Run `npm rebuild better-sqlite3` before returning to Node development/tests. Signing remains a release gate.
+
+Native source builds require Python and the platform's C++ build tools on the maintainer's machine. Source and Electron headers compile outside the home directory and checkout, under `C:\OpenGEOBuild` on Windows or `/tmp/opengeo-build` on macOS/Linux. `OPENGEO_NATIVE_BUILD_ROOT` can select another writable neutral directory. Paths resolving into the home directory or checkout are refused, including redirected directories. Only verified native bindings return to the package; the temporary source and header directory is removed. Desktop users do not need these development tools.
+
+`node dist-server/cli.js projects` lists local projects. `workspace ID`, `job ID`, `run JSON` and `schedule JSON` use the shared backend and its budgets. Configure MCP stdio with `node dist-server/mcp.js` and the same `OPENGEO_DATA_DIR` as the running app. Secrets are not accepted as command-line arguments.
+
+SQLite migration version 1 creates projects, jobs, artifacts, workflow steps and settings. WAL provides durable writes. A runtime lock prevents multiple processes from independently recovering the same jobs. Opening an interrupted job preserves its uncertain provider step for user review.
+
+Migration version 3 adds the optional closed-field usage outbox. Usage sharing is preselected for new setup and saved when setup finishes, unless the user changes it first. No events are sent from an unsaved preference. Existing choices and existing workspaces without a saved preference are preserved. The local session protects the preference, and exports exclude consent and queue state. The usage tests exercise a local test transport without contacting the collector or paid providers.
+
+Audits default to 100 public pages per run. Users can choose a traversal budget up to 100,000 pages; it controls host load and job duration rather than projects or available features. Coverage records failed fetches and a remaining queue so a bounded crawl is not presented as the whole site. Browser rendering uses the same validated networking path and blocks WebSockets, service workers and downloads.
+
+Run `node node_modules/tsx/dist/cli.mjs scripts/analytics-ui-review.ts` to verify loaded evidence views with an isolated local backend and SQLite database. Clearly labelled synthetic records test chart gaps, repeated citations, question/source drill-downs, full-answer access, and layouts at 1360, 760 and 390 pixels. Captures stay outside the repository and are regression evidence, not public marketing examples. The runner and scheduler remain stopped; no paid provider requests run.

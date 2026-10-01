@@ -1,0 +1,20 @@
+services:
+  opengeo:
+    build: .
+    ports:
+      - "127.0.0.1:4318:4318"
+      - "127.0.0.1:4319:4319"
+    environment:
+      OPENGEO_OAUTH_PORT: "4319"
+    volumes:
+      - opengeo_data:/data
+    secrets:
+      - opengeo_secret
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+secrets:
+  opengeo_secret:
+    file: .local/encryption-secret
+volumes:
+  opengeo_data:

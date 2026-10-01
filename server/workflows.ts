@@ -1,0 +1,938 @@
+import { randomUUID } from "node:crypto";
+import { z } from "zod";
+import { Store } from "./storage.js";
+import { Providers, safeCitations, type Completion } from "./providers.js";
+import { crawl, auditFindings } from "./audit.js";
+import { renderedFetch } from "./render.js";
+import { crawlFetch } from "./network.js";
+import { scheduledBudgetCeiling } from "./scheduler.js";
+import {
+  presence,
+  summarize,
+  comparisonKey,
+  visibilityFindings,
+} from "./analysis.js";
+import { prompts } from "./prompts.js";
+import { discoverQuestions, discoverCompetitors } from "./discovery.js";
+import {
+  ProviderError,
+  type Job,
+  type Project,
+  type Observation,
+  type Model,
+} from "./contracts.js";
+const factsSchema = z.object({
+  facts: z.array(
+    z.object({ claim: z.string(), evidenceIds: z.array(z.string()).min(1) }),
+  ),
+  unknowns: z.array(z.string()),
+});
+const reviewSchema = z.object({
+  issues: z.array(
+    z.object({
+      claim: z.string(),
+      reason: z.string(),
+      evidenceIds: z.array(z.string()),
+    }),
+  ),
+  requiresHumanReview: z.boolean(),
+});
+const diagnosisSchema = z
+  .object({
+    recommendations: z.array(
+      z
+        .object({
+          title: z.string().min(1).max(200),
+          description: z.string().min(1).max(3000),
+          priority: z.enum(["high", "medium", "low"]),
+          targetPageId: z.string(),
+          evidenceIds: z.array(z.string()).min(1),
+          steps: z.array(z.string().min(1).max(2000)).min(1),
+        })
+        .strict(),
+    ),
+    uncertainties: z.array(z.string()),
+  })
+  .strict();
+export function parseJson(text: string) {
+  return JSON.parse(
+    text.replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, ""),
+  );
+}
+export class Runner {
+  private timer: ReturnType<typeof setInterval> | undefined;
+  private active:
+    { id: string; abort: AbortController; done: Promise<void> } | undefined;
+  constructor(
+    readonly store: Store,
+    readonly providers: Providers,
+  ) {}
+  start() {
+    this.timer = setInterval(() => {
+      void this.tick();
+    }, 1000);
+    this.timer.unref();
+  }
+  stop() {
+    if (this.timer) clearInterval(this.timer);
+    this.active?.abort.abort();
+    return this.active?.done ?? Promise.resolve();
+  }
+  async cancel(id: string) {
+    const job = this.store.job(id);
+    if (["completed", "failed"].includes(job.status) || (job.status === "cancelled" && job.error !== "cancel_remote")) return job;
+    this.store.updateJob(id, {
+      status: "cancelled",
+      progress: "Cancelled. Completed provider calls may still be billable.",
+    });
+    if (this.active?.id === id) {
+      this.active.abort.abort();
+      await this.active.done;
+    }
+    if (job.provider === 'console') {
+      const saved = this.store.step(id, 'console-scan');
+      if (saved?.state === 'done') {
+        const scan = JSON.parse(saved.body!);
+        try {
+          const result = await this.providers.console('/scans/' + scan.scan_id + '/cancel', {}, id + ':cancel', AbortSignal.timeout(20000));
+          const refund = result.data?.refunded_credits;
+          if (typeof refund !== 'number' || !Number.isFinite(refund) || refund < 0)
+            throw new Error('Invalid cancellation receipt');
+          this.store.updateJob(id, {
+            error: null,
+            spentUsd: Math.max(0, this.store.job(id).spentUsd - refund * 0.1),
+            progress: refund > 0 ? 'Cancelled on Console. Unused credits were returned.' : 'Cancelled on Console. Work already started remains billable.',
+            result: { cancellation: { refundedCredits: refund, priorStatus: result.data.prior_status } },
+          });
+        } catch {
+          this.store.updateJob(id, { error: 'cancel_remote', progress: 'Stopped locally. Remote cancellation was not confirmed. Check Console before starting another check.' });
+        }
+      } else if (saved?.state === 'started') {
+        this.store.updateJob(id, { error: 'cancel_remote', progress: 'Stopped locally. Submission had uncertain completion. Review Console for a running check and any charge.' });
+      }
+    }
+    return this.store.job(id);
+  }
+  resumePreview(id: string) {
+    const job = this.store.job(id);
+    const uncertain = this.store.db.prepare("SELECT COUNT(*) AS count FROM steps WHERE job_id=? AND state='started'").get(id) as { count: number };
+    return { maxCostUsd: job.maxCostUsd, spentUsd: job.spentUsd, uncertainRequests: uncertain.count, provider: job.provider, reason: job.error, scheduledBudgetCeilingUsd: scheduledBudgetCeiling(this.store, job) };
+  }
+  resume(id: string, reviewed: boolean, maxCostUsd?: number) {
+    const job = this.store.job(id);
+    if (job.status !== "paused") throw new Error("Only paused jobs can resume");
+    if (this.resumePreview(id).uncertainRequests && !reviewed)
+      throw new ProviderError("review", "Review uncertain provider requests before resuming.");
+    if (maxCostUsd !== undefined && (!Number.isFinite(maxCostUsd) || maxCostUsd < Math.max(job.maxCostUsd, job.spentUsd) || maxCostUsd > 10000))
+      throw new ProviderError("budget", "The new budget must cover the current ceiling and completed work.");
+    return this.store.db.transaction(() => {
+    const scheduledCeiling = scheduledBudgetCeiling(this.store, job);
+    if (scheduledCeiling !== undefined && Math.max(maxCostUsd ?? job.maxCostUsd, job.spentUsd) > scheduledCeiling + 1e-9)
+      throw new ProviderError("budget", "This run would exceed its approved monthly schedule budget. Keep it paused or start a separately approved manual run.");
+    for (const row of this.store.db
+      .prepare("SELECT step FROM steps WHERE job_id=? AND state='started'")
+      .all(id) as any[])
+      this.store.setStep(id, row.step, "approved-retry");
+    return this.store.updateJob(id, {
+      status: "queued",
+      error: null,
+      progress: "Waiting to resume",
+      ...(maxCostUsd !== undefined ? { maxCostUsd } : {}),
+    });
+    })();
+  }
+  async tick() {
+    if (this.active) return;
+    const job = this.store
+      .jobs()
+      .reverse()
+      .find((j) => j.status === "queued");
+    if (!job) return;
+    const abort = new AbortController();
+    let resolveDone!: () => void;
+    const done = new Promise<void>((resolve) => {
+      resolveDone = resolve;
+    });
+    this.active = { id: job.id, abort, done };
+    this.store.updateJob(job.id, { status: "running", progress: "Starting" });
+    try {
+      const saved = this.store.step(job.id, "project");
+      const project: Project = saved?.body
+        ? JSON.parse(saved.body)
+        : this.store.project(job.projectId);
+      if (!saved) this.store.setStep(job.id, "project", "done", project);
+      if (["measure", "recheck"].includes(job.kind) && job.requestedAnswers === undefined)
+        this.store.updateJob(job.id, { requestedAnswers: project.prompts.length });
+      const result = await this.execute(job, project, abort.signal);
+      if (this.store.job(job.id).status !== "cancelled")
+        this.store.updateJob(job.id, {
+          status: "completed",
+          progress: "Complete",
+          result,
+        });
+    } catch (e) {
+      if (this.store.job(job.id).status !== "cancelled") {
+        const error = e instanceof ProviderError ? e.code : "workflow";
+        this.store.updateJob(job.id, {
+          status: e instanceof ProviderError ? "paused" : "failed",
+          error,
+          progress:
+            e instanceof ProviderError
+              ? e.message
+              : "The workflow could not complete. Review saved evidence and retry after resolving the issue.",
+        });
+      }
+    } finally {
+      this.active = undefined;
+      resolveDone();
+    }
+  }
+  async once<T>(job: Job, name: string, fn: () => Promise<T>, beforeStart?: () => void): Promise<T> {
+    const prior = this.store.step(job.id, name);
+    if (prior?.state === "done") return JSON.parse(prior.body!) as T;
+    if (prior?.state === "started")
+      throw new ProviderError(
+        "interrupted",
+        "An earlier provider request has uncertain completion. Review usage before resuming.",
+        true,
+      );
+    beforeStart?.();
+    this.store.setStep(job.id, name, "started");
+    try {
+      const value = await fn();
+      this.store.setStep(job.id, name, "done", value);
+      return value;
+    } catch (error) {
+      if (error instanceof ProviderError) {
+        if (!error.uncertain && this.store.step(job.id, name)?.state !== 'done') this.store.setStep(job.id, name, 'rejected');
+        throw error;
+      }
+      throw new ProviderError('interrupted', 'The request ended with uncertain completion. Review provider usage before resuming.', true);
+    }
+  }
+  async execute(
+    job: Job,
+    project: Project,
+    signal: AbortSignal,
+  ): Promise<unknown> {
+    const update = (progress: string) =>
+      this.store.updateJob(job.id, { progress });
+    if (job.kind === "discover") return discoverQuestions(this, job, project, signal);
+    if (job.kind === "audit") {
+      const coverage = await crawl(
+        project.domain,
+        signal,
+        (p) => this.store.put("page", project.id, job.id, p),
+        update,
+        job.render ? renderedFetch : undefined,
+        job.maxPages ?? 100,
+        crawlFetch,
+      );
+      const pages = this.store.pages(project.id, job.id);
+      for (const f of auditFindings(project, job.id, pages))
+        this.store.put("finding", project.id, job.id, f);
+      return {
+        pages: pages.length,
+        coverage,
+        findings: this.store
+          .findings(project.id)
+          .filter((f) => f.jobId === job.id).length,
+      };
+    }
+    if (job.kind === "measure" || job.kind === "recheck") {
+      if (!project.prompts.length) throw new Error("Add at least one prompt");
+      if (job.provider === "console")
+        return this.consoleMeasure(job, project, signal);
+      if (job.provider === "chatgpt" || job.provider === "openrouter")
+        return this.apiMeasure(job, project, signal);
+      if (job.provider !== "dataforseo")
+        throw new ProviderError(
+          "capability",
+          "Select DataForSEO or Console to collect visibility evidence.",
+        );
+      const models = await this.providers.models("dataforseo", job.platform);
+      const model = job.model ?? models[0]?.id;
+      if (!model || !models.some((m) => m.id === model))
+        throw new ProviderError(
+          "capability",
+          "Select an available measurement model.",
+        );
+      this.store.updateJob(job.id, { model });
+      for (let i = 0; i < project.prompts.length; i++) {
+        signal.throwIfAborted();
+        if (this.store.step(job.id, "measure:" + i)?.state === "done") continue;
+        const live = this.store.job(job.id);
+        const estimate = this.store.setting<number>(
+          "measurementRequestEstimateUsd",
+          0,
+        );
+        if (estimate <= 0)
+          throw new ProviderError(
+            "estimate",
+            "Set a conservative measurement request estimate in Settings before paid measurements. DataForSEO does not expose a per-request dollar ceiling.",
+          );
+        if (live.spentUsd + estimate > job.maxCostUsd)
+          throw new ProviderError(
+            "budget",
+            "The approved measurement budget is insufficient for the next request.",
+          );
+        update(
+          "Collecting answer " + (i + 1) + " of " + project.prompts.length,
+        );
+        await this.once(job, "measure:" + i, async () => {
+          const result = await this.providers.measure(
+            job.platform,
+            model,
+            project.prompts[i],
+            project.locale,
+            signal,
+          );
+          const observation: Observation = {
+            id: randomUUID(),
+            projectId: project.id,
+            jobId: job.id,
+            prompt: project.prompts[i],
+            provider: "dataforseo",
+            platform: job.platform,
+            model: result.model,
+            locale: project.locale,
+            observedAt: new Date().toISOString(),
+            answer: result.text,
+            citations: result.citations,
+            surface: "api",
+            ...presence(
+              project,
+              result.text,
+              result.citations.map((c) => c.url),
+            ),
+            costUsd: result.costUsd,
+          };
+          this.store.db.transaction(() => {
+            this.store.put("observation", project.id, job.id, observation);
+            this.store.updateJob(job.id, {
+              spentUsd:
+                this.store.job(job.id).spentUsd + (result.costUsd ?? estimate),
+              costBasis: result.costUsd === null ? 'includes_estimates' : this.store.job(job.id).costBasis ?? 'reported',
+            });
+            this.store.setStep(job.id, "measure:" + i, "done", observation);
+          })();
+          return observation;
+        });
+        if (this.store.job(job.id).spentUsd > job.maxCostUsd)
+          throw new ProviderError(
+            "budget",
+            "Provider cost exceeded the estimate. Further requests have stopped.",
+          );
+      }
+      const observations = this.store.observations(project.id, job.id);
+      for (const f of visibilityFindings(project, job.id, observations))
+        this.store.put("finding", project.id, job.id, f);
+      return {
+        metrics: summarize(observations, project.prompts.length),
+        comparisonKey: comparisonKey(
+          project,
+          this.store.job(job.id),
+          observations,
+        ),
+      };
+    }
+    if (job.kind === "diagnose") {
+      const latest = this.store
+        .jobs(project.id)
+        .find(
+          (j) =>
+            ["measure", "recheck"].includes(j.kind) && j.status === "completed",
+        );
+      if (!latest) throw new Error("Collect visibility evidence first");
+      const observations = this.store.observations(project.id, latest.id);
+      if (job.provider === "chatgpt" || job.provider === "openrouter") {
+        const audit = this.store
+          .jobs(project.id)
+          .find((j) => j.kind === "audit" && j.status === "completed");
+        const pages = audit ? this.store.pages(project.id, audit.id) : [];
+        if (!pages.length)
+          throw new ProviderError(
+            "evidence",
+            "Complete a local audit to link recommendations to existing pages.",
+          );
+        const model = await this.contentModel(job);
+        const result = diagnosisSchema.parse(
+          parseJson(
+            await this.llmPass(
+              job,
+              model,
+              "diagnose",
+              {
+                brand: project.brand,
+                aliases: project.aliases,
+                locale: project.locale,
+                pages: pages.map((p) => ({
+                  id: p.id,
+                  url: p.url,
+                  title: p.title,
+                  h1: p.h1,
+                  text: p.text.slice(0, 8000),
+                })),
+                observations,
+              },
+              signal,
+            ),
+          ),
+        );
+        const allowed = new Set([
+          ...pages.map((p) => p.id),
+          ...observations.map((o) => o.id),
+        ]);
+        for (const recommendation of result.recommendations) {
+          const page = pages.find((p) => p.id === recommendation.targetPageId);
+          if (
+            !page ||
+            recommendation.evidenceIds.some((id) => !allowed.has(id))
+          )
+            throw new ProviderError(
+              "evidence",
+              "Analysis referenced unknown evidence. Review the saved analysis before continuing.",
+              true,
+            );
+        }
+        this.store.db.transaction(() => {
+          for (const r of result.recommendations) {
+            this.store.put("finding", project.id, job.id, {
+              id: randomUUID(),
+              projectId: project.id,
+              jobId: job.id,
+              title: r.title,
+              description: r.description,
+              priority: r.priority,
+              targetUrl: pages.find((p) => p.id === r.targetPageId)!.url,
+              evidenceIds: r.evidenceIds,
+              steps: r.steps,
+              confidence: "inferred",
+              status: "open",
+              kind: "analysis",
+            });
+          }
+        })();
+        return {
+          findings: result.recommendations.length,
+          uncertainties: result.uncertainties,
+          model: model.id,
+        };
+      }
+      for (const f of visibilityFindings(project, job.id, observations))
+        this.store.put("finding", project.id, job.id, f);
+      return { findings: observations.filter((o) => !o.cited).length };
+    }
+    if (job.provider === "console")
+      return this.consoleJob(job, project, signal);
+    const completed = this.store.step(job.id, 'content-result');
+    if (completed?.state === 'done') return JSON.parse(completed.body!);
+    if (!["chatgpt", "openrouter"].includes(job.provider ?? ""))
+      throw new ProviderError(
+        "capability",
+        "Connect ChatGPT or OpenRouter for content.",
+      );
+    let original: any;
+    if (job.kind === 'revise') {
+      const snapshot = this.store.step(job.id, 'revision-source');
+      original = snapshot?.body ? JSON.parse(snapshot.body) : this.store.artifacts<any>(project.id, 'content').find((doc) => doc.id === job.contentId);
+      if (!original) throw new Error('Content not found');
+      if (!snapshot) this.store.setStep(job.id, 'revision-source', 'done', original);
+    }
+    const model = await this.contentModel(job);
+    const latest = this.store
+      .jobs(project.id)
+      .find((j) => j.kind === "audit" && j.status === "completed");
+    const sourceIds = new Set<string>(original?.sourceEvidence?.map((s: any) => s.id) ?? []);
+    const sourcePages = sourceIds.size ? this.store.pages(project.id).filter((p) => sourceIds.has(p.id)) : latest ? this.store.pages(project.id, latest.id) : [];
+    const sources = sourcePages.map((p) => ({
+          id: p.id,
+          url: p.url,
+          title: p.title,
+          text: p.text.slice(0, 8000),
+        }));
+    if (!sources.length) throw new Error("Complete a local audit first");
+    const context = {
+      topic: original?.topic ?? job.topic ?? project.brand,
+      brand: project.brand,
+      locale: project.locale,
+      knowledge: {
+        id: "user-knowledge",
+        text: project.knowledge,
+        provenance: "user-supplied, unverified",
+      },
+      sources,
+    };
+    const allowed = new Set([...sources.map((s) => s.id), ...(project.knowledge.trim() ? ["user-knowledge"] : [])]);
+    const call = async (name: keyof typeof prompts, input: unknown) => {
+      return this.llmPass(job, model, name, input, signal);
+    };
+    const research = factsSchema.parse(
+      parseJson(await call("research", context)),
+    );
+    for (const fact of research.facts)
+      if (fact.evidenceIds.some((id) => !allowed.has(id)))
+        throw new ProviderError(
+          "evidence",
+          "The research pass cited unknown evidence. Review the result before retrying.",
+          true,
+        );
+    const brief = await call("brief", { topic: context.topic, locale: context.locale, research, sourceReferences: sources.map(({ id, url, title }) => ({ id, url, title })) });
+    const draft = await call("draft", {
+      locale: context.locale,
+      brief,
+      research,
+      sources,
+      knowledge: context.knowledge,
+      ...(original ? { previousDraft: original.markdown, revisionInstructions: job.revisionInstructions } : {}),
+    });
+    const review = reviewSchema.parse(
+      parseJson(await call("verify", { locale: context.locale, draft, research, sources })),
+    );
+    if (
+      review.issues.some((issue) =>
+        issue.evidenceIds.some((id) => !allowed.has(id)),
+      )
+    )
+      throw new ProviderError(
+        "evidence",
+        "Verification referenced unknown evidence. Review the saved verification before continuing.",
+        true,
+      );
+    const markdown = await call("edit", { locale: context.locale, draft, review, research, sources });
+    const finalReview = reviewSchema.parse(
+      parseJson(await call('verifyFinal', { locale: context.locale, draft: markdown, research, sources })),
+    );
+    if (finalReview.issues.some((issue) => issue.evidenceIds.some((id) => !allowed.has(id))))
+      throw new ProviderError('evidence', 'The final review referenced unknown evidence. Review the saved output before continuing.', true);
+    for (const id of allowed)
+      if (markdown.includes(id))
+        finalReview.issues.push({ claim: 'Internal reference in the article', reason: 'An internal evidence ID appears in the article. Remove it before publishing.', evidenceIds: [id] });
+    const sourceUrls = new Set(sources.map((s) => s.url));
+    const unknownLinks = [...markdown.matchAll(/\]\((https?:\/\/[^\s)]+)\)/g)]
+      .map((m) => m[1])
+      .filter((url) => !sourceUrls.has(url));
+    if (unknownLinks.length)
+      throw new ProviderError(
+        "evidence",
+        "The draft contains links that are not in its source evidence. Review the saved draft before continuing.",
+        true,
+      );
+    const doc = {
+      id: randomUUID(),
+      topic: context.topic,
+      locale: context.locale,
+      markdown,
+      brief,
+      review: finalReview,
+      reviewCurrent: true,
+      sourceEvidence: sources.map(({ id, url, title }) => ({ id, url, title })),
+      status: finalReview.issues.length ? 'needs_review' : 'draft',
+      requiresHumanReview: true,
+      createdAt: new Date().toISOString(),
+      model: model.id,
+      ...(original ? { derivedFrom: original.id, revisionInstructions: job.revisionInstructions } : {}),
+    };
+    this.store.db.transaction(() => {
+      this.store.put("content", project.id, job.id, doc);
+      this.store.setStep(job.id, 'content-result', 'done', doc);
+    })();
+    return doc;
+  }
+  async contentModel(job: Job) {
+    const models = await this.providers.models(job.provider!);
+    const model =
+      models.find((m) => m.id === job.model) ??
+      (!job.model ? models[0] : undefined);
+    if (!model)
+      throw new ProviderError(
+        "capability",
+        "Select an available model for this workflow.",
+      );
+    this.store.updateJob(job.id, { model: model.id });
+    return model;
+  }
+  /** API answer checks share durable request receipts and budgets with the other measurement paths. */
+  async apiMeasure(job: Job, project: Project, signal: AbortSignal) {
+    const model = await this.contentModel(job), provider = job.provider!;
+    const instructions = "Answer the user's question independently in locale " + project.locale + ". Cite sources when available. Do not invent citations.";
+    const cap = Math.min(4096, model.maxOutputTokens ?? 4096);
+    for (let index = 0; index < project.prompts.length; index++) {
+      signal.throwIfAborted();
+      const name = "measure:" + index;
+      if (this.store.step(job.id, name)?.state === "done") continue;
+      const prompt = project.prompts[index], tokenUpper = Buffer.byteLength(instructions + prompt, "utf8") + 1000,
+        estimate = tokenUpper * model.inputUsd + cap * model.outputUsd;
+      this.store.updateJob(job.id, { progress: "Collecting answer " + (index + 1) + " of " + project.prompts.length });
+      await this.once(job, name, async () => {
+        const completion = await this.providers.complete(provider, model.id, instructions, prompt, signal, cap, provider === "chatgpt" && job.webSearch !== false, model);
+        const observation: Observation = {
+          id: randomUUID(), projectId: project.id, jobId: job.id, prompt, provider,
+          platform: provider === "chatgpt" ? "chat_gpt" : "openrouter", model: completion.model, locale: project.locale,
+          observedAt: new Date().toISOString(), answer: completion.text, citations: completion.citations, surface: "api",
+          retrieval: provider === "chatgpt" && job.webSearch !== false ? "web_search" : "model_only",
+          ...(provider === "chatgpt" ? { webSearchConfirmed: completion.webSearchConfirmed === true } : {}),
+          ...presence(project, completion.text, completion.citations.map((citation) => citation.url)), costUsd: completion.costUsd,
+        };
+        this.store.db.transaction(() => {
+          this.store.put("observation", project.id, job.id, observation);
+          this.store.updateJob(job.id, { spentUsd: this.store.job(job.id).spentUsd + (completion.costUsd ?? estimate),
+            costBasis: completion.costUsd === null ? "includes_estimates" : this.store.job(job.id).costBasis ?? "reported" });
+          this.store.setStep(job.id, name, "done", observation);
+        })();
+        if (completion.costUsd === null) throw new ProviderError("cost_unknown", "The answer is saved. The provider omitted its cost; review usage before continuing.", true);
+        if (this.store.job(job.id).spentUsd > job.maxCostUsd) throw new ProviderError("budget", "The answer is saved. Reported cost exceeded the budget; further requests stopped.");
+        return observation;
+      }, () => {
+        if (tokenUpper + cap > model.contextLength) throw new ProviderError("context", "Choose a model with a larger context window.");
+        if (this.store.job(job.id).spentUsd + estimate > job.maxCostUsd) throw new ProviderError("budget", "The approved budget is insufficient for the next answer.");
+      });
+    }
+    const observations = this.store.observations(project.id, job.id);
+    for (const finding of visibilityFindings(project, job.id, observations)) this.store.put("finding", project.id, job.id, finding);
+    const competitors = provider === "chatgpt" && job.discoverCompetitors ? await discoverCompetitors(this, job, project, model, signal) : [];
+    return { metrics: summarize(observations, project.prompts.length), comparisonKey: comparisonKey(project, this.store.job(job.id), observations), competitors };
+  }
+  /** Each paid pass checkpoints its output and spend together before downstream validation. */
+  async llmPass(
+    job: Job,
+    model: Model,
+    name: keyof typeof prompts,
+    input: unknown,
+    signal: AbortSignal,
+  ) {
+    const progress: Record<keyof typeof prompts, string> = {
+      offerings: 'Understanding what your website offers',
+      questions: 'Finding questions your customers might ask',
+      questionReview: 'Reviewing questions for relevance and natural wording',
+      competitors: 'Identifying competitors in the collected answers',
+      research: 'Researching your source material',
+      brief: 'Preparing a content brief',
+      draft: 'Writing your draft',
+      verify: 'Checking factual claims',
+      edit: 'Refining your draft',
+      verifyFinal: 'Checking the final draft',
+      diagnose: 'Preparing recommendations',
+    };
+    this.store.updateJob(job.id, { progress: progress[name] });
+    const text = JSON.stringify(input),
+      cap = Math.min(4096, model.maxOutputTokens ?? 4096),
+      tokenUpper = Buffer.byteLength(text + prompts[name], "utf8") + 1000,
+      estimate = tokenUpper * model.inputUsd + cap * model.outputUsd;
+    return this.once(job, name, async () => {
+      const completion = await this.providers.complete(
+        job.provider!,
+        model.id,
+        prompts[name],
+        text,
+        signal,
+        cap,
+        false,
+        model,
+      );
+      this.store.db.transaction(() => {
+        this.store.updateJob(job.id, {
+          spentUsd:
+            this.store.job(job.id).spentUsd +
+            (completion.costUsd ?? (job.provider === "chatgpt" ? 0 : estimate)),
+          costBasis: completion.costUsd === null && job.provider !== 'chatgpt' ? 'includes_estimates' : this.store.job(job.id).costBasis ?? 'reported',
+        });
+        this.store.put("pass", job.projectId, job.id, {
+          id: randomUUID(),
+          pass: name,
+          input,
+          output: completion.text,
+          model: completion.model,
+          costUsd: completion.costUsd,
+          costEstimateUsd: estimate,
+          createdAt: new Date().toISOString(),
+        });
+        this.store.setStep(job.id, name, "done", completion.text);
+      })();
+      if (job.provider === "openrouter" && completion.costUsd === null)
+        throw new ProviderError(
+          "cost_unknown",
+          "The provider omitted its cost. The completed output is saved; the conservative estimate is held against your budget. Review provider usage before resuming.",
+          true,
+        );
+      if (this.store.job(job.id).spentUsd > job.maxCostUsd)
+        throw new ProviderError(
+          "budget",
+          "Provider cost exceeded the approved estimate. Further requests have stopped.",
+        );
+      return completion.text;
+    }, () => {
+      if (tokenUpper + cap > model.contextLength)
+        throw new ProviderError('context', 'This model cannot hold the evidence. Select a model with a larger context window.');
+      if (this.store.job(job.id).spentUsd + estimate > job.maxCostUsd)
+        throw new ProviderError('budget', 'The approved budget is insufficient for the next analysis pass.');
+    });
+  }
+  async consoleMeasure(job: Job, project: Project, signal: AbortSignal) {
+    const platform = job.platform === 'chat_gpt' ? 'chatgpt' : job.platform;
+    if (this.store.step(job.id, 'console-scan')?.state !== 'done') {
+      const capability = await this.providers.console('/capabilities', undefined, undefined, signal);
+      if (!capability.data?.platforms?.some((p: any) => p.key === platform && p.enabled === true))
+        throw new ProviderError('capability', 'This Console platform is unavailable. Select an enabled platform.');
+    }
+    const domain = await this.once(job, "console-domain", async () => {
+      const list = await this.consolePages("/domains", signal);
+      const existing = list.find((d: any) => d.domain === project.domain);
+      if (existing) return existing;
+      return (
+        await this.providers.console(
+          "/domains",
+          { domain: project.domain },
+          job.id + ":domain",
+          signal,
+        )
+      ).data;
+    });
+    await this.once(job, "console-brand", async () =>
+      this.providers.console(
+        "/domains/" + domain.id + "/brand",
+        {
+          brand_name: project.brand,
+          aliases: project.aliases,
+          country: new Intl.Locale(project.locale).region,
+        },
+        job.id + ":brand",
+        signal,
+        "PATCH",
+      ),
+    );
+    for (const [index, competitor] of project.competitors.entries())
+      await this.once(job, "console-competitor:" + index, async () =>
+        this.providers.console(
+          "/domains/" + domain.id + "/competitors",
+          { domain: competitor },
+          job.id + ":competitor:" + index,
+          signal,
+        ),
+      );
+    const request = {
+      domain_id: domain.id,
+      platforms: [platform],
+      keywords: project.prompts,
+      max_credits: Math.floor((job.maxCostUsd + Number.EPSILON) / 0.1),
+    };
+    if (this.store.step(job.id, "console-scan")?.state !== "done") {
+      const preview = await this.providers.console(
+        "/scans/preview",
+        request,
+        undefined,
+        signal,
+      );
+      const credits =
+        preview.data?.credits_required ??
+        preview.data?.credits_cost ??
+        preview.data?.credit_cost;
+      if (!Number.isSafeInteger(credits) || credits < 0)
+        throw new ProviderError(
+          "estimate",
+          "Console did not return a usable estimate.",
+        );
+      if (!Number.isSafeInteger(preview.data?.query_count) || preview.data.query_count < 1)
+        throw new ProviderError("estimate", "The API did not return the number of answers in this check. No check was submitted.");
+      if (credits * 0.1 > job.maxCostUsd)
+        throw new ProviderError(
+          "budget",
+          "The approved budget is insufficient for this Console check.",
+        );
+      this.store.updateJob(job.id, { requestedAnswers: preview.data.query_count });
+    }
+    const scan = await this.once(
+      job,
+      "console-scan",
+      async () =>
+        (await this.providers.console("/scans", request, job.id, signal)).data,
+    );
+    const scanId = scan.scan_id;
+    if (!scanId)
+      throw new ProviderError(
+        "invalid_response",
+        "Console did not return a check identifier.",
+        true,
+      );
+    if (typeof scan.credits_charged !== 'number' || !Number.isFinite(scan.credits_charged) || scan.credits_charged < 0)
+      throw new ProviderError('cost_unknown', 'Console omitted a usable charge receipt. Review the submitted check before continuing.', true);
+    this.store.updateJob(job.id, { spentUsd: scan.credits_charged * 0.1 });
+    let state;
+    for (let n = 0; n < 180; n++) {
+      signal.throwIfAborted();
+      state = (
+        await this.providers.console(
+          "/scans/" + scanId,
+          undefined,
+          undefined,
+          signal,
+        )
+      ).data;
+      if (state.status !== "completed" && Number.isSafeInteger(state.answers_total) && state.answers_total > 0)
+        this.store.updateJob(job.id, { requestedAnswers: state.answers_total });
+      if (state.status === "completed") {
+        const analysis = (
+          await this.providers.console(
+            "/scans/" + scanId + "/analysis",
+            undefined,
+            undefined,
+            signal,
+          )
+        ).data;
+        if (analysis.analysis_status === "available") break;
+        if (analysis.analysis_status === "unavailable")
+          throw new ProviderError(
+            "analysis",
+            "Console analysis is unavailable for this check. The collected answers remain on the provider.",
+          );
+        state = { ...state, status: "processing-analysis" };
+        this.store.updateJob(job.id, {
+          progress:
+            "Answers collected. Waiting for Console diagnosis and recommendations.",
+        });
+      }
+      if (["failed", "cancelled"].includes(state.status))
+        throw new ProviderError(
+          "provider",
+          "Console did not complete this check.",
+        );
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+    if (state?.status !== "completed")
+      throw new ProviderError(
+        "waiting",
+        "Console is still processing. Resume later to collect results.",
+      );
+    await this.once(job, "console-evidence", async () => {
+      const evidence = await this.consolePages(
+        "/scans/" + scanId + "/observations",
+        signal,
+      );
+      const findings: any[] = [];
+      for (const kind of ["diagnoses", "opportunities"])
+        findings.push(
+          ...(await this.consolePages(
+            "/domains/" +
+              domain.id +
+              "/insights/" +
+              kind +
+              "?scan_id=" +
+              scanId,
+            signal,
+          )),
+        );
+      this.store.db.transaction(() => {
+        const observationIds = new Map<string, string>();
+        for (const row of evidence) {
+          if (row.status === "missing_observation" || !row.answer_text?.trim())
+            continue;
+          const citations = safeCitations(Array.isArray(row.citations) ? row.citations : []);
+          const o: Observation = {
+            id: randomUUID(),
+            projectId: project.id,
+            jobId: job.id,
+            prompt: row.prompt,
+            provider: "console",
+            platform: row.platform,
+            model: row.model ?? "not-disclosed",
+            locale: row.locale ?? project.locale,
+            observedAt: row.observed_at ?? state.completed_at,
+            answer: row.answer_text,
+            citations,
+            surface: "api",
+            mentioned: ["cited", "named"].includes(row.presence),
+            cited: row.presence === "cited",
+            costUsd: null,
+          };
+          this.store.put("observation", project.id, job.id, o);
+          observationIds.set(row.id, o.id);
+        }
+        for (const row of findings)
+          this.store.put("finding", project.id, job.id, {
+            id: randomUUID(),
+            projectId: project.id,
+            jobId: job.id,
+            title: row.title,
+            description: row.description,
+            priority: row.priority ?? "medium",
+            targetUrl: row.target_url ?? "https://" + project.domain,
+            evidenceIds: (row.evidence ?? [])
+              .map((e: any) => observationIds.get(e.observation_id))
+              .filter(Boolean),
+            steps: row.steps ?? [],
+            confidence: "inferred",
+            status: "open",
+            kind: "console",
+            remoteId: row.id,
+            evidenceAsOf: row.evidence_as_of,
+            remoteScanId: row.scan_id,
+          });
+        this.store.setStep(job.id, "console-evidence", "done", {
+          observations: evidence.length,
+        });
+      })();
+      return { observations: evidence.length };
+    });
+    const requested = state.answers_total;
+    const evidenceCount = JSON.parse(this.store.step(job.id, "console-evidence")!.body!).observations;
+    if (!Number.isSafeInteger(requested) || requested < 1 || requested < evidenceCount)
+      throw new ProviderError("invalid_response", "The collected answers are saved, but the API returned an inconsistent check total. Review this check before comparing results.");
+    this.store.updateJob(job.id, { requestedAnswers: requested });
+    return {
+      metrics: summarize(
+        this.store.observations(project.id, job.id),
+        requested,
+      ),
+      consoleScore: state.visibility_score,
+      comparisonKey: comparisonKey(
+        project,
+        job,
+        this.store.observations(project.id, job.id),
+      ),
+    };
+  }
+  async consolePages(path: string, signal: AbortSignal) {
+    const rows: any[] = [];
+    let cursor: string | undefined;
+    const seen = new Set<string>();
+    do {
+      signal.throwIfAborted();
+      const result = await this.providers.console(
+        path +
+          (cursor
+            ? (path.includes("?") ? "&" : "?") +
+              "cursor=" +
+              encodeURIComponent(cursor)
+            : ""),
+        undefined,
+        undefined,
+        signal,
+      );
+      rows.push(...(result.data ?? []));
+      cursor = result.meta?.next_cursor;
+      if (cursor && seen.has(cursor))
+        throw new ProviderError(
+          "pagination",
+          "Console repeated its pagination cursor.",
+        );
+      if (cursor) seen.add(cursor);
+    } while (cursor);
+    return rows;
+  }
+  async consoleJob(job: Job, project: Project, signal: AbortSignal) {
+    const input = {
+      operation: "content",
+      topic: job.topic ?? project.brand,
+      domain: project.domain,
+      max_credits: Math.floor(job.maxCostUsd / 0.1),
+    };
+    const capability = await this.providers.console("/capabilities");
+    if (!capability.data?.operations?.includes("content"))
+      throw new ProviderError(
+        "capability",
+        "Console content is not available on this deployment. Connect ChatGPT or OpenRouter.",
+      );
+    const result = await this.providers.console("/jobs", input, job.id, signal);
+    return result.data;
+  }
+}

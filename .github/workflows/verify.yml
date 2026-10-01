@@ -1,0 +1,94 @@
+name: Verify application
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  application:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, macos-15-intel, macos-15, ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24.4.1'
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run check:public
+      - run: npm test
+      - run: node scripts/clean-build.mjs
+      - run: npm audit --omit=dev
+
+  desktop:
+    if: github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            platform: win
+            arch: x64
+          - os: macos-15-intel
+            platform: mac
+            arch: x64
+          - os: macos-15
+            platform: mac
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24.4.1'
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run check:public
+      - run: npm test
+      - name: Build unsigned verification package
+        run: node scripts/clean-build.mjs --desktop-installer --platform=${{ matrix.platform }} --arch=${{ matrix.arch }} --desktop-output=release/verification
+      - name: Verify packaged setup, local audit and backup
+        run: node scripts/desktop-smoke.mjs --verification
+      # Files are deliberately not uploaded. Distribution requires an exact
+      # artifact confidentiality review and the maintainer's signing decision.
+
+  docker:
+    if: github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24.4.1'
+          package-manager-cache: false
+      - run: npm run check:public
+      - run: docker build --tag opengeo:verification .
+      - name: Verify first setup, local audit, backup and restart
+        run: node scripts/docker-smoke.mjs opengeo:verification

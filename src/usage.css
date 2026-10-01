@@ -1,0 +1,10 @@
+.usage-preference { margin-bottom: 24px; }
+.usage-preference .panel-heading h2 { display: flex; align-items: center; gap: 9px; }
+.usage-choice { display: flex; align-items: center; gap: 10px; cursor: pointer; min-height: 44px; }
+.usage-preference .small { margin-top: 6px; }
+.usage-preference details { margin-top: 14px; max-width: 660px; }
+.usage-preference summary { display: flex; align-items: center; gap: 6px; min-height: 32px; cursor: pointer; font-size: 13px; list-style: none; }
+.usage-preference summary::-webkit-details-marker { display: none; }
+.usage-preference details[open] summary svg { transform: rotate(180deg); }
+.usage-preference.compact { margin: 14px 0; padding: 0; }
+.usage-preference.compact .small { margin-left: 28px; }
