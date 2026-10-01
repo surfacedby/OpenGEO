@@ -5,7 +5,7 @@ import type { Runner } from "./workflows.js";
 import { parseJson } from "./workflows.js";
 import { publicUrl } from "./network.js";
 
-export const questionDiscoveryVersion = 3;
+export const questionDiscoveryVersion = 4;
 const offeringInventory = z.object({
   siteType: z.enum(["business", "marketplace", "publication", "personal", "unclear"]),
   audience: z.string().trim().max(500),
