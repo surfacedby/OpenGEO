@@ -16,6 +16,10 @@ export function retrievalLabel(answer: Observation) {
     return answer.webSearchConfirmed === true ? "Web search confirmed" : "Web search requested, use unconfirmed";
   return answer.retrieval === "model_only" ? "Model-only answer" : "Provider-managed retrieval";
 }
+export function collectionLabel(answer: Pick<Observation, "surface">) {
+  return answer.surface === "consumer_interface" ? "Website observation"
+    : answer.surface === "api" ? "Model connection" : "Collection method not recorded";
+}
 export function ProviderIcon({ provider, size = 22 }: { provider: string; size?: number }) {
   if (provider === "console") return <svg width={size} height={size} viewBox="0 0 20 26" fill="#172033" aria-hidden="true"><g transform="translate(-26.5 -85)"><path d="M33.624 87.341C33.934 87.28 33.797 87.253 34.066 87.341C33.912 87.769 33.174 88.277 32.919 88.676C30.198 92.929 32.525 95.667 36.936 96.581C40.386 97.264 45.19 99.477 44.59 103.819C43.565 111.239 33.216 111.611 29.045 106.732C28.429 105.841 28.078 105.017 27.595 104.052C29.166 103.592 30.099 103.023 31.526 102.555C31.841 103.839 32.662 104.944 33.802 105.615C36.013 106.896 41.232 106.427 40.224 102.875C39.528 100.42 33.848 100.207 31.574 98.885C26.109 95.709 27.827 88.995 33.624 87.341Z"/><path d="M33.366 93.459C33.404 93.709 33.401 93.621 33.358 93.872L33.241 93.875C32.646 93.217 32.618 92.15 32.761 91.323C32.98 90.021 33.731 88.867 34.833 88.14C37.786 86.187 42.438 87.817 44.237 90.63C44.412 90.95 44.568 91.155 44.579 91.515C44.242 91.895 41.287 93.415 40.666 93.725C40.408 93.715 40.481 93.763 40.296 93.655C38.999 90.536 34.369 89.783 33.366 93.459Z"/><path fill="#0b5ed7" d="M33.366 93.459C31.859 91.87 36.387 87.214 40.975 92.439L44.237 90.631C44.412 90.951 44.568 91.155 44.579 91.515C44.242 91.895 41.287 93.415 40.666 93.725C40.408 93.715 40.481 93.763 40.296 93.655C38.999 90.536 34.369 89.783 33.366 93.459Z"/></g></svg>;
   if (provider === "chatgpt" || provider === "chat_gpt" || provider.startsWith("openai/")) return <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d={marks.openai} /></svg>;

@@ -22,6 +22,7 @@ import {
   ProviderIcon,
   providerLabels,
   retrievalLabel,
+  collectionLabel,
 } from "./provider-ui";
 import "./analytics.css";
 
@@ -62,6 +63,7 @@ export function MeasurementScope({
     ...new Set(observations.map((observation) => observation.model)),
   ];
   const retrieval = [...new Set(observations.map(retrievalLabel))];
+  const collection = [...new Set(observations.map(collectionLabel))];
   return (
     <div className="measurement-scope" aria-label="Current measurement scope">
       {measurement.provider &&
@@ -102,13 +104,14 @@ export function MeasurementScope({
               : (measurement.model ?? "Provider selected")}
           </p>
           {retrieval.length > 0 && <p>{retrieval.join(" / ")}</p>}
+          {collection.length > 0 && <p>Collected through: {collection.join(" / ")}</p>}
           {latest?.locale && (
             <p>Answer language: {languageName(latest.locale)}</p>
           )}
           <p>
             Rates use collected answers. Missing answers are not counted as
-            absent mentions. Answers collected through a connection can differ
-            from answers on the provider's website.
+            absent mentions. Answers vary by time, location and account.
+            Comparisons use the same collection method.
           </p>
         </div>
       </details>
@@ -647,7 +650,7 @@ export function AnswerCard({ observation: o }: { observation: Observation }) {
         </summary>
         <p className="answer-text">{o.answer}</p>
         <div className="answer-meta">
-          <span>Provider-collected answer</span>
+          <span>{collectionLabel(o)}</span>
           <span>{retrievalLabel(o)}</span>
           <span>Model: {o.model}</span>
         </div>
