@@ -155,8 +155,8 @@ export class Providers {
           outputUsd: 0,
         }));
     }
-    const b = await this.console("/capabilities");
-    return b.data?.models ?? [];
+    // Managed jobs have a quoted price; their model metadata is not a token-price catalog.
+    return [];
   }
   async complete(
     provider: Provider,

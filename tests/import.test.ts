@@ -51,6 +51,11 @@ test("portable restore isolates projects, preserves evidence provenance, and can
     assert.equal(evidence.projectId, restored.project.id);
     assert.equal(store.job(evidence.jobId).status, "cancelled");
     assert.equal(importProject(store, source).project.id, restored.project.id);
+    for (const surface of ["consumer_interface", "unknown"] as const) {
+      const copy = importProject(store, { ...source, observations: [{ ...source.observations[0], surface }] });
+      assert.equal(store.observations(copy.project.id)[0].surface, surface);
+      assert.equal(store.job(store.observations(copy.project.id)[0].jobId).status, "cancelled");
+    }
     const before = store.projects().length;
     assert.throws(() =>
       restoreBackup(store, {

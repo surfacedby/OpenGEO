@@ -51,7 +51,7 @@ const observation = z
     observedAt: date,
     answer: z.string(),
     citations: z.array(citation),
-    surface: z.literal("api"),
+    surface: z.enum(["api", "consumer_interface", "unknown"]),
     retrieval: z.enum(["web_search", "model_only", "provider_managed"]).optional(),
     webSearchConfirmed: z.boolean().optional(),
     mentioned: z.boolean(),
@@ -98,6 +98,8 @@ const content = z
             .strict(),
         ),
         requiresHumanReview: z.boolean(),
+        scope: z.literal("numeric_and_absolute_statements").optional(),
+        coverageComplete: z.boolean().optional(),
       })
       .strict(),
     status: z.enum(["draft", "needs_review"]),

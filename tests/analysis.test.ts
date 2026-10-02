@@ -30,6 +30,10 @@ test("recheck comparisons reject changed collection scope and incomplete evidenc
     comparisonKey({ ...project, locale: "fr-FR" }, job, obs),
   );
   assert.notEqual(
+    comparisonKey(project, job, [{ ...obs[0], surface: "api" }]),
+    comparisonKey(project, job, [{ ...obs[0], surface: "consumer_interface" }]),
+  );
+  assert.notEqual(
     key,
     comparisonKey(project, job, [
       { model: "changed", prompt: "A question?" },

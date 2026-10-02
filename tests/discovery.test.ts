@@ -214,9 +214,12 @@ test("sitemap discovery follows same-site indexes, obeys robots, deduplicates an
 });
 
 test("Console connection metadata projects only public features and refuses malformed availability", () => {
-  const data = consoleCapabilities({ platforms: [{ key: "chatgpt", name: "ChatGPT", enabled: true, supplierCredential: "synthetic-private-value" }], operations: ["full_check", "internal_debug"], content_available: false, privatePrompt: "synthetic-private-instruction", supplierCosts: [1, 2] });
+  const data = consoleCapabilities({ platforms: [{ key: "chatgpt", name: "ChatGPT", enabled: true, supplierCredential: "synthetic-private-value" }], operations: ["full_check", "internal_debug"], content_available: true,
+    models: [{ id: "managed-model", operations: ["research", "content", "internal_debug"], supplierCost: "synthetic-private-cost" }],
+    privatePrompt: "synthetic-private-instruction", supplierCosts: [1, 2] });
   assert.deepEqual(data.platforms, [{ key: "chatgpt", name: "ChatGPT", enabled: true }]);
   assert.deepEqual(data.operations, ["full_check"]);
+  assert.deepEqual(data.models, [{ id: "managed-model", operations: ["research", "content"] }]);
   assert.ok(!JSON.stringify(data).includes("synthetic-private"));
   assert.throws(() => consoleCapabilities({ platforms: [{ key: "chatgpt", name: "ChatGPT", enabled: "yes" }] }));
 });

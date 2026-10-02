@@ -663,7 +663,7 @@ export function App() {
                     w.content.filter((draft) => draft.id === (selectedContent || w.content[0]?.id)).map((c) => (
                       <article className="answer" key={c.id}>
                         <div className="answer-meta">
-                          <span className="badge">Draft</span>
+                          <span className="badge">{c.status === "needs_review" || c.reviewCurrent === false ? "Needs review" : "Draft"}</span>
                           <span>Human review required</span>
                         </div>
                         <h3>{c.topic}</h3>
@@ -671,7 +671,7 @@ export function App() {
                           <summary>Content brief</summary>
                           <ContentBrief brief={c.brief} sources={c.sourceEvidence} />
                         </details>
-                        <details className="draft-review" open={!!c.review?.issues?.length || c.reviewCurrent === false || !c.review}>
+                        <details className="draft-review" open={!!c.review?.issues?.length || c.review?.coverageComplete === false || c.reviewCurrent === false || !c.review}>
                           <summary>{c.reviewCurrent === false ? "Review outdated after edits" : c.review?.issues?.length ? c.review.issues.length + (c.review.issues.length === 1 ? " claim needs review" : " claims need review") : "Verification notes"}</summary>
                           <ContentReview content={c} />
                         </details>
@@ -871,7 +871,7 @@ function Jobs({
               className="secondary"
               onClick={() => { setReviewError(""); void run(async () => { const receipt = await api<Omit<NonNullable<typeof review>, "id">>("/jobs/" + j.id + "/resume-preview"); setReview({ ...receipt, id: j.id }); }); }}
             >
-              Resume
+              {j.error === "approval" ? "Review draft price" : "Resume"}
             </button>
           )}
           {["running", "queued", "paused"].includes(j.status) && (
@@ -888,11 +888,11 @@ function Jobs({
           {j.status === 'cancelled' && j.error === 'cancel_remote' && <button className="secondary" onClick={() => void run(() => api('/jobs/' + j.id + '/cancel', {}))}>Check cancellation</button>}
           {review?.id === j.id && <form className="resume-review" onSubmit={(event) => {
             event.preventDefault(); const data = new FormData(event.currentTarget); setResuming(true); setReviewError("");
-            void run(async () => { try { await api("/jobs/" + j.id + "/resume", { reviewed: data.get("reviewed") === "on", ...(data.has("budget") ? { maxCostUsd: Number(data.get("budget")) } : {}) }); setReview(null); } catch (failure) { setReviewError((failure as Error).message); } }).finally(() => setResuming(false));
-          }}><h3>Resume this run</h3><p>{review.uncertainRequests ? "A previous request may have completed. Check your provider's activity before allowing another attempt." : j.error === "quota" ? "Resume when your provider's limits allow requests again. Saved results will be kept." : "Saved results will be kept. Resolve the issue shown above before continuing."}</p>
+            void run(async () => { try { await api("/jobs/" + j.id + "/resume", { reviewed: review.reason === "approval" || data.get("reviewed") === "on", ...(data.has("budget") ? { maxCostUsd: Number(data.get("budget")) } : {}) }); setReview(null); } catch (failure) { setReviewError((failure as Error).message); } }).finally(() => setResuming(false));
+          }}><h3>{review.reason === "approval" ? "Approve your draft" : "Resume this run"}</h3><p>{review.reason === "approval" ? j.progress : review.uncertainRequests ? "A previous request may have completed. Check your provider's activity before allowing another attempt." : j.error === "quota" ? "Resume when your provider's limits allow requests again. Saved results will be kept." : "Saved results will be kept. Resolve the issue shown above before continuing."}</p>
             {review.uncertainRequests > 0 && <label className="checkbox-field"><input type="checkbox" name="reviewed" required />I reviewed provider activity and approve retrying uncertain requests.</label>}
             {review.reason === "budget" && review.provider !== "chatgpt" && <label>New approved total budget (USD)<input name="budget" type="number" min={Math.max(review.spentUsd, review.maxCostUsd)} max={review.scheduledBudgetCeilingUsd ?? 10000} step="0.01" defaultValue={Math.max(review.spentUsd, review.maxCostUsd)} required /><small>Includes ${review.spentUsd.toFixed(3)} already committed. Increasing this amount approves additional provider spending.</small>{review.scheduledBudgetCeilingUsd !== undefined && <small>Schedule allowance for this run: ${review.scheduledBudgetCeilingUsd.toFixed(2)}.</small>}</label>}
-            {reviewError && <p className="inline-error" role="alert">{reviewError}</p>}<div className="button-row"><button className="primary" disabled={resuming}>{resuming ? "Resuming..." : "Resume run"}</button><button type="button" className="secondary" disabled={resuming} onClick={() => setReview(null)}>Keep paused</button></div>
+            {reviewError && <p className="inline-error" role="alert">{reviewError}</p>}<div className="button-row"><button className="primary" disabled={resuming}>{resuming ? "Starting..." : review.reason === "approval" ? "Approve and start draft" : "Resume run"}</button><button type="button" className="secondary" disabled={resuming} onClick={() => setReview(null)}>Keep paused</button></div>
           </form>}
         </li>
       ))}
@@ -1033,7 +1033,7 @@ function JobDialog({
       : kind === "revise"
         ? ["chatgpt", "openrouter"]
       : kind === "content"
-        ? ["chatgpt", "openrouter"]
+        ? ["chatgpt", "console", "openrouter"]
         : ["chatgpt", "console", "dataforseo", "openrouter"];
   const [provider, setProvider] = useState<Provider>(
       choices.find((p) => connected[p]) ?? choices[0],
@@ -1069,6 +1069,11 @@ function JobDialog({
     if (provider === 'console') {
       void api('/providers/console/capabilities').then((capability) => {
         if (stopped) return;
+        if (kind === "content") {
+          if (!capability.content_available || !capability.operations?.includes("content"))
+            setDiscoveryError("Content is unavailable on this SurfacedBy connection. Choose ChatGPT or OpenRouter.");
+          return;
+        }
         const enabled = (capability.platforms ?? []).filter((p: any) => p.enabled === true);
         setConsolePlatforms(enabled);
         if (!enabled.some((p: any) => p.key === platform)) setPlatform(enabled[0]?.key ?? '');
@@ -1176,7 +1181,7 @@ function JobDialog({
               {provider === "chatgpt"
                 ? "Uses your ChatGPT plan within its limits. Answers can differ from the ChatGPT website."
                 : provider === "console"
-                  ? "Managed measurement and analysis through one connection. Pay as you go."
+                  ? kind === "content" ? "A researched draft with source links and review notes. Pay as you go, within your approved maximum." : "Managed measurement and analysis through one connection. Pay as you go."
                   : provider === "dataforseo"
                     ? "Collect visibility evidence for local analysis. Provider charges apply."
                     : "Checks answers from your chosen model. OpenRouter usage charges apply."}
@@ -1245,7 +1250,7 @@ function JobDialog({
             submitting ||
             loading ||
             !!discoveryError ||
-            (provider === 'console' && !platform) ||
+            (provider === 'console' && kind !== 'content' && !platform) ||
             (kind !== "audit" &&
               (!connected[provider] ||
                 (provider !== "console" && !model) ||

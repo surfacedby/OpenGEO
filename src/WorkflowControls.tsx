@@ -269,6 +269,7 @@ export function ContentReview({ content }: { content: any }) {
   const issues = content.review?.issues ?? [];
   return <section>
     <h3>Claims to review</h3>
+    {content.review.scope === "numeric_and_absolute_statements" && <p className="small">Automated checks cover numbers and absolute claims{content.review.coverageComplete === false ? ", with some claims left unchecked" : ""}. Review the remaining claims and their sources before publishing.</p>}
     {content.sourceCoverage && <p className="small">Based on {content.sourceCoverage.pagesUsed} website {content.sourceCoverage.pagesUsed === 1 ? 'page' : 'pages'} selected for this topic. Source links are preserved with this draft.</p>}
     {content.reviewCurrent === false && <p>Your edits came after this review. Check the current draft before publishing.</p>}
     {issues.length ? <ul>{issues.map((issue: any, index: number) => <li key={index}>
@@ -277,7 +278,9 @@ export function ContentReview({ content }: { content: any }) {
         const source = content.sourceEvidence?.find((s: any) => s.id === id);
         return source ? <p key={id}><a href={source.url} target="_blank" rel="noreferrer">{source.title || source.url}</a></p> : id === 'user-knowledge' ? <p key={id}>Your supplied expertise</p> : null;
       })}
-    </li>)}</ul> : <p>The automated review found no unresolved claims. Check the source support and wording before publishing.</p>}
+    </li>)}</ul> : <p>{content.review.coverageComplete === false
+      ? "Checks are incomplete. Review the draft and its sources before publishing."
+      : "No issues were found in the checked claims. Review the source support and wording before publishing."}</p>}
   </section>;
 }
 
@@ -299,7 +302,7 @@ export function ScheduleControls({ run, connected }: { run: (f: () => Promise<un
     try { await run(async () => { try { await action(); } catch (failure) { setError(failure); } }); }
     finally { setSaving(false); }
   }
-  const allowed: Provider[] = kind === "content" ? ["chatgpt", "openrouter"] : ["chatgpt", "console", "dataforseo", "openrouter"],
+  const allowed: Provider[] = kind === "content" ? ["chatgpt", "console", "openrouter"] : ["chatgpt", "console", "dataforseo", "openrouter"],
     choices = providerOptions(connected, allowed), local = kind === "audit";
   useEffect(() => {
     let stopped = false;
@@ -317,6 +320,10 @@ export function ScheduleControls({ run, connected }: { run: (f: () => Promise<un
     setLoading(true);
     const request = provider === "console" ? api("/providers/console/capabilities").then((capabilities) => {
       if (stopped) return;
+      if (kind === "content") {
+        if (!capabilities.content_available || !capabilities.operations?.includes("content")) setDiscoveryError("Content is unavailable on this SurfacedBy connection. Choose ChatGPT or OpenRouter.");
+        return;
+      }
       const available = (capabilities.platforms ?? []).filter((entry: any) => entry.enabled);
       setPlatforms(available); if (!available.some((entry: any) => entry.key === platform)) setPlatform(available[0]?.key ?? "");
       if (!available.length) setDiscoveryError("This connection has no supported answer platforms available.");
@@ -325,7 +332,7 @@ export function ScheduleControls({ run, connected }: { run: (f: () => Promise<un
     });
     void request.catch((failure) => { if (!stopped) setDiscoveryError(failure.message); }).finally(() => { if (!stopped) setLoading(false); });
     return () => { stopped = true; };
-  }, [provider, platform, local, connected[provider], discoveryRevision]);
+  }, [provider, platform, local, kind, connected[provider], discoveryRevision]);
   return <section className="panel">
     <div className="panel-heading"><h2>Schedules</h2><button className="secondary" disabled={saving} onClick={() => { submission.current = null; setError(""); setAdding(!adding); }}><Plus size={15} />Add schedule</button></div>
     <div className="panel-padding"><p className="small">Runs while {identity.name} is open. Docker can run continuously on your host. Missed runs become one fresh run.</p></div>
@@ -363,7 +370,7 @@ export function ScheduleControls({ run, connected }: { run: (f: () => Promise<un
         <label>Website<Select label="Scheduled website" name="project" {...feedback.field("projectId")} options={projects.map((project) => ({ value: project.id, label: project.domain, detail: project.brand }))} placeholder="Add a website first" /></label>
         <label>Workflow<Select label="Scheduled workflow" {...feedback.field("kind")} value={kind} onChange={setKind} searchable={false} options={[{ value: "audit", label: "Local audit", detail: "No provider required" }, { value: "recheck", label: "Visibility recheck" }, { value: "content", label: "Content draft" }]} /></label>
         {!local && choices.length > 0 && <><label>Connection<Select label="Schedule connection" {...feedback.field("provider")} value={provider} onChange={(value) => { setProvider(value as Provider); setPlatform("chat_gpt"); }} options={choices} placeholder="Connect a provider first" /></label>
-          {["dataforseo", "console"].includes(provider) && <label>Answer platform<Select label="Schedule answer platform" {...feedback.field("platform")} value={platform} onChange={setPlatform} options={(provider === "console" ? platforms : [{ key: "chat_gpt", name: "ChatGPT" }, { key: "gemini", name: "Gemini" }, { key: "perplexity", name: "Perplexity" }]).map((entry) => ({ value: entry.key, label: entry.name, icon: <ProviderIcon provider={entry.key} size={18} /> }))} /></label>}
+          {["dataforseo", "console"].includes(provider) && kind !== "content" && <label>Answer platform<Select label="Schedule answer platform" {...feedback.field("platform")} value={platform} onChange={setPlatform} options={(provider === "console" ? platforms : [{ key: "chat_gpt", name: "ChatGPT" }, { key: "gemini", name: "Gemini" }, { key: "perplexity", name: "Perplexity" }]).map((entry) => ({ value: entry.key, label: entry.name, icon: <ProviderIcon provider={entry.key} size={18} /> }))} /></label>}
           {provider !== "console" && <ModelSelector models={models} value={model} onChange={setModel} loading={loading} validation={feedback.field("model")} />}
         </>}
         <label>Frequency<Select label="Schedule frequency" {...feedback.field("frequency")} value={frequency} onChange={setFrequency} searchable={false} options={[{ value: "weekly", label: "Weekly" }, { value: "daily", label: "Daily" }]} /></label>
@@ -376,7 +383,8 @@ export function ScheduleControls({ run, connected }: { run: (f: () => Promise<un
       {!local && !choices.length && <p role="status">Connect a provider in Connections before scheduling AI work.</p>}
       {!local && discoveryError && <div><p className="inline-error" role="alert">{discoveryError}</p><button type="button" className="secondary" disabled={loading || saving} onClick={() => setDiscoveryRevision(value => value + 1)}>Retry availability check</button></div>}
       {!local && provider === "chatgpt" && <p className="small">Uses your ChatGPT plan within its limits. Affected work pauses if access is unavailable.</p>}
-      <div className="button-row"><button className="primary" disabled={saving || !projects.length || loading || (!local && (!!discoveryError || !choices.length || !connected[provider] || (provider !== "console" && !model) || (provider === "console" && !platform)))}>{saving ? "Saving schedule..." : "Save schedule"}</button><button type="button" disabled={saving} className="secondary" onClick={() => setAdding(false)}>Cancel</button></div>
+      {kind === "content" && provider === "console" && <p className="small">Scheduled drafts run automatically only when their estimate fits both approved maximums. Unused credits are returned after completion.</p>}
+      <div className="button-row"><button className="primary" disabled={saving || !projects.length || loading || (!local && (!!discoveryError || !choices.length || !connected[provider] || (provider !== "console" && !model) || (provider === "console" && kind !== "content" && !platform)))}>{saving ? "Saving schedule..." : "Save schedule"}</button><button type="button" disabled={saving} className="secondary" onClick={() => setAdding(false)}>Cancel</button></div>
     </form>}
   </section>;
 }

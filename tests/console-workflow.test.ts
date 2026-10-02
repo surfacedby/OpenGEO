@@ -38,6 +38,7 @@ test("Console check totals and public citations survive project edits, dashboard
     if (path.endsWith("/analysis")) return json({ analysis_status: "available" });
     if (path.endsWith("/observations")) return json([
       { id: "remote-answer-1", prompt: "First question?", platform: "chatgpt", model: "fixture-model", status: "collected",
+        surface: "consumer_interface",
         answer_text: "Example provides examples.", presence: "cited", citations: [null, "unusable annotation", { url_citation: "unusable nested annotation" },
           { url: "https://example.com/", title: null, supplier_secret: "synthetic-hidden-field" }, { url: "javascript:alert(1)" }, { url: "https://example.com/" }] },
       { id: "remote-answer-2", prompt: "Second question?", platform: "chatgpt", model: "fixture-model", status: "collected",
@@ -64,6 +65,8 @@ test("Console check totals and public citations survive project edits, dashboard
     const portable = exportProject(store, project.id);
     assert.equal(JSON.stringify(portable).includes("synthetic-hidden-field"), false);
     assert.deepEqual(portable.observations[0].citations, []);
+    assert.equal(portable.observations[0].surface, "unknown");
+    assert.equal(portable.observations[1].surface, "consumer_interface");
     assert.deepEqual(portable.observations[1].citations, [{ url: "https://example.com/" }]);
     const restored = importProject(store, portable).project;
     assert.equal((await workspace(restored.id)).metrics.requested, 3);

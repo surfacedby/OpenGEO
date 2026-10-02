@@ -120,6 +120,7 @@ export async function providerJson(
   try {
     response = await fetch(url, {
       ...init,
+      redirect: "error",
       signal: init.signal
         ? AbortSignal.any([init.signal, AbortSignal.timeout(timeout)])
         : AbortSignal.timeout(timeout),

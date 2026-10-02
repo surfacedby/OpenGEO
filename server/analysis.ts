@@ -61,6 +61,7 @@ export function comparisonKey(
         model: job.model,
         observedModels: [...new Set(observations.map((o) => o.model))].sort(),
         observedPrompts: [...new Set(observations.map((o) => o.prompt))].sort(),
+        surfaces: [...new Set(observations.map((o) => o.surface ?? "unknown"))].sort(),
         retrieval: [...new Set(observations.map((observation) => observation.retrieval ?? "provider_managed"))].sort(),
         webSearchConfirmed: [...new Set(observations.filter((observation) => observation.provider === "chatgpt").map((observation) => observation.webSearchConfirmed === true))].sort(),
       }),

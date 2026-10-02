@@ -16,6 +16,7 @@ import {
 } from "./analysis.js";
 import { prompts } from "./prompts.js";
 import { discoverQuestions, discoverCompetitors } from "./discovery.js";
+import { consoleContent, cancelConsoleContent } from "./console-content.js";
 import {
   ProviderError,
   type Job,
@@ -101,6 +102,7 @@ export class Runner {
       await this.active.done;
     }
     if (job.provider === 'console') {
+      if (await cancelConsoleContent(this, job)) return this.store.job(id);
       const saved = this.store.step(id, 'console-scan');
       if (saved?.state === 'done') {
         const scan = JSON.parse(saved.body!);
@@ -134,6 +136,8 @@ export class Runner {
     if (job.status !== "paused") throw new Error("Only paused jobs can resume");
     if (this.resumePreview(id).uncertainRequests && !reviewed)
       throw new ProviderError("review", "Review uncertain provider requests before resuming.");
+    if (job.error === "approval" && !reviewed)
+      throw new ProviderError("review", "Approve the displayed draft estimate before starting paid work.");
     if (maxCostUsd !== undefined && (!Number.isFinite(maxCostUsd) || maxCostUsd < Math.max(job.maxCostUsd, job.spentUsd) || maxCostUsd > 10000))
       throw new ProviderError("budget", "The new budget must cover the current ceiling and completed work.");
     return this.store.db.transaction(() => {
@@ -144,6 +148,11 @@ export class Runner {
       .prepare("SELECT step FROM steps WHERE job_id=? AND state='started'")
       .all(id) as any[])
       this.store.setStep(id, row.step, "approved-retry");
+    if (job.error === "approval") {
+      const quote = this.store.step(id, "console-content-estimate");
+      if (quote?.state !== "done") throw new ProviderError("estimate", "A current draft estimate is required.");
+      this.store.setStep(id, "console-content-approval", "done", JSON.parse(quote.body!).id);
+    }
     return this.store.updateJob(id, {
       status: "queued",
       error: null,
@@ -920,7 +929,7 @@ export class Runner {
             observedAt: row.observed_at ?? state.completed_at,
             answer: row.answer_text,
             citations,
-            surface: "api",
+            surface: ["api", "consumer_interface"].includes(row.surface) ? row.surface : "unknown",
             mentioned: ["cited", "named"].includes(row.presence),
             cited: row.presence === "cited",
             costUsd: null,
@@ -1001,19 +1010,6 @@ export class Runner {
     return rows;
   }
   async consoleJob(job: Job, project: Project, signal: AbortSignal) {
-    const input = {
-      operation: "content",
-      topic: job.topic ?? project.brand,
-      domain: project.domain,
-      max_credits: Math.floor(job.maxCostUsd / 0.1),
-    };
-    const capability = await this.providers.console("/capabilities");
-    if (!capability.data?.operations?.includes("content"))
-      throw new ProviderError(
-        "capability",
-        "Console content is not available on this deployment. Connect ChatGPT or OpenRouter.",
-      );
-    const result = await this.providers.console("/jobs", input, job.id, signal);
-    return result.data;
+    return consoleContent(this, job, project, signal);
   }
 }
