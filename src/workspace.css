@@ -35,6 +35,13 @@
 .next-step-card > svg { padding: 13px; background: #edf4ff; border: 1px solid #dbe9ff; border-radius: 12px; width: 54px; height: 54px; }
 .next-step-card h2 { font-size: 16px; letter-spacing: -.3px; }
 .next-step-card p { font-size: 12px; color: var(--muted); }
+.insight-banner { display: flex; align-items: center; gap: 15px; padding: 20px 22px; border-radius: var(--radius); background: linear-gradient(110deg, #0868dd, #1557c4); color: white; margin-bottom: 20px; }
+.insight-banner > div { flex: 1; min-width: 0; }
+.insight-banner h2 { color: white; font-size: 14px; margin-bottom: 6px; }
+.insight-banner p { color: #e3edff; font-size: 12px; }
+.insight-banner > svg { color: #d6e8ff; }
+.insight-banner .secondary { background: white; border-color: #fff; color: #174d9b; }
+@media (max-width: 600px) { .insight-banner { padding: 18px; align-items: start; flex-wrap: wrap; } .insight-banner > div { flex-basis: calc(100% - 44px); } .insight-banner .secondary { width: 100%; } }
 .empty > svg { box-sizing: content-box; padding: 14px; color: var(--primary-text); border: 1px solid #dce6f5; background: #f7faff; border-radius: 13px; margin-bottom: 4px; }
 .empty h3 { font-size: 15px; }
 .settings-tabs, .workspace-tabs { gap: 22px; }

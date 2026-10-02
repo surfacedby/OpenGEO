@@ -1,5 +1,5 @@
-import { randomUUID, createHash } from "node:crypto";
-import type { Observation, Project, Finding, Job } from "./contracts.js";
+import { createHash } from "node:crypto";
+import type { Observation, Project, Job } from "./contracts.js";
 import { portableJobResult, completedMeasurement, measurementTime } from "./portable-results.js";
 export function presence(project: Project, answer: string, urls: string[]) {
   const names = [project.brand, ...project.aliases, project.domain]
@@ -150,34 +150,4 @@ export function competitorEvidence(
       ],
     };
   });
-}
-export function visibilityFindings(
-  project: Project,
-  jobId: string,
-  observations: Observation[],
-): Finding[] {
-  return observations
-    .filter((o) => !o.cited)
-    .map((o) => ({
-      id: randomUUID(),
-      projectId: project.id,
-      jobId,
-      title: o.mentioned
-        ? "Help readers find the supporting page"
-        : "Review coverage for this question",
-      description: o.mentioned
-        ? "The brand was named without a citation to its website. This observation does not establish a cause."
-        : "The brand was not detected in this collected answer. Review relevance before creating content.",
-      priority: o.mentioned ? "medium" : "high",
-      targetUrl: "https://" + project.domain,
-      evidenceIds: [o.id],
-      steps: [
-        "Review the answer and cited sources for this exact question.",
-        "Identify an existing page that answers the question with verifiable facts.",
-        "Improve missing explanations and evidence, then recheck the same prompt.",
-      ],
-      confidence: "inferred",
-      status: "open",
-      kind: "visibility",
-    }));
 }

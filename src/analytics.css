@@ -65,8 +65,8 @@
   gap: 20px;
 }
 .metrics > .metric {
-  padding: 20px;
-  gap: 12px;
+  padding: 18px;
+  gap: 9px;
 }
 .metric .metric-title {
   display: flex;
@@ -92,6 +92,7 @@
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
+.metrics > .metric strong.metric-text { font-size: 19px; letter-spacing: -.5px; line-height: 1.4; }
 .site-icon {
   display: inline-grid;
   place-items: center;
@@ -538,6 +539,15 @@
   min-height: 36px;
   font-size: 12px;
 }
+.compact-sources { table-layout: fixed; }
+.compact-sources th:first-child { width: 54%; }
+.compact-sources th:nth-child(2) { width: 34%; }
+.compact-sources th:last-child { width: 12%; }
+.compact-sources th, .compact-sources td { padding: 12px; }
+.compact-sources .source-name { min-width: 0; }
+.compact-sources .rate-track { width: 44px; }
+.compact-sources .evidence-button { min-width: 30px; justify-content: center; border: 1px solid #e2eaf5; border-radius: 7px; background: #f8faff; }
+.compact-sources .evidence-button span { display: none; }
 .prompt-table td:first-child {
   min-width: 220px;
   max-width: 440px;

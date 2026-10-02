@@ -50,7 +50,7 @@ export function BackupControls({
       </div>
       <div className="panel-padding">
         <p>
-          Save your projects, evidence, actions and drafts. Provider credentials
+          Save your projects, evidence, improvements and drafts. Provider credentials
           stay on this installation and are excluded.
         </p>
         <div className="button-row">

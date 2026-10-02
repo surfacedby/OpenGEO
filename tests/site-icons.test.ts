@@ -145,6 +145,19 @@ test('website-declared raster icons work without a root favicon and cannot reach
   assert.equal(requests.length,3);
 });
 
+test('a missing or refused root icon still permits a website-declared raster icon', async () => {
+  const requests: string[] = [];
+  const icons = new SiteIcons(async url => {
+    requests.push(url.pathname);
+    if (url.pathname === '/favicon.ico') return response(403, Buffer.alloc(0));
+    if (url.pathname === '/') return response(200, Buffer.from('<link rel="icon" href="/brand.svg"><link rel="apple-touch-icon" href="/brand.png">'));
+    assert.equal(url.pathname, '/brand.png');
+    return response(200, png);
+  });
+  assert.equal((await icons.get('example.com'))?.contentType, 'image/png');
+  assert.deepEqual(requests, ['/favicon.ico', '/', '/brand.png']);
+});
+
 test('WebP icons require a bounded static canvas and complete chunk framing', () => {
   const bytes=Buffer.alloc(26);
   bytes.write('RIFF'); bytes.writeUInt32LE(18,4); bytes.write('WEBP',8); bytes.write('VP8L',12); bytes.writeUInt32LE(5,16); bytes[20]=47;

@@ -8,6 +8,21 @@ import {
   type CredentialInput,
 } from "./contracts.js";
 import { providerJson } from "./network.js";
+import { Agent } from 'undici';
+const chatGPTTimeoutMs = 15 * 60 * 1000;
+const chatGPTAgent = new Agent({ headersTimeout: chatGPTTimeoutMs, bodyTimeout: chatGPTTimeoutMs });
+
+/** Align socket and request deadlines so a reasoning pause does not discard a healthy subscription response. */
+async function chatGPTResponse<T>(init: RequestInit, signal: AbortSignal, consume: (response: Response) => Promise<T>): Promise<T> {
+  const request: RequestInit & { dispatcher: Agent } = { ...init, redirect: 'error', dispatcher: chatGPTAgent, signal: AbortSignal.any([signal, AbortSignal.timeout(chatGPTTimeoutMs)]) };
+  try { return await consume(await fetch('https://api.openai.com/v1/responses', request)); }
+  catch (error) {
+    if (error instanceof ProviderError) throw error;
+    const failure = error as { name?: string; cause?: { code?: string } };
+    const timeout = failure.name === 'TimeoutError' || ['UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT'].includes(failure.cause?.code ?? '');
+    throw new ProviderError('interrupted', timeout ? 'ChatGPT did not finish within the response allowance. Saved progress is kept; review plan usage before retrying.' : 'The ChatGPT connection ended before completion was confirmed. Saved progress is kept; review plan usage before retrying.', true);
+  }
+}
 export type Completion = {
   text: string;
   costUsd: number | null;
@@ -218,13 +233,12 @@ export class Providers {
         "capability",
         "Select ChatGPT or OpenRouter for local content.",
       );
-    const r = await fetch("https://api.openai.com/v1/responses", {
+    return chatGPTResponse({
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: "Bearer " + (await this.connections.token()),
       },
-      signal: AbortSignal.any([signal, AbortSignal.timeout(300000)]),
       body: JSON.stringify({
         model,
         instructions,
@@ -234,7 +248,7 @@ export class Providers {
         // A visibility check needs a fresh search; merely offering the tool lets the model skip it.
         ...(webSearch ? { tools: [{ type: "web_search" }], tool_choice: "required" } : {}),
       }),
-    });
+    }, signal, async r => {
     if (!r.ok) {
       const b = await r.json().catch(() => null);
       const code = b?.error?.code;
@@ -315,6 +329,7 @@ export class Providers {
         true,
       );
     return { text, costUsd: 0, citations, model, webSearchConfirmed };
+    });
   }
   async measure(
     platform: string,

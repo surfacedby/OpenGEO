@@ -2,6 +2,9 @@ import type { Finding } from '../server/contracts';
 
 const priority = { high: 0, medium: 1, low: 2 };
 
+export const opportunityFindings = (findings: Finding[]) => findings.filter(finding => ['analysis', 'console'].includes(finding.kind));
+export const auditFindings = (findings: Finding[]) => findings.filter(finding => !['analysis', 'console', 'visibility'].includes(finding.kind));
+
 /** Related page findings share a heading while retaining their own evidence and status. */
 export function findingGroups(findings: Finding[]) {
   const groups = new Map<string, { key: string; title: string; priority: Finding['priority']; findings: Finding[] }>();
@@ -21,4 +24,12 @@ export function targetLabel(url: string | undefined) {
     const page = new URL(url);
     return page.pathname === '/' ? page.hostname : page.pathname + page.search;
   } catch { return url; }
+}
+
+export function targetDomain(url: string | undefined) {
+  try {
+    if (!url) return null;
+    const parsed = new URL(url);
+    return ['http:', 'https:'].includes(parsed.protocol) && !parsed.username && !parsed.password ? parsed.hostname : null;
+  } catch { return null; }
 }

@@ -20,6 +20,18 @@ test('rechecks replace unstarted advice while preserving accepted actions and hi
   assert.equal(findings[0].evidenceIds[0],'source');
 });
 
+test('an analysis from another measurement is not presented as fresh advice and absence signals are not recommendations', () => {
+  const jobs = [
+    { id: 'check-new', kind: 'measure', status: 'completed', createdAt: '2026-10-02T00:00:00Z' },
+    { id: 'analysis-old', kind: 'diagnose', status: 'completed', createdAt: '2026-10-01T00:00:00Z', result: { measurementJobId: 'check-old' } },
+  ] as Job[];
+  const advice = { id: 'advice', kind: 'analysis', jobId: 'analysis-old', status: 'open' } as Finding;
+  const signal = { id: 'signal', kind: 'visibility', jobId: 'check-new', status: 'open' } as Finding;
+  assert.deepEqual(currentFindings([advice, signal], jobs), []);
+  assert.deepEqual(currentFindings([{ ...advice, status: 'doing' }, signal], jobs).map(item => item.id), ['advice']);
+  assert.equal(advice.status, 'open');
+});
+
 test('reports use the current plan while project exports preserve its history', () => {
   const directory = mkdtempSync(join(tmpdir(), 'opengeo-plan-report-')), store = new Store(directory);
   try {

@@ -209,6 +209,22 @@ test("a confirmed ChatGPT response finishes without waiting for the transport to
   } finally { globalThis.fetch = original; f.close(); }
 });
 
+test('subscription transport interruptions preserve uncertainty without exposing network error details', async () => {
+  const f = fixture(), original = globalThis.fetch;
+  const saved = f.vault.get('chatgpt'); saved.profiles[0].expiresAt = Date.now() + 3600000; f.vault.set('chatgpt', saved);
+  try {
+    for (const code of ['UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_SOCKET']) {
+      globalThis.fetch = (async () => { throw new TypeError('Synthetic confidential transport detail', { cause: { code } }); }) as typeof fetch;
+      await assert.rejects(f.providers.complete('chatgpt', 'fixture-model', 'Explain the supplied evidence.', 'Synthetic request.', AbortSignal.timeout(1000)), (error: any) => {
+        assert.equal(error.code, 'interrupted'); assert.equal(error.uncertain, true);
+        assert.ok(!error.message.includes('Synthetic confidential transport detail'));
+        assert.match(error.message, code === 'UND_ERR_SOCKET' ? /connection ended/ : /response allowance/);
+        return true;
+      });
+    }
+  } finally { globalThis.fetch = original; f.close(); }
+});
+
 test("ChatGPT API measurements preserve citations and progress when plan usage stops, without a paid fallback", async () => {
   const f = fixture(), original = globalThis.fetch; let requests = 0;
   const saved = f.vault.get("chatgpt"); saved.profiles[0].expiresAt = Date.now() + 3600000; f.vault.set("chatgpt", saved);

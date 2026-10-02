@@ -86,15 +86,14 @@ try {
   assert.equal(runtime.store.jobs()[0].provider, "console");
   assert.equal(runtime.store.jobs()[0].maxCostUsd, 0.2);
   assert.equal(runtime.store.jobs()[0].status, "queued");
-  await navigate(page, "Actions");
-  const plan = page.getByRole("tab", { name: /Improvement plan/ });
-  const content = page.getByRole("tab", { name: /Content drafts/ });
-  await plan.focus(); await page.keyboard.press("ArrowRight");
-  assert.equal(await content.getAttribute("aria-selected"), "true");
-  assert.equal(await content.evaluate(element => element === document.activeElement), true);
-  await page.keyboard.press("Home");
-  assert.equal(await plan.getAttribute("aria-selected"), "true");
-  assert.equal(await plan.evaluate(element => element === document.activeElement), true);
+  await page.getByRole("button", { name: "Open navigation", exact: true }).click();
+  const content = page.getByRole("button", { name: "Content", exact: true });
+  await content.focus(); await page.keyboard.press("Enter");
+  await page.getByRole("heading", { name: "Content", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Open navigation", exact: true }).click();
+  assert.equal(await content.getAttribute("aria-current"), "page");
+  assert.equal(await page.getByRole("button", { name: "Actions", exact: true }).count(), 0);
+  await page.getByRole("button", { name: "Close dialog", exact: true }).click();
   await navigate(page, "Settings");
   await page.getByRole("tab", { name: "Schedules", exact: true }).click();
   await page.getByRole("button", { name: "Add schedule", exact: true }).click();
@@ -116,7 +115,7 @@ try {
   assert.equal(runtime.scheduler.list()[0].monthlyBudgetUsd, 1);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   assert.deepEqual(failures, []);
-  console.log("Actual browser verified: linked validation, availability retry, pending-run close protection, retained inputs, one queued job after a lost reply, connected-provider schedules and keyboard action tabs. No paid provider requests.");
+  console.log("Actual browser verified: linked validation, availability retry, pending-run close protection, retained inputs, one queued job after a lost reply, connected-provider schedules and keyboard content navigation. No paid provider requests.");
 } finally {
   release?.(); globalThis.fetch = original; await browser.close(); await runtime.app.close(); rmSync(directory, { recursive: true, force: true });
 }

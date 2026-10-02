@@ -12,7 +12,6 @@ import {
   presence,
   summarize,
   comparisonKey,
-  visibilityFindings,
 } from "./analysis.js";
 import { prompts } from "./prompts.js";
 import { discoverQuestions, discoverCompetitors } from "./discovery.js";
@@ -345,8 +344,6 @@ export class Runner {
           );
       }
       const observations = this.store.observations(project.id, job.id);
-      for (const f of visibilityFindings(project, job.id, observations))
-        this.store.put("finding", project.id, job.id, f);
       return {
         metrics: summarize(observations, project.prompts.length),
         comparisonKey: comparisonKey(
@@ -474,12 +471,7 @@ export class Runner {
         })();
         return receipt;
       }
-      const latest = this.store.jobs(project.id).find(completedMeasurement);
-      if (!latest) throw new ProviderError("evidence", "Collect visibility evidence first.");
-      const observations = this.store.observations(project.id, latest.id);
-      for (const f of visibilityFindings(project, job.id, observations))
-        this.store.put("finding", project.id, job.id, f);
-      return { findings: observations.filter((o) => !o.cited).length };
+      throw new ProviderError("capability", "Connect ChatGPT or OpenRouter to analyze your collected evidence.");
     }
     if (job.provider === "console")
       return this.consoleJob(job, project, signal);
@@ -673,8 +665,6 @@ export class Runner {
       collectionCompletedAt: observations.map(answer => answer.observedAt).sort().at(-1),
     };
     this.store.db.transaction(() => {
-      if (!this.store.findings(project.id).some(finding => finding.jobId === job.id && finding.kind === "visibility"))
-        for (const finding of visibilityFindings(project, job.id, observations)) this.store.put("finding", project.id, job.id, finding);
       this.store.setStep(job.id, "measurement-result", "done", result);
       this.store.updateJob(job.id, { result: { ...(this.store.job(job.id).result as object ?? {}), ...result } });
     })();

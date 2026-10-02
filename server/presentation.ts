@@ -56,11 +56,15 @@ export function currentFindings(findings: Finding[], jobs: Job[]) {
   const analysis = jobs.find(job => job.kind === 'diagnose' && job.status === 'completed');
   const generations = new Map(jobs.map(job => [job.id, job]));
   return findings.filter(finding => {
+    if (finding.kind === 'visibility') return false;
     if (finding.status !== 'open') return true;
     const job = generations.get(finding.jobId);
     if (!job) return true;
     if (job.kind === 'audit') return job.id === audit?.id;
-    if (job.kind === 'diagnose') return job.id === analysis?.id;
+    if (job.kind === 'diagnose') {
+      const period = (job.result as { measurementJobId?: string } | null)?.measurementJobId;
+      return job.id === analysis?.id && (!measurement || (period ? period === measurement.id : job.createdAt >= measurement.createdAt));
+    }
     if (['measure', 'recheck'].includes(job.kind)) return job.id === measurement?.id;
     return true;
   });

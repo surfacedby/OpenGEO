@@ -44,7 +44,7 @@ Set `OPENGEO_SECRET_FILE` to the absolute path of `.local/encryption-secret`, th
 1. Connect ChatGPT or your preferred provider. You can also choose local audits only.
 2. Add your website. OpenGEO reads public pages and sitemaps locally, then uses your connected ChatGPT plan to suggest relevant customer questions. Edit, add or unselect individual questions.
 3. Check your selected questions. Read the answers and citations, then choose which evidence-supported competitors to follow. Other paid connections require a spending approval before checks.
-4. Track an improvement in Actions. Use your own expertise and audited sources to develop a brief and draft.
+4. Review Opportunities and create a draft in Content. Use your own expertise and audited sources to develop a brief and draft.
 5. Review factual claims before publishing. Recheck the same questions, model and locale.
 
 No rankings or growth are guaranteed. An observed change does not prove that a particular edit caused it.

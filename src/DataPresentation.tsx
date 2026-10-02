@@ -427,7 +427,7 @@ export function SourcesTable({
       )}
       {shown.length ? (
         <div className="table-wrap">
-          <table className="analytics-table source-coverage-table responsive-evidence-table">
+          <table className={'analytics-table source-coverage-table responsive-evidence-table' + (compact ? ' compact-sources' : '')}>
             <caption className="visually-hidden">
               {mode === "domains" ? "Cited domains" : "Cited pages"}. Coverage
               counts each collected answer once per source.

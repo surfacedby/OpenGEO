@@ -63,7 +63,7 @@ export function reportMarkdown(store: Store, id: string) {
     (latest && metrics
       ? "Checked: " + new Date(measurementTime(latest)).toISOString() + "\n\n- Brand mentions: " + percent(metrics.mentionRate) + "\n- Website citations: " + percent(metrics.citationRate) + "\n- Answers collected: " + metrics.completed + " of " + metrics.requested + "\n- Missing answers: " + metrics.missing + "\n\nRates use collected answers. API observations can differ from consumer interfaces. Missing answers do not count as absent mentions."
       : "No completed measurement. Failed checks are not evidence of absence.") +
-    "\n\n## Actions\n\n" +
+    "\n\n## Improvements\n\n" +
     findings
       .map(
         (f) =>

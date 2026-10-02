@@ -6,9 +6,6 @@ import {
   type ReactNode,
 } from "react";
 import {
-  ContentEditor,
-  ContentBrief,
-  ContentReview,
   ModelSelector,
 } from "./WorkflowControls";
 import {
@@ -48,7 +45,8 @@ import { AnswerCard, AnswerDistribution, AuditEssentials, CitationComparison, Me
 import { SiteIcon } from "./SiteIcon";
 import { AuditSummary } from "./AuditSummary";
 import { Findings } from "./Findings";
-import { findingGroups } from "./finding-groups";
+import { findingGroups, opportunityFindings, auditFindings } from "./finding-groups";
+import { ContentWorkspace } from "./ContentWorkspace";
 import { completedMeasurement } from "../server/portable-results";
 import type { Presentation } from "../server/presentation";
 import identity from "../brand/identity.json";
@@ -98,7 +96,7 @@ const navigation = [
   ["Responses", MessagesSquare],
   ["Sources", Link],
   ["Opportunities", Lightbulb],
-  ["Actions", ListChecks],
+  ["Content", FileText],
   ["Competitors", Users],
   ["Reports", ChartColumn],
   ["Settings", Settings],
@@ -133,7 +131,7 @@ export function App() {
     [revision, setRevision] = useState<any>(null),
     [query, setQuery] = useState(""),
     [evidenceFilter, setEvidenceFilter] = useState<{ ids: string[]; label: string } | null>(null),
-    [actionTab, setActionTab] = useState("Plan"),
+    [contentTopic, setContentTopic] = useState(""),
     [selectedContent, setSelectedContent] = useState(""),
     [unsavedDraft, setUnsavedDraft] = useState<{ projectId: string; id: string; markdown: string; baseMarkdown: string; recoverySession: string } | null>(null),
     [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null),
@@ -202,9 +200,11 @@ export function App() {
     return () => { clearInterval(timer); refreshSequence.current++; };
   }, [selected, sessionReady]);
   useEffect(() => { document.title = identity.name; }, []);
-  useEffect(() => { mainRef.current?.scrollTo(0, 0); }, [page, selected, actionTab]);
+  useEffect(() => { mainRef.current?.scrollTo(0, 0); }, [page, selected]);
   const w = workspace,
     p = w?.project;
+  const opportunities = opportunityFindings(w?.findings ?? []);
+  const auditIssues = auditFindings(w?.findings ?? []);
   const ownCitations = w?.presentation.outcomes.find((group) => group.kind === "cited");
   const ownWebsite = w ? { domain:w.project.domain, citationRate:w.metrics.citationRate, answersCiting:ownCitations?.count ?? 0, answersCollected:w.metrics.completed, observationIds:ownCitations?.observationIds ?? [] } : null;
   const filteredAnswers = w?.observations.filter((answer) => (!evidenceFilter || evidenceFilter.ids.includes(answer.id)) && (answer.prompt + " " + answer.answer).toLowerCase().includes(query.trim().toLowerCase())) ?? [];
@@ -230,6 +230,7 @@ export function App() {
   const activeMeasurement = w?.jobs.find(job => ['measure', 'recheck'].includes(job.kind) && ['queued', 'running', 'paused'].includes(job.status) && !completedMeasurement(job));
   const analyzed = !!w?.measurement && w.jobs.some(job => job.kind === 'diagnose' && job.status === 'completed' && ((job.result as { measurementJobId?: string } | null)?.measurementJobId ? (job.result as { measurementJobId: string }).measurementJobId === w.measurement!.id : job.createdAt >= w.measurement!.createdAt));
   const activeAnalysis = w?.jobs.find(job => job.kind === 'diagnose' && ['queued', 'running'].includes(job.status));
+  const pausedAnalysis = w?.jobs.find(job => job.kind === 'diagnose' && job.status === 'paused' && (!w.measurement || job.createdAt >= w.measurement.createdAt));
   const canAnalyze = connected.chatgpt || connected.openrouter;
   const activeAudit = w?.jobs.find((job) => job.kind === "audit" && ["running", "queued"].includes(job.status));
   const auditLabel = activeAudit?.status === "queued" ? "Audit queued" : activeAudit ? "Auditing..." : "Run audit";
@@ -239,9 +240,9 @@ export function App() {
     : { label: "Connect for AI checks", action: openConnections };
   const headingAction = page === "Site Audit" ? { label: auditLabel, action: () => setJobDialog("audit") }
     : page === "Visibility" ? activeMeasurement ? null : measurementAction
-    : page === "Overview" ? activeMeasurement ? { label: "View current check", action: () => changePage('Visibility') } : !audited ? { label: auditLabel, action: () => setJobDialog("audit") } : !measured ? measurementAction : activeAnalysis ? null : !analyzed && canAnalyze ? { label: "Prepare improvement plan", action: () => setJobDialog('diagnose') } : { label: "Review improvements", action: () => changePage("Actions") }
-    : page === "Opportunities" && audited && measured && !activeAnalysis ? { label: "Analyze evidence", action: () => setJobDialog("diagnose") }
-    : page === "Actions" && actionTab === "Content" && audited ? { label: "Create content", action: () => setJobDialog("content") } : null;
+    : page === "Overview" ? activeMeasurement ? { label: "View current check", action: () => changePage('Visibility') } : !audited ? { label: auditLabel, action: () => setJobDialog("audit") } : !measured ? measurementAction : activeAnalysis ? null : pausedAnalysis ? { label: "Review paused analysis", action: () => changePage('Opportunities') } : !analyzed && canAnalyze ? { label: "Find opportunities", action: () => setJobDialog('diagnose') } : { label: "Review opportunities", action: () => changePage("Opportunities") }
+    : page === "Opportunities" && audited && measured && !activeAnalysis && !pausedAnalysis ? { label: "Analyze evidence", action: () => setJobDialog("diagnose") }
+    : page === "Content" && audited && !!w?.content.length ? { label: "Create content", action: () => { setContentTopic(""); setJobDialog("content"); } } : null;
   return (
     <div className="shell">
       <a className="skip-link" href="#main-content">Skip to workspace</a>
@@ -304,7 +305,7 @@ export function App() {
           </div>
         </header>
         <main ref={mainRef} id="main-content" tabIndex={-1}>
-          {profiles.welcome && <section className="plan-welcome" aria-label="ChatGPT plan usage"><ProviderIcon provider="chatgpt" size={24} /><div><h2>You're using your ChatGPT plan</h2><p>Eligible AI requests use your existing plan within its limits. Manage this connection in ChatGPT Settings.</p></div><a href="https://chatgpt.com/settings/usage" target="_blank" rel="noreferrer">Manage usage <ArrowUpRight size={14} /></a><button className="secondary" onClick={() => void run(() => api("/connections/chatgpt/acknowledge-plan", {}))}>Got it</button></section>}
+          {profiles.welcome && <section className="plan-welcome" aria-label="ChatGPT plan usage"><ProviderIcon provider="chatgpt" size={20} /><div><h2>Your ChatGPT plan is connected</h2><p>Your plan limits apply.</p></div><a href="https://chatgpt.com/settings/usage" target="_blank" rel="noreferrer">Manage usage <ArrowUpRight size={14} /></a><button className="icon-button" aria-label="Dismiss ChatGPT connection notice" onClick={() => void run(() => api("/connections/chatgpt/acknowledge-plan", {}))}><X size={16} /></button></section>}
           <div className="page-heading">
             <div>
               <h1>{page}</h1>
@@ -320,7 +321,7 @@ export function App() {
                 disabled={busy || ((page === "Site Audit" || (page === "Overview" && !audited)) && !!activeAudit)}
                 onClick={headingAction.action}
               >
-                {headingAction.label === "Connect for AI checks" ? <Link size={15} /> : <Play size={14} />}
+                {headingAction.label === "Connect for AI checks" ? <Link size={15} /> : headingAction.label.startsWith('Review') || headingAction.label.startsWith('View') ? <ArrowRight size={15} /> : headingAction.label === 'Create content' ? <Plus size={15} /> : page === 'Site Audit' ? <ScanSearch size={15} /> : <Play size={14} />}
                 {headingAction.label}
               </button>
             )}
@@ -364,14 +365,12 @@ export function App() {
                       }
                     />
                     <Metric
-                      title="Priorities to review"
-                      value={String(
-                        findingGroups(w.findings.filter((f) => f.status !== "done")).length,
-                      )}
-                      detail="Related page improvements grouped together"
+                      title="Opportunities"
+                      value={analyzed || opportunities.length ? String(findingGroups(opportunities.filter((f) => f.status !== "done")).length) : "Not analyzed"}
+                      detail={analyzed ? "Evidence-based improvements to review" : "Analyze your answers to find improvements"}
                     />
-                  </div> : <section className="next-step-card"><ScanSearch size={25} /><div><h2>{activeAudit?.status === "queued" ? "Your site audit is queued" : activeAudit ? "Your site audit is running" : audited ? "Your first audit is ready" : "Start with a site audit"}</h2><p>{activeAudit?.status === "queued" ? "It will start automatically. You can explore your workspace." : activeAudit ? "You can explore your workspace while we inspect your public pages." : audited ? `${w.pages.length} ${w.pages.length === 1 ? "page inspected" : "pages inspected"}. ${canMeasure ? "Next, check how AI answers your customers' questions." : "Connect a provider when you are ready to check AI answers."}` : "Inspect your public pages to find improvements you can act on."}</p></div><button className="secondary" onClick={() => activeAudit || !audited ? changePage("Site Audit") : canMeasure ? changePage("Visibility") : openConnections()}>{activeAudit ? "View progress" : audited ? canMeasure ? "Set up AI checks" : "Connect for AI checks" : "View site audit"}<ArrowRight size={15} /></button></section>}
-                  {measured && !activeMeasurement && !analyzed && <section className="next-step-card"><Lightbulb size={25} /><div><h2>{activeAnalysis ? 'Your improvement plan is on its way' : 'Your answers are ready. Choose your next move.'}</h2><p>{activeAnalysis ? activeAnalysis.progress : 'Use the collected answers and audited pages to prepare an improvement plan.'}</p></div>{!activeAnalysis && <button className="primary" onClick={() => canAnalyze ? setJobDialog('diagnose') : openConnections()}>{canAnalyze ? 'Prepare improvement plan' : 'Connect for analysis'}<ArrowRight size={15} /></button>}</section>}
+                  </div> : <section className="next-step-card"><ScanSearch size={25} /><div><h2>{activeAudit?.status === "queued" ? "Your site audit is queued" : activeAudit ? "Your site audit is running" : audited ? "Your first audit is ready" : "Start with a site audit"}</h2><p>{activeAudit?.status === "queued" ? "It will start automatically. You can explore your workspace." : activeAudit ? "You can explore your workspace while we inspect your public pages." : audited ? `${w.pages.length} ${w.pages.length === 1 ? "page inspected" : "pages inspected"}. ${canMeasure ? "Next, check how AI answers your customers' questions." : "Connect a provider when you are ready to check AI answers."}` : "Inspect your public pages to find improvements you can act on."}</p></div>{activeAudit && <button className="secondary" onClick={() => changePage('Site Audit')}>View progress<ArrowRight size={15} /></button>}</section>}
+                  {measured && !activeMeasurement && !analyzed && <section className="insight-banner"><Lightbulb size={22} /><div><h2>{activeAnalysis ? 'Finding your next opportunity' : pausedAnalysis ? 'Your analysis is paused' : w.metrics.mentionRate === 0 ? 'Your brand was missing from this check' : 'Turn your visibility into your next improvement'}</h2><p>{activeAnalysis ? activeAnalysis.progress : pausedAnalysis ? 'Saved progress is kept. Review the interrupted run in Opportunities before continuing.' : `${w.metrics.completed} answers collected. Analyze them alongside your pages to find where useful content can make a difference.`}</p></div>{!canAnalyze && <button className="secondary" onClick={openConnections}>Connect for analysis <ArrowRight size={15} /></button>}</section>}
                   {measured && <><div className="analytics-grid"><VisibilityChart presentation={w.presentation} openVisibility={() => changePage("Visibility")} /><SourcesTable presentation={w.presentation} collected={w.metrics.completed} compact evidence={openEvidence} openSources={() => changePage("Sources")} projectId={p!.id} /></div><div className="analytics-grid"><AnswerDistribution presentation={w.presentation} collected={w.metrics.completed} requested={w.metrics.requested} missing={w.metrics.missing} collecting={!!activeMeasurement} evidence={openEvidence} /><CitationComparison projectId={p!.id} ownDomain={p!.domain} rows={[ownWebsite!,...w.competitors]} evidence={openEvidence} openCompetitors={() => changePage("Competitors")} /></div></>}
                   {measured && <details className="panel activity-panel" open={w.jobs.some((job) => ["running", "queued", "paused"].includes(job.status))}><summary><h2>Recent activity</h2><span>{w.jobs.length} runs</span><ChevronDown size={16} /></summary><Jobs jobs={w.jobs} run={run} /></details>}
                   {!measured && audited && <AuditSummary audit={w.presentation.audit} domain={p!.domain} findings={w.findings} openAudit={() => changePage("Site Audit")} />}
@@ -411,9 +410,9 @@ export function App() {
                       <WorkflowRow
                         n="3"
                         title="Make an evidence-based improvement"
-                        description={w.findings.some((finding) => finding.status === "done") ? "Review the improvements you've marked done" : w.content.length ? "Review your drafts and apply an improvement" : "Turn findings into actions and useful content"}
+                        description={w.findings.some((finding) => finding.status === "done") ? "Review the improvements you've marked done" : w.content.length ? "Review your drafts and apply an improvement" : "Turn evidence into useful content"}
                         done={w.findings.some((finding) => finding.status === "done")}
-                        onClick={() => changePage("Actions")}
+                        onClick={() => changePage("Content")}
                       />
                       <WorkflowRow
                         n="4"
@@ -434,34 +433,31 @@ export function App() {
                       <Jobs jobs={w.jobs.slice(0, 5)} run={run} />
                     </section>
                   </div>}
-                  <section className="panel">
+                  {opportunities.some(finding => finding.status !== 'done') && <section className="panel">
                     <div className="panel-heading">
-                      <h2>Recommended actions</h2>
+                      <h2>Next opportunities</h2>
                       <button
                         className="text-button"
-                        onClick={() => changePage("Actions")}
+                        onClick={() => changePage("Opportunities")}
                       >
                         View all <ArrowRight size={14} />
                       </button>
                     </div>
                     <Findings
-                      findings={w.findings
+                      findings={opportunities
                         .filter((f) => f.status !== "done")}
                       compact
                       projectId={p!.id}
                       run={run}
+                      openAll={() => changePage("Opportunities")}
                       emptyMessage={w.findings.length ? "Your current improvements are complete. Recheck visibility to see what changed." : audited && measured ? "Analyze your collected evidence in Opportunities to prepare recommendations." : audited ? "Check visibility to connect page improvements to collected answers." : "Run a site audit to find page improvements you can act on."}
                       emptyTitle={w.findings.length ? "Current improvements complete" : "No recommendations yet"}
                     />
-                  </section>
+                  </section>}
                 </>
               )}
-              {page === "Actions" && <div className="workspace-tabs" role="tablist" aria-label="Actions workspace">{["Plan", "Content"].map((tab) => <button key={tab} id={"actions-" + tab} role="tab" tabIndex={actionTab === tab ? 0 : -1} aria-selected={actionTab === tab} onClick={() => { if (tab !== actionTab) navigate(() => setActionTab(tab)); }} onKeyDown={(event) => {
-                const next = event.key === "Home" ? "Plan" : event.key === "End" ? "Content" : ["ArrowLeft", "ArrowRight"].includes(event.key) ? tab === "Plan" ? "Content" : "Plan" : null;
-                if (next) { event.preventDefault(); navigate(() => { setActionTab(next); document.getElementById("actions-" + next)?.focus(); }); }
-              }}>{tab === "Plan" ? <ListChecks size={16} /> : <FileText size={16} />}{tab === "Plan" ? "Improvement plan" : "Content drafts"}<span className="badge">{tab === "Plan" ? findingGroups(w.findings.filter((finding) => finding.status !== "done")).length : w.content.length}</span></button>)}</div>}
               {page === "Site Audit" && (
-                <><AuditEssentials audit={w.presentation.audit} /><section className="panel"><div className="panel-heading"><h2>Audit activity</h2></div><Jobs jobs={w.jobs.filter((job) => job.kind === "audit").slice(0, 3)} run={run} /></section><section className="panel">
+                <><AuditEssentials audit={w.presentation.audit} />{auditIssues.length > 0 && <section className="panel"><div className="panel-heading"><h2>Page improvements</h2><span>{findingGroups(auditIssues).length} checks to review</span></div><Findings findings={auditIssues} projectId={p!.id} run={run} mode="audit" /></section>}<details className="panel activity-panel"><summary><h2>Audit activity</h2><ChevronDown size={16} /></summary><Jobs jobs={w.jobs.filter((job) => job.kind === "audit").slice(0, 3)} run={run} /></details><section className="panel">
                   <div className="panel-heading">
                     <h2>Audited pages</h2>
                     <span>{w.pages.length} {w.pages.length === 1 ? "page" : "pages"}</span>
@@ -631,68 +627,28 @@ export function App() {
               {page === "Sources" && (
                 <SourcesTable presentation={w.presentation} collected={w.metrics.completed} evidence={openEvidence} projectId={p!.id} />
               )}
-              {(page === "Opportunities" || (page === "Actions" && actionTab === "Plan")) && (
-                <section className="panel">
-                  <div className="panel-heading">
-                    <h2>
-                      {page === "Actions"
-                        ? "Your action plan"
-                        : "Evidence-based opportunities"}
-                    </h2>
-                    <span>{findingGroups(w.findings).length} priorities / {w.findings.length} supporting items</span>
-                    {page === "Opportunities" && audited && measured && !activeAnalysis && (
-                      <button
-                        className="text-button"
-                        onClick={() => setJobDialog("diagnose")}
-                      >
-                        Analyze the evidence <ArrowRight size={14} />
-                      </button>
-                    )}
-                  </div>
-                  <Findings findings={w.findings} projectId={p!.id} run={run} />
-                </section>
-              )}
-              {page === "Actions" && actionTab === "Content" && (
-                <section className="panel">
-                  <div className="panel-heading">
-                    <h2>Content workspace</h2>
-                    <span>Research, brief, draft, review</span>
-                  </div>
-                  {w.jobs.some(job => ['content', 'revise'].includes(job.kind)) && <details className="content-activity" open={w.jobs.some(job => ['content', 'revise'].includes(job.kind) && ['queued', 'running', 'paused', 'failed'].includes(job.status))}><summary>Draft activity <ChevronDown size={14} /></summary><Jobs jobs={w.jobs.filter(job => ['content', 'revise'].includes(job.kind)).slice(0, 5)} run={run} /></details>}
-                  {w.content.length > 0 && <div className="panel-padding"><Select label="Content draft" value={selectedContent || w.content[0]?.id} onChange={(id) => { if (id !== selectedContent) navigate(() => setSelectedContent(id)); }} options={w.content.map((draft) => ({ value: draft.id, label: draft.topic, detail: new Date(draft.createdAt).toLocaleString() + " / " + (draft.reviewCurrent === false ? "Review outdated" : draft.review?.issues?.length ? draft.review.issues.length + " claims to review" : "Draft") }))} /></div>}
-                  {w.content.length ? (
-                    w.content.filter((draft) => draft.id === (selectedContent || w.content[0]?.id)).map((c) => (
-                      <article className="answer" key={c.id}>
-                        <div className="answer-meta">
-                          <span className="badge">{c.status === "needs_review" || c.reviewCurrent === false ? "Needs review" : "Draft"}</span>
-                          <span>Human review required</span>
-                        </div>
-                        <h3>{c.topic}</h3>
-                        <details>
-                          <summary>Content brief</summary>
-                          <ContentBrief brief={c.brief} sources={c.sourceEvidence} />
-                        </details>
-                        <details className="draft-review" open={!!c.review?.issues?.length || c.review?.coverageComplete === false || c.reviewCurrent === false || !c.review}>
-                          <summary>{c.reviewCurrent === false ? "Review outdated after edits" : c.review?.issues?.length ? c.review.issues.length + (c.review.issues.length === 1 ? " claim needs review" : " claims need review") : "Verification notes"}</summary>
-                          <ContentReview content={c} />
-                        </details>
-                        <ContentEditor
-                          key={c.id}
-                          content={c}
-                          projectId={p!.id}
-                          run={run}
-                          revise={() => { setRevision(c); setJobDialog('revise'); }}
-                          onDraftChange={(edit) => setUnsavedDraft(edit === null ? null : { projectId: p!.id, id: c.id, ...edit })}
-                        />
-                      </article>
-                    ))
-                  ) : (
-                    <Empty title={w.jobs.some(job => job.kind === 'content' && ['queued', 'running'].includes(job.status)) ? 'Your draft is on its way' : 'Create something useful'}>
-                      {w.jobs.some(job => job.kind === 'content' && ['queued', 'running'].includes(job.status)) ? 'Research, writing and review progress appears above. Your draft will appear here when ready.' : 'Choose a topic to create a researched draft with a brief and review notes.'}
-                    </Empty>
-                  )}
-                </section>
-              )}
+              {page === "Opportunities" && <>
+                {(analyzed || opportunities.length > 0) && <div className="opportunity-summary" aria-label="Opportunity summary">
+                  <div><Lightbulb size={20} /><strong>{findingGroups(opportunities.filter(f => f.status !== 'done')).length}</strong><span>Open opportunities</span></div>
+                  <div><ListChecks size={20} /><strong>{findingGroups(opportunities.filter(f => f.priority === 'high' && f.status !== 'done')).length}</strong><span>High priority</span></div>
+                  <div><Check size={20} /><strong>{findingGroups(opportunities.filter(f => f.status === 'done')).length}</strong><span>Completed</span></div>
+                </div>}
+                {activeAnalysis && <section className="insight-banner" role="status"><RefreshCw size={20} /><div><h2>Reviewing your answers and pages</h2><p>{activeAnalysis.progress}</p></div></section>}
+                {pausedAnalysis && <section className="panel"><div className="panel-heading"><h2>Continue your saved analysis</h2></div><Jobs jobs={[pausedAnalysis]} run={run} /></section>}
+                <section className="panel"><Findings findings={opportunities} projectId={p!.id} run={run}
+                  emptyTitle={activeAnalysis ? "Your opportunities are on their way" : pausedAnalysis ? "Waiting for the analysis to finish" : "Find your next content opportunity"}
+                  emptyMessage={activeAnalysis ? "You can explore your answers while the analysis runs." : pausedAnalysis ? "Recommendations appear after all reviewed pages have been checked. Your saved answers and progress are kept." : measured && audited ? "Analyze your answers alongside your website to identify specific pages to improve. A missing mention alone is not a recommendation." : "Complete a site audit and visibility check to find improvements grounded in your evidence."}
+                  jobs={w.jobs} measurementId={w.measurement?.id}
+                  createContent={finding => navigate(() => { setPage('Content'); setContentTopic(finding.title); setJobDialog('content'); })} /></section>
+              </>}
+              {page === "Content" && <>
+                {w.jobs.some(job => ['content', 'revise'].includes(job.kind)) && <details className="panel activity-panel" open={w.jobs.some(job => ['content', 'revise'].includes(job.kind) && ['queued', 'running', 'paused', 'failed'].includes(job.status))}><summary><h2>Draft activity</h2><ChevronDown size={14} /></summary><Jobs jobs={w.jobs.filter(job => ['content', 'revise'].includes(job.kind)).slice(0, 5)} run={run} /></details>}
+                <ContentWorkspace drafts={w.content} selected={selectedContent} select={id => { if (id !== selectedContent) navigate(() => setSelectedContent(id)); }} projectId={p!.id} run={run}
+                  pending={w.jobs.some(job => job.kind === 'content' && ['queued', 'running'].includes(job.status))}
+                  create={() => { setContentTopic(''); setJobDialog('content'); }}
+                  revise={draft => { setRevision(draft); setJobDialog('revise'); }}
+                  onDraftChange={edit => setUnsavedDraft(edit === null ? null : { projectId: p!.id, ...edit })} />
+              </>}
               {page === "Competitors" && (
                 <>
                   {measured ? <CitationComparison projectId={p!.id} ownDomain={p!.domain} rows={[ownWebsite!,...w.competitors]} evidence={openEvidence} openCompetitors={() => document.getElementById("comparison-websites")?.focus()} /> : <section className="panel"><Empty title="Compare the websites in your answers">Add competitors below, then run a visibility check.</Empty></section>}
@@ -707,7 +663,7 @@ export function App() {
                   <div className="report-grid">
                     <div>
                       <FileText size={25} />
-                      <h3>Evidence and action report</h3>
+                      <h3>Evidence and improvement report</h3>
                       <p>
                         Download an editable report or open a print-friendly
                         version.
@@ -735,7 +691,7 @@ export function App() {
                       <Download size={25} />
                       <h3>Portable project</h3>
                       <p>
-                        Your configuration, evidence, actions and drafts.
+                        Your configuration, evidence, improvements and drafts.
                         Credentials are excluded.
                       </p>
                       <a
@@ -778,6 +734,7 @@ export function App() {
           project={p}
           connected={connected}
           revision={revision}
+          initialTopic={contentTopic}
           run={run}
           close={() => { setJobDialog(null); setRevision(null); }}
         />
@@ -792,7 +749,7 @@ const descriptions: Record<string, string> = {
   Responses: "Read the answers behind your measurements.",
   Sources: "Inspect the pages linked in collected answers.",
   Opportunities: "Find useful improvements supported by evidence.",
-  Actions: "Plan improvements, create content and review it before publishing.",
+  Content: "Create useful content with research, source links and a review before publishing.",
   Competitors: "Keep a clear view of relevant competing brands.",
   Reports: "Keep, share and move your work.",
   Settings: "Manage provider connections and scheduled work.",
@@ -806,11 +763,11 @@ function Metric({
   value: string;
   detail: string;
 }) {
-  const Icon = ({ "Brand mentions": MessagesSquare, "Website citations": Link, "Answers collected": Check, "Priorities to review": ListChecks, "Missing answers": MessagesSquare, "Answers remaining": MessagesSquare, "Source links": Globe } as Record<string, typeof MessagesSquare>)[title] ?? ChartColumn;
+  const Icon = ({ "Brand mentions": MessagesSquare, "Website citations": Link, "Answers collected": Check, "Opportunities": Lightbulb, "Missing answers": MessagesSquare, "Answers remaining": MessagesSquare, "Source links": Globe } as Record<string, typeof MessagesSquare>)[title] ?? ChartColumn;
   return (
     <section className="metric">
       <span className="metric-title">{title}<span className="metric-icon"><Icon size={17} aria-hidden="true" /></span></span>
-      <strong>{value}</strong>
+      <strong className={value.length > 10 ? 'metric-text' : undefined}>{value}</strong>
       <small>{detail}</small>
     </section>
   );
@@ -1016,6 +973,7 @@ function JobDialog({
   project,
   connected,
   revision,
+  initialTopic,
   run,
   close,
   openConnections,
@@ -1024,6 +982,7 @@ function JobDialog({
   project: Project;
   connected: Record<string, boolean>;
   revision: any;
+  initialTopic: string;
   run: (f: () => Promise<unknown>) => Promise<void>;
   close: () => void;
   openConnections: () => void;
@@ -1212,6 +1171,7 @@ function JobDialog({
                 Topic
                 <input
                   name="topic"
+                  defaultValue={initialTopic}
                   {...feedback.field("topic")}
                   required
                   placeholder="What should this content help readers understand?"

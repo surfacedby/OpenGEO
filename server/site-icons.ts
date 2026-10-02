@@ -124,9 +124,8 @@ export class SiteIcons {
     const signal = AbortSignal.timeout(5000);
     const direct = await this.read(initial, signal);
     if (!direct) return null;
-    const icon = direct.status === 200 ? rasterIcon(direct.bytes) : null;
+    const icon = direct?.status === 200 ? rasterIcon(direct.bytes) : null;
     if (icon) return icon;
-    if (![200, 404].includes(direct.status)) return null;
     const home = await this.read(new URL('/', initial), signal, true);
     if (!home || home.status !== 200) return null;
     const $ = load(home.bytes.toString('utf8'));
@@ -140,7 +139,8 @@ export class SiteIcons {
         candidates.add(candidate.href);
       } catch { /* Invalid page links cannot authorize icon requests. */ }
     }
-    for (const candidate of [...candidates].slice(0, 4)) {
+    const ordered = [...candidates].sort((a, b) => Number(/\.svg(?:$|\?)/i.test(a)) - Number(/\.svg(?:$|\?)/i.test(b)));
+    for (const candidate of ordered.slice(0, 4)) {
       const response = await this.read(new URL(candidate), signal);
       const icon = response?.status === 200 ? rasterIcon(response.bytes) : null;
       if (icon) return icon;
@@ -165,8 +165,8 @@ export class SiteIcons {
           url = next;
           continue;
         }
-        if (response.status === 404) return { status: 404, bytes: Buffer.alloc(0), url };
-        if (response.status !== 200 || !response.body) return null;
+        if (response.status !== 200) return { status: response.status, bytes: Buffer.alloc(0), url };
+        if (!response.body) return null;
         const chunks: Buffer[] = [];
         let length = 0;
         for await (const chunk of response.body) {
