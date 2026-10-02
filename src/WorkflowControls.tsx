@@ -269,6 +269,7 @@ export function ContentReview({ content }: { content: any }) {
   const issues = content.review?.issues ?? [];
   return <section>
     <h3>Claims to review</h3>
+    {content.sourceCoverage && <p className="small">Based on {content.sourceCoverage.pagesUsed} website {content.sourceCoverage.pagesUsed === 1 ? 'page' : 'pages'} selected for this topic. Source links are preserved with this draft.</p>}
     {content.reviewCurrent === false && <p>Your edits came after this review. Check the current draft before publishing.</p>}
     {issues.length ? <ul>{issues.map((issue: any, index: number) => <li key={index}>
       <strong>{issue.claim}</strong><p>{issue.reason}</p>

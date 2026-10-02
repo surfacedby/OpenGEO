@@ -1,5 +1,6 @@
 import { fetch as safeFetch } from "undici";
 import { publicAgent, publicUrl } from "./network.js";
+import { load } from "cheerio";
 
 export type SiteIcon = { bytes: Buffer; contentType: string };
 type FetchIcon = (
@@ -17,13 +18,39 @@ const request: FetchIcon = (url, signal) =>
     signal,
     headers: {
       "User-Agent": "Local website icon request",
-      Accept: "image/png,image/x-icon,image/vnd.microsoft.icon",
+      Accept: "image/png,image/webp,image/x-icon,image/vnd.microsoft.icon,text/html;q=0.5",
     },
   });
 
 /** Only bounded raster icons are returned; active SVG/HTML and credential-bearing URLs never reach the renderer. */
 export function rasterIcon(bytes: Buffer): SiteIcon | null {
   if (bytes.length < 24 || bytes.length > 131072) return null;
+  if (bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP') {
+    if (bytes.readUInt32LE(4) + 8 !== bytes.length) return null;
+    let image = false, canvas: [number, number] | undefined;
+    for (let offset = 12; offset < bytes.length;) {
+      if (offset + 8 > bytes.length) return null;
+      const type = bytes.toString('ascii', offset, offset + 4), length = bytes.readUInt32LE(offset + 4), start = offset + 8;
+      const end = start + length + (length % 2);
+      if (end > bytes.length || (length % 2 && bytes[end - 1] !== 0)) return null;
+      let dimensions: [number, number] | undefined;
+      if (type === 'VP8X') {
+        if (offset !== 12 || length !== 10 || (bytes[start] & 2)) return null;
+        canvas = dimensions = [bytes.readUIntLE(start + 4, 3) + 1, bytes.readUIntLE(start + 7, 3) + 1];
+      } else if (type === 'VP8L') {
+        if (image || length < 5 || bytes[start] !== 47) return null;
+        const bits = bytes.readUInt32LE(start + 1);
+        if (bits >>> 29) return null;
+        image = true; dimensions = [(bits & 16383) + 1, ((bits >>> 14) & 16383) + 1];
+      } else if (type === 'VP8 ') {
+        if (image || length < 10 || (bytes[start] & 1) || !bytes.subarray(start + 3, start + 6).equals(Buffer.from([157, 1, 42]))) return null;
+        image = true; dimensions = [bytes.readUInt16LE(start + 6) & 16383, bytes.readUInt16LE(start + 8) & 16383];
+      } else if (type === 'ANIM' || type === 'ANMF') return null;
+      if (dimensions && (dimensions.some(value => value < 1 || value > 512) || (canvas && image && dimensions.some((value, index) => value !== canvas![index])))) return null;
+      offset = end;
+    }
+    return image ? { bytes, contentType: 'image/webp' } : null;
+  }
   if (
     bytes
       .subarray(0, 8)
@@ -94,8 +121,35 @@ export class SiteIcons {
     return task;
   }
   private async load(initial: URL) {
+    const signal = AbortSignal.timeout(5000);
+    const direct = await this.read(initial, signal);
+    if (!direct) return null;
+    const icon = direct.status === 200 ? rasterIcon(direct.bytes) : null;
+    if (icon) return icon;
+    if (![200, 404].includes(direct.status)) return null;
+    const home = await this.read(new URL('/', initial), signal, true);
+    if (!home || home.status !== 200) return null;
+    const $ = load(home.bytes.toString('utf8'));
+    const candidates = new Set<string>();
+    for (const element of $('link[rel]').toArray()) {
+      const rel = $(element).attr('rel')?.toLowerCase().split(/\s+/) ?? [];
+      if (!rel.includes('icon') && !rel.includes('apple-touch-icon')) continue;
+      try {
+        const candidate = publicUrl(new URL($(element).attr('href') ?? '', home.url).href);
+        if (candidate.hostname.replace(/^www\./, '') !== initial.hostname.replace(/^www\./, '') || candidate.href === initial.href) continue;
+        candidates.add(candidate.href);
+      } catch { /* Invalid page links cannot authorize icon requests. */ }
+    }
+    for (const candidate of [...candidates].slice(0, 4)) {
+      const response = await this.read(new URL(candidate), signal);
+      const icon = response?.status === 200 ? rasterIcon(response.bytes) : null;
+      if (icon) return icon;
+    }
+    return null;
+  }
+  /** Website metadata can name a raster icon, but cannot redirect decorative requests to another host. */
+  private async read(initial: URL, signal: AbortSignal, html = false) {
     let url = initial;
-    const signal = AbortSignal.timeout(3500);
     for (let i = 0; i < 3; i++) {
       const response = await this.fetcher(url, signal);
       try {
@@ -111,15 +165,20 @@ export class SiteIcons {
           url = next;
           continue;
         }
+        if (response.status === 404) return { status: 404, bytes: Buffer.alloc(0), url };
         if (response.status !== 200 || !response.body) return null;
         const chunks: Buffer[] = [];
         let length = 0;
         for await (const chunk of response.body) {
           length += chunk.length;
-          if (length > 131072) return null;
+          if (length > 131072) {
+            if (!html) return null;
+            chunks.push(Buffer.from(chunk).subarray(0, 131072 - (length - chunk.length)));
+            break;
+          }
           chunks.push(Buffer.from(chunk));
         }
-        return rasterIcon(Buffer.concat(chunks));
+        return { status: 200, bytes: Buffer.concat(chunks), url };
       } finally {
         await response.body?.cancel?.().catch(() => {});
       }

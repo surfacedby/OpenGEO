@@ -130,3 +130,30 @@ test("site icons coalesce duplicate requests and queue larger sets within the co
   assert.equal((await icons.get("site0.example"))?.contentType, "image/png");
   assert.equal(calls, 12);
 });
+
+test('website-declared raster icons work without a root favicon and cannot reach unrelated hosts', async () => {
+  const requests: string[] = [];
+  const icons = new SiteIcons(async url => {
+    requests.push(url.href);
+    if(url.pathname === '/favicon.ico') return response(404, Buffer.alloc(0));
+    if(url.pathname === '/') return response(200, Buffer.from('<link rel="icon" href="https://tracking.example/icon.png"><link rel="icon" href="http://127.0.0.1/private"><link rel="icon" href="/uploads/brand.png">'));
+    return response(200, png);
+  });
+  assert.equal((await icons.get('example.com'))?.contentType,'image/png');
+  assert.deepEqual(requests,['https://example.com/favicon.ico','https://example.com/','https://example.com/uploads/brand.png']);
+  assert.ok((await icons.get('example.com'))?.bytes.equals(png));
+  assert.equal(requests.length,3);
+});
+
+test('WebP icons require a bounded static canvas and complete chunk framing', () => {
+  const bytes=Buffer.alloc(26);
+  bytes.write('RIFF'); bytes.writeUInt32LE(18,4); bytes.write('WEBP',8); bytes.write('VP8L',12); bytes.writeUInt32LE(5,16); bytes[20]=47;
+  bytes.writeUInt32LE(31|(31<<14),21);
+  assert.equal(rasterIcon(bytes)?.contentType,'image/webp');
+  const oversized=Buffer.from(bytes); oversized.writeUInt32LE(1023|(31<<14),21);
+  assert.equal(rasterIcon(oversized),null);
+  const truncated=Buffer.from(bytes); truncated.writeUInt32LE(40,16);
+  assert.equal(rasterIcon(truncated),null);
+  const trailing=Buffer.concat([bytes,Buffer.from('<script>')]);
+  assert.equal(rasterIcon(trailing),null);
+});

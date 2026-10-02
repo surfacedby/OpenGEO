@@ -23,7 +23,7 @@ import {
   auditCoverage,
 } from "./contracts.js";
 import { publicUrl } from "./network.js";
-import { workspacePresentation } from "./presentation.js";
+import { workspacePresentation, currentFindings } from "./presentation.js";
 import { SiteIcons } from "./site-icons.js";
 import { UsageSharing } from "./usage.js";
 import {
@@ -286,7 +286,7 @@ export async function createApp(
       auditCoverage: coverage.success ? coverage.data : null,
       pages,
       observations,
-      findings: store.findings(id),
+      findings: currentFindings(store.findings(id), jobs),
       content: store.artifacts(id, "content"),
       metrics,
       presentation: workspacePresentation(jobs, measure, observations,

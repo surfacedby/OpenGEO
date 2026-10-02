@@ -483,35 +483,6 @@ td small {
   font-size: 12px;
 }
 tbody tr:hover { background: #fafcff; }
-.finding {
-  border-bottom: 1px solid #f1f5f9;
-}
-.finding:last-child {
-  border: 0;
-}
-.finding > summary {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 18px 22px;
-  cursor: pointer;
-}
-.finding > summary strong {
-  font-size: 13px;
-  font-weight: 600;
-  flex: 1;
-}
-.finding-body {
-  padding: 0 22px 20px 78px;
-  font-size: 13px;
-  line-height: 1.8;
-}
-.finding-body p {
-  margin-bottom: 10px;
-}
-.finding-body ol {
-  padding-left: 18px;
-}
 .answer {
   padding: 24px;
   border-bottom: 1px solid var(--border);
@@ -773,13 +744,6 @@ form .secondary {
   .topbar {
     font-size: 11px;
   }
-  .finding > summary {
-    padding: 15px 14px;
-    flex-wrap: wrap;
-  }
-  .finding-body {
-    padding: 0 18px 18px;
-  }
   .panel-heading {
     padding: 17px;
   }
@@ -802,9 +766,7 @@ form .secondary {
 .workflow-row:disabled { opacity: 1; color: var(--muted); background: #fafafa; }
 .workflow-row:disabled strong { color: var(--muted); }
 .workflow-row .step { flex: none; }
-.finding > summary > .choice { width: 145px; flex: none; }
-.finding > summary > strong { min-width: 0; overflow-wrap: anywhere; }
-.finding-body a, .answer-text, .answer h3 { overflow-wrap: anywhere; }
+.answer-text, .answer h3 { overflow-wrap: anywhere; }
 .jobs li { flex-wrap: wrap; }
 .jobs li > div:first-child { min-width: min(160px, 100%); }
 .jobs li .resume-review { flex: 0 0 100%; border-top: 1px solid var(--border); padding-top: 18px; margin-top: 10px; }
@@ -837,8 +799,6 @@ form .secondary {
   .provider-card .provider-footer { flex-direction: column; align-items: stretch; }
   .provider-card .provider-footer button { width: 100%; }
   .provider-card .provider-footer small { min-width: 0; }
-  .finding > summary > strong { flex-basis: calc(100% - 72px); }
-  .finding > summary > .choice { margin-left: 0; width: 100%; }
   .source-list li { flex-wrap: wrap; }
   .source-list li a { min-width: 0; }
   .source-list .muted { flex-basis: 100%; margin-left: 28px; }

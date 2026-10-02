@@ -6,6 +6,8 @@ import { crawl, auditFindings } from "./audit.js";
 import { renderedFetch } from "./render.js";
 import { crawlFetch } from "./network.js";
 import { scheduledBudgetCeiling } from "./scheduler.js";
+import { completedMeasurement } from "./portable-results.js";
+import { evidenceBatches, contentSources } from "./evidence-context.js";
 import {
   presence,
   summarize,
@@ -66,7 +68,16 @@ export class Runner {
   constructor(
     readonly store: Store,
     readonly providers: Providers,
-  ) {}
+  ) {
+    for (const job of store.jobs()) {
+      if (!["measure", "recheck"].includes(job.kind) || !["chatgpt", "openrouter"].includes(job.provider ?? "")) continue;
+      const snapshot = store.step(job.id, "project");
+      if (!snapshot?.body) continue;
+      const project: Project = JSON.parse(snapshot.body);
+      if (project.prompts.length && project.prompts.every((_, index) => store.step(job.id, "measure:" + index)?.state === "done"))
+        this.checkpointApiMeasurement(job, project);
+    }
+  }
   start() {
     this.timer = setInterval(() => {
       void this.tick();
@@ -337,54 +348,58 @@ export class Runner {
       };
     }
     if (job.kind === "diagnose") {
-      const latest = this.store
-        .jobs(project.id)
-        .find(
-          (j) =>
-            ["measure", "recheck"].includes(j.kind) && j.status === "completed",
-        );
-      if (!latest) throw new Error("Collect visibility evidence first");
-      const observations = this.store.observations(project.id, latest.id);
+      const completed = this.store.step(job.id, "diagnosis-result");
+      if (completed?.state === "done") return JSON.parse(completed.body!);
       if (job.provider === "chatgpt" || job.provider === "openrouter") {
-        const audit = this.store
-          .jobs(project.id)
-          .find((j) => j.kind === "audit" && j.status === "completed");
-        const pages = audit ? this.store.pages(project.id, audit.id) : [];
-        if (!pages.length)
-          throw new ProviderError(
-            "evidence",
-            "Complete a local audit to link recommendations to existing pages.",
-          );
         const model = await this.contentModel(job);
-        const result = diagnosisSchema.parse(
-          parseJson(
-            await this.llmPass(
-              job,
-              model,
-              "diagnose",
-              {
-                brand: project.brand,
-                aliases: project.aliases,
-                locale: project.locale,
-                pages: pages.map((p) => ({
-                  id: p.id,
-                  url: p.url,
-                  title: p.title,
-                  h1: p.h1,
-                  text: p.text.slice(0, 8000),
-                })),
-                observations,
-              },
-              signal,
-            ),
-          ),
-        );
+        const priorEvidence = this.store.step(job.id, "diagnosis-inputs");
+        let evidence;
+        if (priorEvidence?.body) evidence = JSON.parse(priorEvidence.body);
+        else {
+          const latest = this.store.jobs(project.id).find(completedMeasurement);
+          if (!latest) throw new ProviderError("evidence", "Collect visibility evidence first.");
+          const audit = this.store.jobs(project.id).find(item => item.kind === "audit" && item.status === "completed");
+          const pages = audit ? this.store.pages(project.id, audit.id) : [];
+          if (!pages.length) throw new ProviderError("evidence", "Complete a local audit to link recommendations to existing pages.");
+          evidence = {
+            context: { brand: project.brand, aliases: project.aliases, locale: project.locale, observations: this.store.observations(project.id, latest.id) },
+            sources: pages.map(page => ({ id: page.id, url: page.url, title: page.title.slice(0, 500), h1: page.h1.slice(0, 5).map(heading => heading.slice(0, 500)), text: page.text.slice(0, 8000) })),
+            measurementJobId: latest.id,
+          };
+        }
+        if (!priorEvidence) this.store.setStep(job.id, "diagnosis-inputs", "done", evidence);
+        const context: { brand: string; aliases: string[]; locale: string; observations: Observation[] } = evidence.context;
+        const sources: { id: string; url: string; title: string; h1: string[]; text: string }[] = evidence.sources;
+        const maximumBytes = Math.min(65000, model.contextLength - 7000 - Buffer.byteLength(JSON.stringify(context) + prompts.diagnose, "utf8"));
+        const legacy = this.store.step(job.id, "diagnose");
+        const savedPlan = this.store.step(job.id, "diagnosis-batches");
+        const batches: typeof sources[] = savedPlan?.body ? JSON.parse(savedPlan.body) : legacy ? [sources] : evidenceBatches(sources, maximumBytes);
+        if (!savedPlan) this.store.setStep(job.id, "diagnosis-batches", "done", batches);
+        const result: z.infer<typeof diagnosisSchema> = { recommendations: [], uncertainties: [] };
+        for (const [index, batch] of batches.entries()) {
+          const reviewed = diagnosisSchema.parse(parseJson(await this.llmPass(job, model, "diagnose", {
+            ...context, pages: batch, coverage: { pagesAvailable: sources.length, pagesInThisBatch: batch.length, excerpts: true },
+          }, signal, legacy ? "diagnose" : "diagnose:" + index,
+          "Preparing recommendations (" + (index + 1) + " of " + batches.length + ")")));
+          const pageIds = new Set(batch.map(page => page.id));
+          if (reviewed.recommendations.some(recommendation => !pageIds.has(recommendation.targetPageId)))
+            throw new ProviderError("evidence", "Analysis referenced a page outside its reviewed evidence. The output is saved for review.");
+          result.recommendations.push(...reviewed.recommendations);
+          result.uncertainties.push(...reviewed.uncertainties);
+        }
+        const unique = new Set<string>();
+        result.recommendations = result.recommendations.filter(recommendation => {
+          const key = JSON.stringify([recommendation.targetPageId, recommendation.title.trim().toLocaleLowerCase()]);
+          if (unique.has(key)) return false;
+          unique.add(key); return true;
+        });
+        result.uncertainties = [...new Set(result.uncertainties)];
         const allowed = new Set([
-          ...pages.map((p) => p.id),
-          ...observations.map((o) => o.id),
+          ...sources.map((p) => p.id),
+          ...context.observations.map((o) => o.id),
         ]);
         for (const recommendation of result.recommendations) {
-          const page = pages.find((p) => p.id === recommendation.targetPageId);
+          const page = sources.find((p) => p.id === recommendation.targetPageId);
           if (
             !page ||
             recommendation.evidenceIds.some((id) => !allowed.has(id))
@@ -395,6 +410,40 @@ export class Runner {
               true,
             );
         }
+        if (result.recommendations.length > 1) {
+          const candidates = result.recommendations.map((item, index) => ({
+            index, title: item.title, summary: item.description.slice(0, 200),
+            target: sources.find(page => page.id === item.targetPageId)!.url,
+          }));
+          const plan = z.object({ groups: z.array(z.object({
+            primaryIndex: z.number().int().nonnegative(), indices: z.array(z.number().int().nonnegative()).min(1),
+          }).strict()) }).strict().parse(parseJson(await this.llmPass(job, model, 'consolidate', { candidates }, signal)));
+          const seen = new Set<number>();
+          for (const group of plan.groups) {
+            if (!group.indices.includes(group.primaryIndex))
+              throw new ProviderError('evidence', 'The action plan referenced an unrelated primary task. The output is saved for review.');
+            for (const index of group.indices) {
+              if (!result.recommendations[index] || seen.has(index))
+                throw new ProviderError('evidence', 'The action plan repeated or referenced an unknown task. The output is saved for review.');
+              seen.add(index);
+            }
+          }
+          if (seen.size !== result.recommendations.length)
+            throw new ProviderError('evidence', 'The action plan omitted a supported task. The output is saved for review.');
+          // Related tasks share a heading while preserving each page's instructions and evidence.
+          result.recommendations = plan.groups.flatMap(group => {
+            const primary = result.recommendations[group.primaryIndex];
+            return [group.primaryIndex, ...group.indices.filter(index => index !== group.primaryIndex)]
+              .map(index => ({ ...result.recommendations[index], title: primary.title }));
+          });
+        }
+        const receipt = {
+          findings: result.recommendations.length,
+          uncertainties: result.uncertainties,
+          pagesReviewed: sources.length,
+          measurementJobId: evidence.measurementJobId,
+          model: model.id,
+        };
         this.store.db.transaction(() => {
           for (const r of result.recommendations) {
             this.store.put("finding", project.id, job.id, {
@@ -404,7 +453,7 @@ export class Runner {
               title: r.title,
               description: r.description,
               priority: r.priority,
-              targetUrl: pages.find((p) => p.id === r.targetPageId)!.url,
+              targetUrl: sources.find((p) => p.id === r.targetPageId)!.url,
               evidenceIds: r.evidenceIds,
               steps: r.steps,
               confidence: "inferred",
@@ -412,13 +461,13 @@ export class Runner {
               kind: "analysis",
             });
           }
+          this.store.setStep(job.id, "diagnosis-result", "done", receipt);
         })();
-        return {
-          findings: result.recommendations.length,
-          uncertainties: result.uncertainties,
-          model: model.id,
-        };
+        return receipt;
       }
+      const latest = this.store.jobs(project.id).find(completedMeasurement);
+      if (!latest) throw new ProviderError("evidence", "Collect visibility evidence first.");
+      const observations = this.store.observations(project.id, latest.id);
       for (const f of visibilityFindings(project, job.id, observations))
         this.store.put("finding", project.id, job.id, f);
       return { findings: observations.filter((o) => !o.cited).length };
@@ -445,15 +494,23 @@ export class Runner {
       .find((j) => j.kind === "audit" && j.status === "completed");
     const sourceIds = new Set<string>(original?.sourceEvidence?.map((s: any) => s.id) ?? []);
     const sourcePages = sourceIds.size ? this.store.pages(project.id).filter((p) => sourceIds.has(p.id)) : latest ? this.store.pages(project.id, latest.id) : [];
-    const sources = sourcePages.map((p) => ({
-          id: p.id,
-          url: p.url,
-          title: p.title,
-          text: p.text.slice(0, 8000),
-        }));
-    if (!sources.length) throw new Error("Complete a local audit first");
+    if (!sourcePages.length) throw new Error("Complete a local audit first");
+    const topic = original?.topic ?? job.topic ?? project.brand;
+    const savedSources = this.store.step(job.id, "content-sources");
+    const sourceBudget = Math.min(65000, Math.floor((model.contextLength - 10000 - Buffer.byteLength(project.knowledge + (original?.markdown ?? ""), "utf8")) / 2));
+    let selected;
+    if (savedSources?.body) selected = JSON.parse(savedSources.body);
+    else if (original && sourceIds.size) {
+      if (sourcePages.length !== sourceIds.size) throw new ProviderError("evidence", "Some original sources are missing. Restore them before revising this draft.");
+      const sources = sourcePages.map(page => ({ id: page.id, url: page.url, title: page.title.slice(0, 500), text: page.text.slice(0, 8000) }));
+      if (Buffer.byteLength(JSON.stringify(sources), "utf8") > sourceBudget)
+        throw new ProviderError("context", "Choose a model with more room to preserve this draft's original sources. No request was sent.");
+      selected = { sources, coverage: original.sourceCoverage ?? { pagesAvailable: sources.length, pagesUsed: sources.length, excerpts: true } };
+    } else selected = contentSources(sourcePages, topic, sourceBudget);
+    if (!savedSources) this.store.setStep(job.id, "content-sources", "done", selected);
+    const sources: { id: string; url: string; title: string; text: string }[] = selected.sources;
     const context = {
-      topic: original?.topic ?? job.topic ?? project.brand,
+      topic,
       brand: project.brand,
       locale: project.locale,
       knowledge: {
@@ -462,6 +519,7 @@ export class Runner {
         provenance: "user-supplied, unverified",
       },
       sources,
+      coverage: selected.coverage,
     };
     const allowed = new Set([...sources.map((s) => s.id), ...(project.knowledge.trim() ? ["user-knowledge"] : [])]);
     const call = async (name: keyof typeof prompts, input: unknown) => {
@@ -527,6 +585,7 @@ export class Runner {
       review: finalReview,
       reviewCurrent: true,
       sourceEvidence: sources.map(({ id, url, title }) => ({ id, url, title })),
+      sourceCoverage: selected.coverage,
       status: finalReview.issues.length ? 'needs_review' : 'draft',
       requiresHumanReview: true,
       createdAt: new Date().toISOString(),
@@ -588,10 +647,29 @@ export class Runner {
         if (this.store.job(job.id).spentUsd + estimate > job.maxCostUsd) throw new ProviderError("budget", "The approved budget is insufficient for the next answer.");
       });
     }
-    const observations = this.store.observations(project.id, job.id);
-    for (const finding of visibilityFindings(project, job.id, observations)) this.store.put("finding", project.id, job.id, finding);
+    const collection = this.checkpointApiMeasurement(job, project);
     const competitors = provider === "chatgpt" && job.discoverCompetitors ? await discoverCompetitors(this, job, project, model, signal) : [];
-    return { metrics: summarize(observations, project.prompts.length), comparisonKey: comparisonKey(project, this.store.job(job.id), observations), competitors };
+    return { ...collection, competitors };
+  }
+  /** The answer receipt and its findings commit together, independently of later suggestions. */
+  checkpointApiMeasurement(job: Job, project: Project) {
+    const prior = this.store.step(job.id, "measurement-result");
+    if (prior?.state === "done") return JSON.parse(prior.body!);
+    const observations = this.store.observations(project.id, job.id);
+    if (observations.length !== project.prompts.length)
+      throw new ProviderError("evidence", "The answer collection is incomplete. Saved answers remain available.");
+    const result = {
+      metrics: summarize(observations, project.prompts.length),
+      comparisonKey: comparisonKey(project, this.store.job(job.id), observations),
+      collectionCompletedAt: observations.map(answer => answer.observedAt).sort().at(-1),
+    };
+    this.store.db.transaction(() => {
+      if (!this.store.findings(project.id).some(finding => finding.jobId === job.id && finding.kind === "visibility"))
+        for (const finding of visibilityFindings(project, job.id, observations)) this.store.put("finding", project.id, job.id, finding);
+      this.store.setStep(job.id, "measurement-result", "done", result);
+      this.store.updateJob(job.id, { result: { ...(this.store.job(job.id).result as object ?? {}), ...result } });
+    })();
+    return result;
   }
   /** Each paid pass checkpoints its output and spend together before downstream validation. */
   async llmPass(
@@ -600,6 +678,8 @@ export class Runner {
     name: keyof typeof prompts,
     input: unknown,
     signal: AbortSignal,
+    receiptKey: string = name,
+    progressLabel?: string,
   ) {
     const progress: Record<keyof typeof prompts, string> = {
       offerings: 'Understanding what your website offers',
@@ -613,13 +693,14 @@ export class Runner {
       edit: 'Refining your draft',
       verifyFinal: 'Checking the final draft',
       diagnose: 'Preparing recommendations',
+      consolidate: 'Organizing your improvement plan',
     };
-    this.store.updateJob(job.id, { progress: progress[name] });
+    this.store.updateJob(job.id, { progress: progressLabel ?? progress[name] });
     const text = JSON.stringify(input),
       cap = Math.min(4096, model.maxOutputTokens ?? 4096),
       tokenUpper = Buffer.byteLength(text + prompts[name], "utf8") + 1000,
       estimate = tokenUpper * model.inputUsd + cap * model.outputUsd;
-    return this.once(job, name, async () => {
+    return this.once(job, receiptKey, async () => {
       const completion = await this.providers.complete(
         job.provider!,
         model.id,
@@ -647,7 +728,7 @@ export class Runner {
           costEstimateUsd: estimate,
           createdAt: new Date().toISOString(),
         });
-        this.store.setStep(job.id, name, "done", completion.text);
+        this.store.setStep(job.id, receiptKey, "done", completion.text);
       })();
       if (job.provider === "openrouter" && completion.costUsd === null)
         throw new ProviderError(

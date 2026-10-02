@@ -15,7 +15,7 @@ function fixture(send: typeof fetch = fetch) {
   const directory = mkdtempSync(join(tmpdir(), "opengeo-usage-test-")), store = new Store(directory);
   let now = new Date("2026-10-01T10:00:00Z");
   const usage = new UsageSharing(store, send, () => now);
-  return { directory, store, usage, day: (value: string) => { now = new Date(value); }, queued: () => store.db.prepare("SELECT body FROM usage_outbox ORDER BY rowid").all().map((row: any) => JSON.parse(row.body)), async close() { await usage.close(); store.close(); rmSync(directory, { recursive: true, force: true }); } };
+  return { directory, store, usage, clock: () => now, day: (value: string) => { now = new Date(value); }, queued: () => store.db.prepare("SELECT body FROM usage_outbox ORDER BY rowid").all().map((row: any) => JSON.parse(row.body)), async close() { await usage.close(); store.close(); rmSync(directory, { recursive: true, force: true }); } };
 }
 const response = (accepted: string[]) => new Response(JSON.stringify({ accepted }), { headers: { "Content-Type": "application/json" } });
 
@@ -59,7 +59,7 @@ test("daily activity and limits persist across restarts; exported projects conta
   const f = fixture();
   try {
     f.usage.setEnabled(true); const installation = f.store.setting<any>("usageConsent", null).installation;
-    const reopened = new UsageSharing(f.store);
+    const reopened = new UsageSharing(f.store, fetch, f.clock);
     reopened.record("workspace_opened", null, true); reopened.setEnabled(true);
     assert.equal(f.queued().length, 2); assert.equal(f.store.setting<any>("usageConsent", null).installation, installation);
     for (let n = 0; n < 100; n++) f.usage.record("audit_completed");

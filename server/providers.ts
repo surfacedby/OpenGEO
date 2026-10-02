@@ -256,7 +256,7 @@ export class Providers {
     let citations: Citation[] = [];
     const finishedItems = new Map<number, any>();
     const decoder = new TextDecoder();
-    for await (const chunk of r.body) {
+    responseStream: for await (const chunk of r.body) {
       buffer += decoder.decode(chunk, { stream: true });
       if (buffer.length > 2_000_000)
         throw new ProviderError(
@@ -291,6 +291,7 @@ export class Providers {
           const finalText = parts.map((part: any) => part.text ?? "").join("\n");
           if (finalText.trim()) text = finalText;
           citations = safeCitations([...citations, ...parts.flatMap((part: any) => part.annotations ?? [])]);
+          if (completed) break responseStream;
         }
         if (
           ["response.failed", "response.incomplete", "error"].includes(

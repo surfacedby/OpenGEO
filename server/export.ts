@@ -1,7 +1,8 @@
 import { Store } from "./storage.js";
 import type { PageEvidence } from "./contracts.js";
 import type { PortableContent } from "./import.js";
-import { portableJobResult } from "./portable-results.js";
+import { portableJobResult, completedMeasurement, measurementTime } from "./portable-results.js";
+import { currentFindings } from "./presentation.js";
 export { escapeHtml } from "./markdown.js";
 export function exportProject(store: Store, id: string) {
   return {
@@ -46,13 +47,9 @@ export function exportProject(store: Store, id: string) {
 }
 export function reportMarkdown(store: Store, id: string) {
   const p = store.project(id),
-    findings = store.findings(id),
-    latest = store
-      .jobs(id)
-      .find(
-        (j) =>
-          ["measure", "recheck"].includes(j.kind) && j.status === "completed",
-      );
+    jobs = store.jobs(id),
+    findings = currentFindings(store.findings(id), jobs),
+    latest = jobs.find(completedMeasurement);
   const metrics = (latest?.result as { metrics?: { requested: number; completed: number; missing: number; mentionRate: number | null; citationRate: number | null } } | null)?.metrics;
   const percent = (value: number | null) => value === null ? "No collected evidence" : value.toFixed(1) + "%";
   return (
@@ -64,7 +61,7 @@ export function reportMarkdown(store: Store, id: string) {
     new Date().toISOString() +
     "\n\n## Visibility\n\n" +
     (latest && metrics
-      ? "Checked: " + new Date(latest.updatedAt).toISOString() + "\n\n- Brand mentions: " + percent(metrics.mentionRate) + "\n- Website citations: " + percent(metrics.citationRate) + "\n- Answers collected: " + metrics.completed + " of " + metrics.requested + "\n- Missing answers: " + metrics.missing + "\n\nRates use collected answers. API observations can differ from consumer interfaces. Missing answers do not count as absent mentions."
+      ? "Checked: " + new Date(measurementTime(latest)).toISOString() + "\n\n- Brand mentions: " + percent(metrics.mentionRate) + "\n- Website citations: " + percent(metrics.citationRate) + "\n- Answers collected: " + metrics.completed + " of " + metrics.requested + "\n- Missing answers: " + metrics.missing + "\n\nRates use collected answers. API observations can differ from consumer interfaces. Missing answers do not count as absent mentions."
       : "No completed measurement. Failed checks are not evidence of absence.") +
     "\n\n## Actions\n\n" +
     findings

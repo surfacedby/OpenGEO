@@ -1,6 +1,6 @@
 import { randomUUID, createHash } from "node:crypto";
 import type { Observation, Project, Finding, Job } from "./contracts.js";
-import { portableJobResult } from "./portable-results.js";
+import { portableJobResult, completedMeasurement, measurementTime } from "./portable-results.js";
 export function presence(project: Project, answer: string, urls: string[]) {
   const names = [project.brand, ...project.aliases, project.domain]
     .map((x) => x.trim())
@@ -69,7 +69,7 @@ export function comparisonKey(
 }
 export function recheckComparison(jobs: Job[]) {
   const completed = jobs.filter(
-    (j) => ["measure", "recheck"].includes(j.kind) && j.status === "completed",
+    completedMeasurement,
   );
   const latest = completed[0],
     current = latest?.result as any;
@@ -97,8 +97,8 @@ export function recheckComparison(jobs: Job[]) {
   return {
     status: "comparable",
     previousJobId: previous.id,
-    previousAt: previous.updatedAt,
-    currentAt: latest.updatedAt,
+    previousAt: measurementTime(previous),
+    currentAt: measurementTime(latest),
     mentionPoints:
       current.metrics.mentionRate === null || prior.mentionRate === null
         ? null

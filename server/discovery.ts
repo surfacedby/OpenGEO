@@ -4,6 +4,7 @@ import { ProviderError } from "./contracts.js";
 import type { Runner } from "./workflows.js";
 import { parseJson } from "./workflows.js";
 import { publicUrl } from "./network.js";
+import { prompts } from "./prompts.js";
 
 export const questionDiscoveryVersion = 4;
 const offeringInventory = z.object({
@@ -24,23 +25,31 @@ const suggestedCompetitors = z.object({
 export async function discoverQuestions(runner: Runner, job: Job, project: Project, signal: AbortSignal) {
   if (!["chatgpt", "openrouter"].includes(job.provider ?? ""))
     throw new ProviderError("capability", "Connect ChatGPT or OpenRouter to suggest questions. You can also add your own.");
-  const audit = runner.store.jobs(project.id).find(item => item.kind === "audit" && item.status === "completed" &&
-    JSON.parse(runner.store.step(item.id, "project")?.body ?? "null")?.domain === project.domain);
-  if (!audit) throw new ProviderError("evidence", "Wait for the website audit to finish before suggesting questions.");
   const model = await runner.contentModel(job);
-  const readable = runner.store.pages(project.id, audit.id).filter(page => page.status >= 200 && page.status < 300 && !page.noindex && page.text.trim().length >= 80);
-  if (!readable.length) throw new ProviderError("evidence", "We couldn't read enough website content. Try a rendered audit or add your own questions.");
-  // Shorter paths prioritize the home page within the bounded evidence context.
-  const sorted = [...readable].sort((a, b) => new URL(a.url).pathname.length - new URL(b.url).pathname.length);
-  const pages = [];
-  let remaining = Math.max(0, Math.min(60000, model.contextLength - 7000));
-  for (const page of sorted) {
-    const source = { id: page.id, url: page.url, title: page.title.slice(0, 300), headings: page.h1.slice(0, 5), schemaTypes: page.schemaTypes, text: page.text.slice(0, 3500), externalLinks: page.links.filter(link => { try { return new URL(link).hostname !== new URL(page.url).hostname; } catch { return false; } }).slice(0, 30) };
-    const size = Buffer.byteLength(JSON.stringify(source), "utf8");
-    if (size > remaining) continue;
-    pages.push(source); remaining -= size;
+  const saved = runner.store.step(job.id, 'question-inputs');
+  let inputs: { auditJobId: string; pages: { id: string; url: string; title: string; headings: string[]; schemaTypes: string[]; text: string; externalLinks: string[] }[] };
+  if (saved?.body) inputs = JSON.parse(saved.body);
+  else {
+    const audit = runner.store.jobs(project.id).find(item => item.kind === "audit" && item.status === "completed" &&
+      JSON.parse(runner.store.step(item.id, "project")?.body ?? "null")?.domain === project.domain);
+    if (!audit) throw new ProviderError("evidence", "Wait for the website audit to finish before suggesting questions.");
+    const readable = runner.store.pages(project.id, audit.id).filter(page => page.status >= 200 && page.status < 300 && !page.noindex && page.text.trim().length >= 80);
+    if (!readable.length) throw new ProviderError("evidence", "We couldn't read enough website content. Try a rendered audit or add your own questions.");
+    // Shorter paths prioritize the home page within the bounded evidence context.
+    const sorted = [...readable].sort((a, b) => new URL(a.url).pathname.length - new URL(b.url).pathname.length);
+    const pages = [];
+    let remaining = Math.max(0, Math.min(60000, model.contextLength - 7000));
+    for (const page of sorted) {
+      const source = { id: page.id, url: page.url, title: page.title.slice(0, 300), headings: page.h1.slice(0, 5), schemaTypes: page.schemaTypes, text: page.text.slice(0, 3500), externalLinks: page.links.filter(link => { try { return new URL(link).hostname !== new URL(page.url).hostname; } catch { return false; } }).slice(0, 30) };
+      const size = Buffer.byteLength(JSON.stringify(source), "utf8");
+      if (size > remaining) continue;
+      pages.push(source); remaining -= size;
+    }
+    if (!pages.length) throw new ProviderError("context", "Choose a model with enough room for your website evidence.");
+    inputs = { auditJobId: audit.id, pages };
+    runner.store.setStep(job.id, 'question-inputs', 'done', inputs);
   }
-  if (!pages.length) throw new ProviderError("context", "Choose a model with enough room for your website evidence.");
+  const { pages } = inputs;
   const context = { brand: project.brand, aliases: project.aliases, locale: project.locale, businessNotes: project.knowledge.slice(0, 4000) };
   const inventory = offeringInventory.parse(parseJson(await runner.llmPass(job, model, "offerings", { ...context, pages }, signal)));
   const spaces = (value: string) => value.replace(/\s+/g, " ").trim();
@@ -54,7 +63,7 @@ export async function discoverQuestions(runner: Runner, job: Job, project: Proje
         throw new ProviderError("evidence", "Website analysis referenced an unsupported passage. The output is saved for review.", true);
     }
   }
-  const result = { pagesRead: pages.length, auditJobId: audit.id, model: model.id, version: questionDiscoveryVersion };
+  const result = { pagesRead: pages.length, auditJobId: inputs.auditJobId, model: model.id, version: questionDiscoveryVersion };
   if (!inventory.offerings.length) return { ...result, questions: [] };
   const data = suggestedQuestions.parse(parseJson(await runner.llmPass(job, model, "questions", { ...context, inventory }, signal)));
   if (data.questions.some(question => !offeringIds.has(question.offeringId)))
@@ -73,7 +82,7 @@ export async function discoverQuestions(runner: Runner, job: Job, project: Proje
     seen.add(key);
     const offering = inventory.offerings.find(item => item.id === candidate.offeringId)!;
     const pageIds = [...new Set(offering.evidence.map(proof => proof.pageId))];
-    return [{ text: question.text, intent: candidate.intent, pageIds, sources: pageIds.map(id => { const page = readable.find(item => item.id === id)!; return { url: page.url, title: page.title }; }) }];
+    return [{ text: question.text, intent: candidate.intent, pageIds, sources: pageIds.map(id => { const page = pages.find(item => item.id === id)!; return { url: page.url, title: page.title }; }) }];
   });
   return { ...result, questions };
 }
@@ -81,20 +90,44 @@ export async function discoverQuestions(runner: Runner, job: Job, project: Proje
 /** A suggested alternative needs an answer mention and its own cited domain before user review. */
 export async function discoverCompetitors(runner: Runner, job: Job, project: Project, model: Model, signal: AbortSignal) {
   const observations = runner.store.observations(project.id, job.id);
-  const data = suggestedCompetitors.parse(parseJson(await runner.llmPass(job, model, "competitors", {
-    brand: project.brand, domain: project.domain, locale: project.locale,
-    answers: observations.map(answer => ({ id: answer.id, question: answer.prompt, text: answer.answer.slice(0, 12000), citations: answer.citations })),
-  }, signal)));
-  const seen = new Set<string>();
-  return data.competitors.flatMap(candidate => {
+  const context = { brand: project.brand, domain: project.domain, locale: project.locale };
+  const legacy = runner.store.step(job.id, "competitors");
+  const batches: { id: string; question: string; text: string; citations: typeof observations[number]["citations"] }[][] = [];
+  if (legacy) {
+    // An existing receipt retains its request identity, including uncertain completion.
+    batches.push(observations.map(answer => ({ id: answer.id, question: answer.prompt, text: answer.answer.slice(0, 12000), citations: answer.citations })));
+  } else {
+    const ceiling = Math.min(18000, model.contextLength - 6000 - Buffer.byteLength(JSON.stringify(context) + prompts.competitors, "utf8"));
+    let batch: typeof batches[number] = [];
+    for (const answer of observations.filter(answer => answer.citations.length > 0)) {
+      const source = { id: answer.id, question: answer.prompt, text: answer.answer.slice(0, 12000), citations: answer.citations };
+      if (Buffer.byteLength(JSON.stringify([source]), "utf8") > ceiling)
+        throw new ProviderError("context", "Choose a model with more room to review competitor evidence. Your answers are saved.");
+      if (batch.length && Buffer.byteLength(JSON.stringify([...batch, source]), "utf8") > ceiling) {
+        batches.push(batch); batch = [];
+      }
+      batch.push(source);
+    }
+    if (batch.length) batches.push(batch);
+  }
+  const candidates: z.infer<typeof suggestedCompetitors>["competitors"] = [];
+  for (const [index, answers] of batches.entries()) {
+    signal.throwIfAborted();
+    const data = suggestedCompetitors.parse(parseJson(await runner.llmPass(job, model, "competitors", { ...context, answers }, signal, legacy ? "competitors" : "competitors:" + index)));
+    candidates.push(...data.competitors);
+  }
+  const confirmed = new Map<string, { name: string; domain: string; observationIds: string[] }>();
+  for (const candidate of candidates) {
     let domain: string;
-    try { domain = publicUrl(candidate.domain).hostname.replace(/^www\./, ""); } catch { return []; }
-    if (domain === project.domain || domain.endsWith("." + project.domain) || seen.has(domain)) return [];
+    try { domain = publicUrl(candidate.domain).hostname.replace(/^www\./, ""); } catch { continue; }
+    if (domain === project.domain || domain.endsWith("." + project.domain)) continue;
     const evidence = observations.filter(answer => candidate.observationIds.includes(answer.id) && answer.answer.toLocaleLowerCase().includes(candidate.name.toLocaleLowerCase()) && answer.citations.some(citation => {
       try { const host = publicUrl(citation.url).hostname.replace(/^www\./, ""); return host === domain || host.endsWith("." + domain); } catch { return false; }
     }));
-    if (!evidence.length) return [];
-    seen.add(domain);
-    return [{ name: candidate.name, domain, observationIds: evidence.map(answer => answer.id) }];
-  });
+    if (!evidence.length) continue;
+    const prior = confirmed.get(domain);
+    confirmed.set(domain, { name: prior?.name ?? candidate.name, domain,
+      observationIds: [...new Set([...(prior?.observationIds ?? []), ...evidence.map(answer => answer.id)])] });
+  }
+  return [...confirmed.values()];
 }

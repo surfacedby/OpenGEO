@@ -104,6 +104,8 @@ export class Store {
         return old;
       }
       this.project(input.projectId);
+      if (input.kind === 'diagnose' && this.jobs(input.projectId).some(job => job.kind === 'diagnose' && ['queued', 'running'].includes(job.status)))
+        throw new ProviderError('in_progress', 'An improvement plan is already being prepared. Follow its progress in Recent activity.');
       if (input.kind === 'revise' && !this.artifacts<any>(input.projectId, 'content').some((doc) => doc.id === input.contentId))
         throw new Error('Content not found');
       const now = new Date().toISOString();

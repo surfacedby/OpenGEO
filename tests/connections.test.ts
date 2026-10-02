@@ -192,6 +192,23 @@ test("ChatGPT streaming search evidence survives an empty terminal output and re
   } finally { globalThis.fetch = original; f.close(); }
 });
 
+test("a confirmed ChatGPT response finishes without waiting for the transport to close", async () => {
+  const f = fixture(), original = globalThis.fetch;
+  const saved = f.vault.get("chatgpt"); saved.profiles[0].expiresAt = Date.now() + 3600000; f.vault.set("chatgpt", saved);
+  let cancelled = false;
+  globalThis.fetch = (async () => new Response(new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('data: ' + JSON.stringify({ type: "response.completed", response: { status: "completed", output: [{ content: [{ type: "output_text", text: "The completed answer." }] }] } }) + '\n\n'));
+    },
+    cancel() { cancelled = true; },
+  }))) as typeof fetch;
+  try {
+    const response = await f.providers.complete("chatgpt", "fixture-model", "Answer independently.", "Explain this topic.", AbortSignal.timeout(1000));
+    assert.equal(response.text, "The completed answer.");
+    assert.equal(cancelled, true);
+  } finally { globalThis.fetch = original; f.close(); }
+});
+
 test("ChatGPT API measurements preserve citations and progress when plan usage stops, without a paid fallback", async () => {
   const f = fixture(), original = globalThis.fetch; let requests = 0;
   const saved = f.vault.get("chatgpt"); saved.profiles[0].expiresAt = Date.now() + 3600000; f.vault.set("chatgpt", saved);

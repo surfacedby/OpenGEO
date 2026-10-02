@@ -103,6 +103,8 @@ const content = z
     status: z.enum(["draft", "needs_review"]),
     reviewCurrent: z.boolean().optional(),
     sourceEvidence: z.array(z.object({ id, url: safeUrl, title: z.string() }).strict()).optional(),
+    sourceCoverage: z.object({ pagesAvailable: z.number().int().nonnegative(), pagesUsed: z.number().int().nonnegative(), excerpts: z.boolean() }).strict()
+      .refine(value => value.pagesUsed <= value.pagesAvailable).optional(),
     derivedFrom: id.optional(),
     revisionInstructions: z.string().max(2000).optional(),
     requiresHumanReview: z.literal(true),

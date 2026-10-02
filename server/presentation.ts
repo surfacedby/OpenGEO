@@ -1,5 +1,5 @@
-import type { Job, Observation, PageEvidence } from "./contracts.js";
-import { portableJobResult } from "./portable-results.js";
+import type { Finding, Job, Observation, PageEvidence } from "./contracts.js";
+import { portableJobResult, completedMeasurement } from "./portable-results.js";
 
 export type SourceRow = {
   key: string;
@@ -48,6 +48,23 @@ export type Presentation = {
     noindex: number;
   };
 };
+
+/** Fresh plans replace unstarted suggestions; accepted work keeps its progress across rechecks. */
+export function currentFindings(findings: Finding[], jobs: Job[]) {
+  const audit = jobs.find(job => job.kind === 'audit' && job.status === 'completed');
+  const measurement = jobs.find(completedMeasurement);
+  const analysis = jobs.find(job => job.kind === 'diagnose' && job.status === 'completed');
+  const generations = new Map(jobs.map(job => [job.id, job]));
+  return findings.filter(finding => {
+    if (finding.status !== 'open') return true;
+    const job = generations.get(finding.jobId);
+    if (!job) return true;
+    if (job.kind === 'audit') return job.id === audit?.id;
+    if (job.kind === 'diagnose') return job.id === analysis?.id;
+    if (['measure', 'recheck'].includes(job.kind)) return job.id === measurement?.id;
+    return true;
+  });
+}
 
 /** Count answers rather than links: one answer citing a domain repeatedly is one observation. */
 export function sourceCoverage(observations: Observation[]) {
@@ -162,19 +179,19 @@ export function comparableHistory(jobs: Job[], measurement?: Job) {
   if (!current)
     return { history: [] as HistoryPoint[], historyScopeAvailable: false };
   const history = jobs
-    .filter((job) => job.status === "completed")
+    .filter(completedMeasurement)
     .flatMap((job) => {
       const result = portableJobResult(job);
       if (
         !result ||
         result.comparisonKey !== current.comparisonKey ||
-        !Number.isFinite(Date.parse(job.updatedAt))
+        !Number.isFinite(Date.parse(result.collectionCompletedAt ?? job.updatedAt))
       )
         return [];
       return [
         {
           jobId: job.id,
-          at: job.updatedAt,
+          at: result.collectionCompletedAt ?? job.updatedAt,
           collected: result.metrics.completed,
           requested: result.metrics.requested,
           missing: result.metrics.missing,

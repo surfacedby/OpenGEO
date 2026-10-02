@@ -11,6 +11,7 @@ import {
 import { SiteIcon } from "./SiteIcon";
 import { FileText, ListChecks, Braces } from "lucide-react";
 import type { Job, Observation } from "../server/contracts";
+import { completedMeasurement, measurementTime } from "../server/portable-results";
 import type {
   Presentation,
   PromptRow,
@@ -81,13 +82,13 @@ export function MeasurementScope({
       </span>
       <span>
         <CalendarDays size={14} />
-        {dateTime(measurement.updatedAt)}
+        {dateTime(measurementTime(measurement))}
       </span>
       {measurement.status !== "completed" && (
-        <span className="badge">{measurement.status}</span>
+        <span className="badge">{completedMeasurement(measurement) ? 'Answers ready' : ({ queued: 'Waiting to start', running: 'Collecting answers', paused: 'Paused', failed: 'Needs attention', cancelled: 'Stopped' } as Record<string, string>)[measurement.status] ?? measurement.status}</span>
       )}
       {missing > 0 && (
-        <span className="scope-missing">{missing} answers missing</span>
+        <span className={['queued', 'running', 'paused'].includes(measurement.status) ? '' : 'scope-missing'}>{missing} {['queued', 'running', 'paused'].includes(measurement.status) ? 'answers remaining' : 'answers missing'}</span>
       )}
       <details>
         <summary>
@@ -526,9 +527,11 @@ function SourceTableRow({
 export function PromptTable({
   rows,
   evidence,
+  collecting = false,
 }: {
   rows: PromptRow[];
   evidence: Evidence;
+  collecting?: boolean;
 }) {
   const [search, setSearch] = useState("");
   const shown = rows.filter((row) =>
@@ -579,8 +582,8 @@ export function PromptTable({
                     {row.collected}
                     {row.requested !== null ? " / " + row.requested : ""}
                     {row.missing !== null && row.missing > 0 && (
-                      <small className="scope-missing">
-                        {row.missing} missing
+                      <small className={collecting ? '' : 'scope-missing'}>
+                        {row.missing} {collecting ? 'remaining' : 'missing'}
                       </small>
                     )}
                   </td>
@@ -671,12 +674,14 @@ export function AnswerDistribution({
   requested,
   missing,
   evidence,
+  collecting = false,
 }: {
   presentation: Presentation;
   collected: number;
   requested: number;
   missing: number;
   evidence: Evidence;
+  collecting?: boolean;
 }) {
   const colors = { cited: "#0d6cf2", mentioned: "#087f76", absent: "#d99522" },
     circumference = 2 * Math.PI * 66;
@@ -765,7 +770,7 @@ export function AnswerDistribution({
         </div>
         <small>
           {missing
-            ? `${missing} missing. These are not counted as absent mentions.`
+            ? collecting ? `${missing} answers remaining. Results update as they arrive.` : `${missing} missing. These are not counted as absent mentions.`
             : "All requested answers were collected."}
         </small>
       </div>

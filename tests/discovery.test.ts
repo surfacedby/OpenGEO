@@ -15,6 +15,8 @@ import { jobInput, projectInput } from "../server/contracts.js";
 import { sitemapPages } from "../server/sitemap.js";
 import { connectionPage } from "../server/connection-page.js";
 import { consoleCapabilities } from "../server/console-capabilities.js";
+import { completedMeasurement } from "../server/portable-results.js";
+import { comparableHistory } from "../server/presentation.js";
 
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "opengeo-discovery-")), store = new Store(directory);
@@ -59,6 +61,7 @@ test("website suggestions use readable evidence, exclude brand-biased duplicates
     const result = f.store.job(job.id).result as any;
     assert.equal(result.questions.length, 1); assert.equal(result.questions[0].sources[0].url, f.page.url);
     assert.deepEqual(f.store.project(f.project.id).prompts, f.project.prompts);
+    f.store.updateJob(f.store.jobs(f.project.id).find(item => item.kind === 'audit')!.id, {status:'failed'});
     await f.runner.execute(f.store.job(job.id), f.project, new AbortController().signal);
     assert.equal(calls, 3, "Saved inventory, questions and review are not requested again after an interrupted response");
   } finally { globalThis.fetch = original; await f.close(); }
@@ -106,10 +109,39 @@ test("first checks discover competitors only from answer mentions with matching 
     quota = true; await f.runner.tick();
     assert.equal(f.store.job(job.id).status, "paused"); assert.equal(f.store.job(job.id).error, "quota");
     assert.equal(f.store.observations(f.project.id, job.id).length, 1);
+    assert.equal(completedMeasurement(f.store.job(job.id)), true);
+    assert.equal(comparableHistory(f.store.jobs(), f.store.job(job.id)).history.length, 1);
+    const findings = f.store.findings(f.project.id).filter(finding => finding.jobId === job.id).length;
     quota = false; f.runner.resume(job.id, false); await f.runner.tick();
     assert.equal(f.store.job(job.id).status, "completed"); assert.equal(calls, 3);
+    assert.equal(f.store.findings(f.project.id).filter(finding => finding.jobId === job.id).length, findings);
     assert.deepEqual((f.store.job(job.id).result as any).competitors.map((candidate: any) => candidate.domain), ["alternative.example"]);
     assert.deepEqual(f.store.project(f.project.id).competitors, [], "Candidates require user selection");
+  } finally { globalThis.fetch = original; await f.close(); }
+});
+
+test("competitor analysis checkpoints bounded batches and does not replay saved answers or completed analysis", async () => {
+  const f = fixture(), original = globalThis.fetch;
+  const questions = Array.from({ length: 4 }, (_, index) => "Which support tools work for a team of " + (index + 1) + " people?");
+  f.store.updateProject(f.project.id, { ...f.project, prompts: questions });
+  let answers = 0, analysis = 0, quota = true;
+  globalThis.fetch = (async (url, init) => {
+    if (String(url).endsWith("/models")) return json({ models: [{ slug: "fixture-model", display_name: "Fixture model", visibility: "list", context_window: 32768 }] });
+    const request = JSON.parse(init!.body as string);
+    if (request.tools) { answers++; return stream("Alternative supports small teams. " + "Evidence about customer support. ".repeat(350), [{ type: "url_citation", url: "https://alternative.example/help" }]); }
+    const input = JSON.parse(request.input[0].content); analysis++;
+    assert.ok(Buffer.byteLength(JSON.stringify(input.answers), "utf8") <= 18000);
+    if (analysis === 2 && quota) return new Response(JSON.stringify({ error: { code: "usage_limit" } }), { status: 429 });
+    return stream(JSON.stringify({ competitors: [{ name: "Alternative", domain: "alternative.example", observationIds: input.answers.map((answer: any) => answer.id) }] }));
+  }) as typeof fetch;
+  try {
+    const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: "measure", provider: "chatgpt", discoverCompetitors: true }), "batched-competitors");
+    await f.runner.tick();
+    assert.equal(f.store.job(job.id).status, "paused"); assert.equal(answers, 4);
+    assert.equal(f.store.step(job.id, "competitors:0")?.state, "done");
+    quota = false; f.runner.resume(job.id, false); await f.runner.tick();
+    assert.equal(f.store.job(job.id).status, "completed"); assert.equal(answers, 4); assert.equal(analysis, 5);
+    assert.equal((f.store.job(job.id).result as any).competitors.length, 1);
   } finally { globalThis.fetch = original; await f.close(); }
 });
 
