@@ -340,8 +340,27 @@ try {
     .getByRole("button", { name: "Edit questions", exact: true })
     .click();
   await page
-    .getByRole("textbox", { name: "Customer questions", exact: true })
+    .getByRole("textbox", { name: "Question 1", exact: true })
     .waitFor();
+  assert.deepEqual(
+    await page.locator(".inline-question").allTextContents(),
+    prompts,
+  );
+  const editedQuestion = "Synthetic review: find useful documentation examples";
+  await page.getByRole("textbox", { name: "Question 1", exact: true }).fill(editedQuestion);
+  await page.getByRole("checkbox", { name: "Include question 4", exact: true }).uncheck();
+  await page.getByRole("button", { name: "Save questions", exact: true }).click();
+  await page.getByText("Questions and website details saved.", { exact: true }).waitFor();
+  assert.deepEqual(runtime.store.project(project.id).prompts, [
+    editedQuestion,
+    prompts[1],
+    prompts[2],
+  ]);
+  assert.deepEqual(runtime.store.project(project.id).competitors, [
+    "iana.org",
+    "w3.org",
+    "example.net",
+  ]);
   const empty = runtime.store
     .projects()
     .find((item) => item.brand === "Empty UX test")!;

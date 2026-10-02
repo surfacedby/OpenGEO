@@ -217,7 +217,8 @@ export function App() {
     else action();
   }
   const changePage = (label: string) => {
-    if (page !== label) navigate(() => { setPage(label); setQuery(""); setEvidenceFilter(null); });
+    if (page === label) mainRef.current?.scrollTo(0, 0);
+    else navigate(() => { setPage(label); setQuery(""); setEvidenceFilter(null); });
   };
   const openConnections = () => navigate(() => { setPage("Settings"); setQuery(""); setEvidenceFilter(null); setConnectionsRequest(value => value + 1); });
   const openEvidence = (ids: string[], label: string) => navigate(() => {
