@@ -47,6 +47,7 @@ export async function createApp(
   onConnected?: () => void,
 ) {
   const app = Fastify({ logger: false, bodyLimit: 20_000_000 });
+  const sessionCookie = "opengeo_session_" + createHash("sha256").update(token).digest("hex").slice(0, 16);
   const siteIcons = new SiteIcons();
   const usage = new UsageSharing(store);
   store.onJobCompleted = (kind, provider) => { if (kind !== "discover") usage.record(({ audit: "audit_completed", measure: "visibility_completed", recheck: "recheck_completed", diagnose: "analysis_completed", content: "content_created", revise: "content_revised" } as const)[kind], kind === "audit" ? null : provider ?? null); };
@@ -96,7 +97,7 @@ export async function createApp(
     const cookie = String(req.headers.cookie ?? "")
       .split(";")
       .map((c) => c.trim())
-      .find((c) => c.startsWith("opengeo_session="))
+      .find((c) => c.startsWith(sessionCookie + "="))
       ?.split("=")[1];
     const provided =
       req.headers.authorization?.replace(/^Bearer /, "") ?? cookie ?? "";
@@ -131,7 +132,7 @@ export async function createApp(
     usage.record("workspace_opened", null, true);
     res.header(
       "Set-Cookie",
-      "opengeo_session=" + token + "; HttpOnly; SameSite=Strict; Path=/",
+      sessionCookie + "=" + token + "; HttpOnly; SameSite=Strict; Path=/",
     );
     res.header("Cache-Control", "no-store");
     return { product: identity.name };
