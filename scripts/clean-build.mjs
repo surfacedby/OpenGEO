@@ -1,7 +1,9 @@
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, mkdtempSync, mkdirSync, copyFileSync, rmSync } from 'node:fs';
 import { resolve, dirname, relative, isAbsolute } from 'node:path';
+import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import identity from '../brand/identity.json' with { type: 'json' };
+import { nativeFiles } from './native-debug-paths.mjs';
 
 // Build children receive only system paths, never provider or production configuration.
 const systemNames = new Set(['PATH', 'PATHEXT', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'TEMP', 'TMP', 'USERPROFILE', 'HOME', 'APPDATA', 'LOCALAPPDATA', 'PROGRAMDATA', 'PROGRAMFILES', 'PROGRAMFILES(X86)', 'SYSTEMDRIVE', 'NUMBER_OF_PROCESSORS', 'PSMODULEPATH']);
@@ -38,8 +40,33 @@ run('typescript', 'tsc', ['--noEmit']);
 run('vite', 'vite', ['build']);
 run('tsup', 'tsup', ['server/main.ts', 'server/cli.ts', 'server/mcp.ts', '--format', 'esm', '--platform', 'node', '--out-dir', 'dist-server', '--external', 'better-sqlite3']);
 if (desktop) {
-  for (const script of ['prepare-browser.mjs', 'prepare-native.mjs'])
-    execFileSync(process.execPath, [resolve('scripts', script)], { env: environment, stdio: 'inherit' });
-  run('electron-builder', 'electron-builder', ['--' + target, '--' + architecture, ...(process.argv.includes('--desktop-installer') ? [] : ['--dir']), '--config.directories.output=' + output]);
+  // Electron packaging must leave the source installation's Node runtime usable.
+  const moduleRoot = resolve('node_modules/better-sqlite3');
+  const original = ['build/Release', 'bin'].flatMap(directory => nativeFiles(resolve(moduleRoot, directory)));
+  const backup = mkdtempSync(resolve(tmpdir(), 'opengeo-native-restore-'));
+  let restored = true;
+  try {
+    for (const file of original) {
+      const saved = resolve(backup, relative(moduleRoot, file));
+      mkdirSync(dirname(saved), { recursive: true });
+      copyFileSync(file, saved);
+    }
+    try {
+      for (const script of ['prepare-browser.mjs', 'prepare-native.mjs'])
+        execFileSync(process.execPath, [resolve('scripts', script)], { env: environment, stdio: 'inherit' });
+      run('electron-builder', 'electron-builder', ['--' + target, '--' + architecture, ...(process.argv.includes('--desktop-installer') ? [] : ['--dir']), '--config.directories.output=' + output]);
+    } finally {
+      restored = false;
+      for (const file of original) {
+        mkdirSync(dirname(file), { recursive: true });
+        copyFileSync(resolve(backup, relative(moduleRoot, file)), file);
+      }
+      restored = true;
+    }
+  } finally {
+    if (dirname(backup) !== resolve(tmpdir())) throw new Error('Native restore cleanup escaped its temporary directory.');
+    if (restored) rmSync(backup, { recursive: true, force: true });
+    else console.error('Source native modules need recovery from ' + backup);
+  }
 }
 console.log(identity.name + ' built with permitted system settings only.');
