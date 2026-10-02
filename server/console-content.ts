@@ -59,9 +59,15 @@ export async function consoleContent(runner: Runner, job: Job, project: Project,
   const completed = runner.store.step(job.id, "content-result");
   if (completed?.state === "done") return JSON.parse(completed.body!);
   if (job.kind !== "content") throw new ProviderError("capability", "Choose ChatGPT or OpenRouter to revise an existing draft.");
-  const capability = consoleCapabilities((await runner.providers.console("/capabilities", undefined, undefined, signal)).data);
-  if (!capability.content_available || !capability.operations.includes("content"))
+  const submitted = runner.store.step(job.id, "console-content-job")?.state === "done";
+  const savedCapability = runner.store.step(job.id, "console-content-capabilities");
+  // Stopping new purchases must not prevent collection of an existing reservation.
+  const capability = submitted
+    ? savedCapability?.body ? consoleCapabilities(JSON.parse(savedCapability.body)) : null
+    : consoleCapabilities((await runner.providers.console("/capabilities", undefined, undefined, signal)).data);
+  if (!submitted && (!capability?.content_available || !capability.operations.includes("content")))
     throw new ProviderError("capability", "Content is unavailable on this SurfacedBy connection. Choose ChatGPT or OpenRouter.");
+  if (!submitted) runner.store.setStep(job.id, "console-content-capabilities", "done", capability);
   const domain = await runner.once(job, "console-domain", async () => {
     const domains = await runner.consolePages("/domains", signal);
     return domains.find(row => row.domain === project.domain) ?? (await runner.providers.console("/domains", { domain: project.domain }, job.id + ":domain", signal)).data;
@@ -83,7 +89,6 @@ export async function consoleContent(runner: Runner, job: Job, project: Project,
   const quote = estimate.parse(await runner.once(job, "console-content-estimate", async () =>
     estimate.parse((await runner.providers.console("/domains/" + domainId + "/content/estimates/content", input, job.id + ":estimate", signal)).data)));
   if (quote.domain_id !== domainId) throw new ProviderError("invalid_response", "The estimate does not belong to this website. No draft was submitted.");
-  const submitted = runner.store.step(job.id, "console-content-job")?.state === "done";
   if (!submitted) {
     if (Date.parse(quote.expires_at) <= Date.now()) throw new ProviderError("estimate_expired", "The draft estimate has expired. Start a new draft for a current price; no job was submitted.");
     if (!quote.estimated_credits || quote.estimated_credits * 0.1 > job.maxCostUsd + 1e-9)
@@ -128,7 +133,7 @@ export async function consoleContent(runner: Runner, job: Job, project: Project,
         evidenceIds: sources.filter(source => issue.evidence_urls.includes(source.url)).map(source => source.id) })) },
     reviewCurrent: true, requiresHumanReview: true,
     status: output.review.issues.length || !output.review.coverage_complete ? "needs_review" : "draft",
-    createdAt: new Date().toISOString(), model: capability.models.find(model => model.operations.includes("content"))?.id ?? "managed" };
+    createdAt: new Date().toISOString(), model: capability?.models.find(model => model.operations.includes("content"))?.id ?? "managed" };
   runner.store.db.transaction(() => {
     runner.store.put("content", project.id, job.id, doc);
     runner.store.setStep(job.id, "content-result", "done", doc);

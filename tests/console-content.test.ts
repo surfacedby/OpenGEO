@@ -28,7 +28,7 @@ test("managed drafts preserve approved quotes, survive interrupted collection, s
   store.updateJob(audit.id, { status: "completed" });
   const domainId = randomUUID(), quoteId = randomUUID(), remoteId = randomUUID();
   const requests: { path: string; body: any; identity?: string }[] = [];
-  let finished = false, cancelling = false;
+  let finished = false, cancelling = false, available = true, expired = false;
   const remote = () => ({ id: remoteId, status: finished ? cancelling ? "cancelled" : "completed" : "waiting_reconciliation",
     estimated_credits: 4, cancel_requested: cancelling,
     receipt: finished ? { status: cancelling ? "cancelled" : "completed", charged_credits: 2, refunded_credits: 2 } : null });
@@ -39,13 +39,13 @@ test("managed drafts preserve approved quotes, survive interrupted collection, s
     requests.push({ path, body: body ? JSON.parse(body) : undefined, identity: request.headers["idempotency-key"] as string | undefined });
     assert.equal(request.headers["x-api-key"], "synthetic-console-credential");
     let data: unknown;
-    if (path === "/capabilities") data = { platforms: [], operations: ["content"], content_available: true, models: [{ id: "managed-model", operations: ["content"] }] };
+    if (path === "/capabilities") data = { platforms: [], operations: available ? ["content"] : [], content_available: available, models: [{ id: "managed-model", operations: ["content"] }] };
     else if (path === "/domains") data = [{ id: domainId, domain: project.domain }];
     else if (path.includes("/estimates/")) {
       assert.equal(requests.at(-1)!.body.locale, "fr-FR");
       assert.equal(requests.at(-1)!.body.content_type, "blog_post");
       assert.deepEqual(requests.at(-1)!.body.source_urls, ["https://example.com/"]);
-      data = { id: quoteId, domain_id: domainId, operation: "content", estimated_credits: 4, expires_at: new Date(Date.now() + 3600000).toISOString() };
+      data = { id: quoteId, domain_id: domainId, operation: "content", estimated_credits: 4, expires_at: new Date(Date.now() + (expired ? -3600000 : 3600000)).toISOString() };
     } else if (path === "/content/jobs") data = remote();
     else if (path.endsWith("/cancel")) { cancelling = true; data = remote(); }
     else if (path.endsWith("/results")) data = { job: remote(), brief: "Explain reports for small teams.", draft: { title: "Reports", markdown: "# Rapports\n\nCréez un rapport utile.", html: "<script>private-fixture</script>" },
@@ -79,7 +79,7 @@ test("managed drafts preserve approved quotes, survive interrupted collection, s
     const submission = requests.find(request => request.path === "/content/jobs")!;
     assert.equal(submission.identity, job.id);
     assert.deepEqual(submission.body, { estimate_id: quoteId, request_key: job.id, approved_credits: 6 });
-    finished = true; runner.resume(job.id, false); await runner.tick();
+    finished = true; available = false; runner.resume(job.id, false); await runner.tick();
     assert.equal(store.job(job.id).status, "completed");
     assert.equal(store.job(job.id).spentUsd, 0.2);
     assert.equal(store.job(job.id).costBasis, "reported");
@@ -96,6 +96,12 @@ test("managed drafts preserve approved quotes, survive interrupted collection, s
     assert.equal(draft.requiresHumanReview, true);
     assert.equal(draft.sourceEvidence[0].url, "https://example.com/");
     assert.equal(draft.review.issues[0].evidenceIds[0], draft.sourceEvidence[0].id);
+    const unavailable = store.enqueue(jobInput.parse({ projectId: project.id, kind: "content", provider: "console", topic: "How can I share reports?", maxCostUsd: 0.6 }), "unavailable-managed-draft");
+    await runner.tick();
+    assert.equal(store.job(unavailable.id).error, "capability");
+    assert.equal(store.job(unavailable.id).spentUsd, 0);
+    assert.equal(requests.filter(request => request.path === "/content/jobs").length, 1);
+    await runner.cancel(unavailable.id); available = true;
     const cancelled = store.enqueue(jobInput.parse({ projectId: project.id, kind: "content", provider: "console", topic: "How can I share reports?", maxCostUsd: 0.6 }), "cancelled-managed-draft");
     finished = false; await runner.tick(); runner.resume(cancelled.id, true); await runner.tick(); await runner.cancel(cancelled.id);
     assert.equal(store.job(cancelled.id).error, "cancel_remote");
@@ -107,11 +113,17 @@ test("managed drafts preserve approved quotes, survive interrupted collection, s
     cancelling = false;
     const scheduler = new Scheduler(store), scheduled = scheduler.add({ job: { projectId: project.id, kind: "content", provider: "console", topic: "How can I share reports?", maxCostUsd: 0.6 }, frequency: "daily", hour: 9, timezone: "UTC", monthlyBudgetUsd: 0.6 });
     scheduler.tick(new Date(scheduled.nextAt)); await runner.tick();
-    const scheduledJob = store.jobs(project.id).find(item => item.kind === "content" && ![job.id, cancelled.id].includes(item.id))!;
+    const scheduledJob = store.jobs(project.id).find(item => item.kind === "content" && ![job.id, cancelled.id, unavailable.id].includes(item.id))!;
     assert.equal(scheduledJob.status, "completed");
     assert.equal(requests.filter(request => request.path === "/content/jobs").length, 3);
     scheduler.tick(new Date(scheduler.list()[0].nextAt));
     assert.equal(scheduler.list()[0].lastError, "Monthly budget is insufficient for the next run.");
+    expired = true;
+    const stale = store.enqueue(jobInput.parse({ projectId: project.id, kind: "content", provider: "console", topic: "How can I share reports?", maxCostUsd: 0.6 }), "expired-managed-draft");
+    await runner.tick();
+    assert.equal(store.job(stale.id).error, "estimate_expired");
+    assert.equal(store.job(stale.id).spentUsd, 0);
+    assert.equal(requests.filter(request => request.path === "/content/jobs").length, 3);
   } finally {
     globalThis.fetch = original; connections.close(); await runner.stop(); store.close();
     server.closeAllConnections(); server.close(); await once(server, "close");
