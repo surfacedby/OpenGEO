@@ -2,6 +2,17 @@ export type ValidationField = { path: (string | number)[]; message: string };
 export class RequestError extends Error {
   constructor(message: string, readonly fields: ValidationField[] = []) { super(message); this.name = "RequestError"; }
 }
+let sessionGeneration = 0;
+let sessionRefresh: Promise<void> | undefined;
+function refreshSession(): Promise<void> {
+  if (!sessionRefresh) {
+    sessionRefresh = fetch("/api/session", { credentials: "same-origin" }).then(response => {
+      if (!response.ok) throw new Error("Local session could not be renewed");
+      sessionGeneration++;
+    }).finally(() => { sessionRefresh = undefined; });
+  }
+  return sessionRefresh;
+}
 export async function api<T = any>(
   path: string,
   body?: unknown,
@@ -14,7 +25,8 @@ export async function api<T = any>(
       : "The workspace did not confirm this schedule. Check your schedules or retry with the same settings."
     : "Your local workspace could not be reached. Keep the application running and try again.";
   let response: Response;
-  try { response = await fetch("/api" + path, {
+  const generation = sessionGeneration;
+  const options: RequestInit = {
     method,
     credentials: "same-origin",
     headers: {
@@ -24,7 +36,16 @@ export async function api<T = any>(
         : {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
-  }); } catch { throw new Error(unavailable); }
+  };
+  try {
+    response = await fetch("/api" + path, options);
+    // Local authorization runs before handlers, so a refused request has not
+    // started work. Other failures retain the caller's explicit retry flow.
+    if (response.status === 401 && path !== "/session") {
+      if (generation === sessionGeneration) await refreshSession();
+      response = await fetch("/api" + path, options);
+    }
+  } catch { throw new Error(unavailable); }
   let data;
   try { data = await response.json(); } catch { throw new Error(unavailable); }
   if (!response.ok) {
