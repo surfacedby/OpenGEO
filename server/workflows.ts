@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { withoutEvidenceList } from './finding-text.js';
 import { Store } from "./storage.js";
 import { Providers, safeCitations, type Completion } from "./providers.js";
 import { crawl, auditFindings } from "./audit.js";
@@ -531,7 +532,7 @@ export class Runner {
               projectId: project.id,
               jobId: job.id,
               title: r.title,
-              description: r.description,
+              description: withoutEvidenceList(r.description, r.evidenceIds),
               priority: r.priority,
               targetUrl: sources.find((p) => p.id === r.targetPageId)!.url,
               evidenceIds: r.evidenceIds,

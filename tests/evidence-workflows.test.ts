@@ -15,6 +15,7 @@ import { prompts } from '../server/prompts.js';
 import { contentSources } from '../server/evidence-context.js';
 import { exportProject } from '../server/export.js';
 import { importProject, previewImport } from '../server/import.js';
+import { withoutEvidenceList } from '../server/finding-text.js';
 
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), 'opengeo-evidence-')), store = new Store(directory);
@@ -34,6 +35,16 @@ function fixture() {
 }
 const json = (value:unknown) => new Response(JSON.stringify(value), {headers:{'Content-Type':'application/json'}});
 const stream = (text:string) => new Response('data: ' + JSON.stringify({type:'response.completed',response:{status:'completed',output:[{content:[{type:'output_text',text}]}]}}) + '\n\n');
+
+test('reader explanations omit only a trailing list of their verified structured evidence references', () => {
+  const page = randomUUID(), answer = randomUUID();
+  assert.equal(withoutEvidenceList('Explain the supported workflow. Evidence: ' + page + ', ' + answer + '.', [page, answer]), 'Explain the supported workflow.');
+  assert.equal(withoutEvidenceList('Sources: ' + page, [page]), '');
+  const prose = 'The resource discusses sources and evidence without an identifier list.';
+  assert.equal(withoutEvidenceList(prose, [page]), prose);
+  const unknown = 'Review the evidence. Evidence: ' + randomUUID();
+  assert.equal(withoutEvidenceList(unknown, [page]), unknown);
+});
 
 test('related same-page tasks merge evidence and instructions without merging distinct work', () => {
   const task = { targetPageId: 'page-one', title: 'Explain the supported workflow', priority: 'medium' as const, evidenceIds: ['page-one', 'answer-one'], steps: ['Check the current explanation.', 'Add the supported example.'], opportunity: { type: 'page_update' } };
