@@ -18,15 +18,21 @@ export function evidenceBatches<T>(items: T[], maximumBytes: number): T[][] {
 
 /** Source selection favors the requested subject while retaining the site's primary context. */
 export function contentSources(pages: PageEvidence[], topic: string, maximumBytes: number) {
-  const terms = [...new Set(topic.toLocaleLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? [])];
-  const score = (page: PageEvidence) => {
-    const heading = (page.title + " " + page.h1.join(" ")).toLocaleLowerCase();
-    const text = page.text.toLocaleLowerCase();
-    return terms.reduce((total, term) => total + (heading.includes(term) ? 4 : 0) + (text.includes(term) ? 1 : 0), 0)
-      + (new URL(page.url).pathname === "/" ? 2 : 0);
-  };
   const readable = pages.filter(page => page.status >= 200 && page.status < 300 && !page.noindex && page.text.trim());
-  const ranked = [...readable].sort((a, b) => score(b) - score(a) || a.url.localeCompare(b.url));
+  const segmenter = new Intl.Segmenter(undefined, { granularity: "word" });
+  const words = (text: string) => new Set([...segmenter.segment(text.normalize("NFKC").toLowerCase())]
+    .filter(part => part.isWordLike).map(part => part.segment));
+  const terms = [...words(topic)];
+  const documents = readable.map(page => ({ page, heading: words(page.title + " " + page.h1.join(" ")), text: words(page.text) }));
+  // Corpus frequency discounts repeated navigation and common query words without a niche or language blacklist.
+  const weights = new Map(terms.map(term => {
+    const frequency = documents.filter(doc => doc.heading.has(term) || doc.text.has(term)).length;
+    return [term, Math.log(1 + (documents.length - frequency + 0.5) / (frequency + 0.5))];
+  }));
+  const ranked = documents.map(doc => ({ page: doc.page, score: terms.reduce((total, term) =>
+    total + weights.get(term)! * ((doc.heading.has(term) ? 4 : 0) + (doc.text.has(term) ? 1 : 0)), 0)
+    + (new URL(doc.page.url).pathname === "/" ? 0.5 : 0) }))
+    .sort((a, b) => b.score - a.score || a.page.url.localeCompare(b.page.url)).map(doc => doc.page);
   const sources: { id: string; url: string; title: string; text: string }[] = [];
   let remaining = maximumBytes - 2;
   for (const page of ranked) {
