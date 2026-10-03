@@ -356,10 +356,10 @@ export function VisibilityChart({
         <div className="analytics-empty">
           <p>
             {presentation.historyScopeAvailable
-              ? "No completed checks in this collection scope yet."
-              : "Finish a visibility check to start your history."}
+              ? "No completed checks match these settings yet."
+              : "Finish the current check to see its comparable history."}
           </p>
-          <span>Comparable checks appear here as you recheck.</span>
+          <span>Previous checks are saved in Measurement history.</span>
         </div>
       )}
     </section>
