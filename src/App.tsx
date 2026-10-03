@@ -247,7 +247,9 @@ export function App() {
   const audited = !!w?.pages.length, measured = !!w?.metrics.completed;
   const analysisMeasurement = w?.jobs.find(completedMeasurement);
   const activeMeasurement = w?.jobs.find(job => ['measure', 'recheck'].includes(job.kind) && ['queued', 'running', 'paused'].includes(job.status) && !completedMeasurement(job));
-  const analyzed = !!analysisMeasurement && w!.jobs.some(job => job.kind === 'diagnose' && job.status === 'completed' && ((job.result as { measurementJobId?: string } | null)?.measurementJobId ? (job.result as { measurementJobId: string }).measurementJobId === analysisMeasurement.id : job.createdAt >= analysisMeasurement.createdAt));
+  const completedAnalysis = analysisMeasurement && w!.jobs.find(job => job.kind === 'diagnose' && job.status === 'completed' && ((job.result as { measurementJobId?: string } | null)?.measurementJobId ? (job.result as { measurementJobId: string }).measurementJobId === analysisMeasurement.id : job.createdAt >= analysisMeasurement.createdAt));
+  const analyzed = !!completedAnalysis;
+  const omittedSuggestions = (completedAnalysis?.result as { omittedSuggestions?: number } | null)?.omittedSuggestions ?? 0;
   const activeAnalysis = w?.jobs.find(job => job.kind === 'diagnose' && ['queued', 'running'].includes(job.status));
   const pausedAnalysis = w?.jobs.find(job => job.kind === 'diagnose' && job.status === 'paused' && (!w.measurement || job.createdAt >= w.measurement.createdAt));
   const canAnalyze = connected.chatgpt || connected.openrouter;
@@ -650,6 +652,7 @@ export function App() {
               )}
               {page === "Opportunities" && <>
                 {analysisMeasurement && <p className="small">Recommendations use the completed visibility check from {new Date(analysisMeasurement.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} and your audited pages.</p>}
+                {omittedSuggestions > 0 && <p className="small">{omittedSuggestions} {omittedSuggestions === 1 ? 'suggestion was' : 'suggestions were'} left out because the supporting evidence could not be verified.</p>}
                 {(analyzed || opportunities.length > 0) && <div className="opportunity-summary" aria-label="Opportunity summary">
                   <div><Lightbulb size={20} /><strong>{findingGroups(opportunities.filter(f => f.status !== 'done')).length}</strong><span>Open opportunities</span></div>
                   <div><ListChecks size={20} /><strong>{findingGroups(opportunities.filter(f => f.priority === 'high' && f.status !== 'done')).length}</strong><span>High priority</span></div>

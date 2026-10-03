@@ -294,3 +294,34 @@ test('opportunities review relevance, separate new resources and preserve draft 
     assert.deepEqual(f.store.findings(imported.project.id)[0].opportunity, findings[0].opportunity);
   } finally { globalThis.fetch = original; await f.close(); }
 });
+
+test('an unverifiable suggestion is excluded without discarding supported work or replaying its receipt', async () => {
+  const f = fixture(), original = globalThis.fetch;
+  let calls = 0, proposed = false;
+  globalThis.fetch = (async (url, init) => {
+    if (String(url).endsWith('/models')) return json({ models: [{ slug: 'fixture', display_name: 'Fixture', visibility: 'list', context_window: 200000 }] });
+    calls++;
+    const request = JSON.parse(init!.body as string), input = JSON.parse(request.input[0].content);
+    if (request.instructions === prompts.contentGaps) return stream(JSON.stringify({ recommendations: [], uncertainties: [] }));
+    if (request.instructions === prompts.opportunityReview) return stream(JSON.stringify({ accepted: input.candidates.map((candidate:any) => ({ index: candidate.index, title: candidate.title, description: candidate.description, steps: candidate.steps, opportunity: { type: 'page_update', pageLabel: 'Guide', pageTitle: 'Support workspace', benefit: 'Answer the saved customer question.' } })) }));
+    assert.equal(request.instructions, prompts.diagnose);
+    if (proposed) return stream(JSON.stringify({ recommendations: [], uncertainties: [] }));
+    proposed = true;
+    return stream(JSON.stringify({ recommendations: input.pages.slice(0, 1).map((page:any) => ({ title: 'Clarify the supported workflow', description: 'Explain the workspace for the observed customer need.', priority: 'medium', targetPageId: page.id, evidenceIds: [page.id, input.observations[0].id], steps: ['Check the existing workflow explanation.'] })).concat([{ title: 'Unsupported workflow change', description: 'A proposed change with an unverified reference.', priority: 'medium', targetPageId: input.pages[0].id, evidenceIds: ['unknown-reference', input.observations[0].id], steps: ['Review the proposed change.'] }]), uncertainties: [] }));
+  }) as typeof fetch;
+  try {
+    const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'diagnose', provider: 'chatgpt' }), 'partial-supported-analysis');
+    await f.runner.tick();
+    assert.equal(f.store.job(job.id).status, 'completed', f.store.job(job.id).progress);
+    const findings = f.store.findings(f.project.id);
+    assert.equal(findings.length, 1);
+    assert.ok(findings[0].evidenceIds.every(id => id !== 'unknown-reference'));
+    const result = f.store.job(job.id).result as any;
+    assert.equal(result.omittedSuggestions, 1);
+    assert.ok(result.uncertainties.some((note:string) => note.includes('supporting evidence could not be verified')));
+    const completedCalls = calls;
+    await f.runner.execute(f.store.job(job.id), f.project, new AbortController().signal);
+    assert.equal(calls, completedCalls);
+    assert.equal(f.store.findings(f.project.id).length, 1);
+  } finally { globalThis.fetch = original; await f.close(); }
+});

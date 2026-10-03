@@ -458,20 +458,18 @@ export class Runner {
           ...sources.map((p) => p.id),
           ...context.observations.map((o) => o.id),
         ]);
-        for (const recommendation of result.recommendations) {
+        let omittedSuggestions = 0;
+        result.recommendations = result.recommendations.filter(recommendation => {
           const page = sources.find((p) => p.id === recommendation.targetPageId);
           if (
             !page ||
             recommendation.evidenceIds.some((id) => !allowed.has(id)) ||
             (evidence.version === 2 && (!recommendation.evidenceIds.includes(page.id) ||
               !recommendation.evidenceIds.some(id => context.observations.some(answer => answer.id === id))))
-          )
-            throw new ProviderError(
-              "evidence",
-              "Analysis referenced unknown evidence. Review the saved analysis before continuing.",
-              true,
-            );
-        }
+          ) { omittedSuggestions++; return false; }
+          return true;
+        });
+        if (omittedSuggestions) result.uncertainties.push(omittedSuggestions + ' suggestions were left out because their supporting evidence could not be verified.');
         if (result.recommendations.length > 1) {
           const candidates = result.recommendations.map((item, index) => ({
             index, title: item.title, summary: item.description.slice(0, 200), type: item.opportunity?.type,
@@ -503,6 +501,7 @@ export class Runner {
         }
         const receipt = {
           findings: result.recommendations.length,
+          omittedSuggestions,
           uncertainties: result.uncertainties,
           pagesReviewed: sources.length,
           measurementJobId: evidence.measurementJobId,
