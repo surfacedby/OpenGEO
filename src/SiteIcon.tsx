@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 /** The local backend enforces website scope and the saved icon lookup preference. */
 export function SiteIcon({
@@ -10,12 +10,12 @@ export function SiteIcon({
   domain: string;
   size?: number;
 }) {
+  return <SiteImage key={projectId + ':' + domain} projectId={projectId} domain={domain} size={size} />;
+}
+
+function SiteImage({ projectId, domain, size }: { projectId: string; domain: string; size: number }) {
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  useEffect(() => {
-    setFailed(false);
-    setLoaded(false);
-  }, [projectId, domain]);
   return (
     <span
       className="site-icon"
@@ -39,6 +39,7 @@ export function SiteIcon({
           width={size - 6}
           height={size - 6}
           loading="lazy"
+          style={{ opacity: loaded ? 1 : 0 }}
           onLoad={() => setLoaded(true)}
           onError={() => {
             setFailed(true);
