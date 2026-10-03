@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Job, Model, Project, DiscoveredWebsite } from "./contracts.js";
+import type { Job, Model, Project, DiscoveredWebsite, Observation } from "./contracts.js";
 import { ProviderError } from "./contracts.js";
 import type { Runner } from "./workflows.js";
 import { parseJson } from "./workflows.js";
@@ -131,6 +131,11 @@ export async function discoverCompetitors(runner: Runner, job: Job, project: Pro
     const data = suggestedCompetitors.parse(parseJson(await runner.llmPass(job, model, "competitors", { ...context, answers }, signal, legacy ? "competitors" : "competitors:" + index)));
     candidates.push(...data.competitors);
   }
+  return confirmedWebsites(project, observations, candidates);
+}
+
+/** Cited evidence determines eligible roles; a reference cannot erase a competing-offering explanation. */
+export function confirmedWebsites(project: Pick<Project, 'domain'>, observations: Observation[], candidates: z.infer<typeof suggestedCompetitors>['competitors']) {
   const confirmed = new Map<string, DiscoveredWebsite>();
   for (const candidate of candidates) {
     let domain: string;
