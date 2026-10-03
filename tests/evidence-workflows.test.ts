@@ -136,6 +136,40 @@ test('content uses bounded relevant evidence and revisions preserve every origin
   } finally {globalThis.fetch=original;await f.close();}
 });
 
+test('a homepage summary is valid target evidence and receives its full excerpt during review', async () => {
+  const f = fixture(), original = globalThis.fetch;
+  for (const page of f.pages.slice(3)) f.store.db.prepare('DELETE FROM artifacts WHERE id=?').run(page.id);
+  const home = parsePage('https://example.com/', 200, '<title>Welcome</title><h1>Welcome</h1><p>' + 'A software business serves organizations with a shared workspace. '.repeat(170) + '</p>');
+  f.store.put('page', f.project.id, f.audit.id, home);
+  let proposed = false, reviewed = false;
+  globalThis.fetch = (async (url, init) => {
+    if (String(url).endsWith('/models')) return json({ models: [{ slug: 'fixture', display_name: 'Fixture', visibility: 'list', context_window: 50000 }] });
+    const request = JSON.parse(init!.body as string), input = JSON.parse(request.input[0].content);
+    if (request.instructions === prompts.contentGaps) return stream(JSON.stringify({ recommendations: [], uncertainties: [] }));
+    if (request.instructions === prompts.opportunityReview) {
+      assert.ok(input.pages.some((page:any) => page.id === home.id && page.text.length > input.siteOverview.text.length));
+      reviewed = true;
+      return stream(JSON.stringify({ accepted: [{ index: 0, title: 'Explain the supported workflow', description: 'Clarify how the workspace serves the observed need.', steps: ['Review the current workflow explanation.'], opportunity: { type: 'page_update', pageLabel: 'Homepage', pageTitle: 'Welcome', benefit: 'Help visitors evaluate the supported workflow.' } }] }));
+    }
+    assert.equal(request.instructions, prompts.diagnose);
+    assert.equal(input.siteOverview.id, home.id);
+    if (!proposed && !input.pages.some((page:any) => page.id === home.id)) {
+      assert.ok(!input.website.sources.some((page:any) => page.id === home.id));
+      proposed = true;
+      return stream(JSON.stringify({ recommendations: [{ title: 'Explain the supported workflow', description: 'Clarify how the workspace serves the observed need.', priority: 'medium', targetPageId: home.id, evidenceIds: [home.id, input.observations[0].id], steps: ['Review the current workflow explanation.'] }], uncertainties: [] }));
+    }
+    return stream(JSON.stringify({ recommendations: [], uncertainties: [] }));
+  }) as typeof fetch;
+  try {
+    const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'diagnose', provider: 'chatgpt' }), 'homepage-context');
+    await f.runner.tick();
+    assert.equal(f.store.job(job.id).status, 'completed', f.store.job(job.id).progress);
+    assert.equal(proposed, true);
+    assert.equal(reviewed, true);
+    assert.equal(f.store.findings(f.project.id)[0].targetUrl, home.url);
+  } finally { globalThis.fetch = original; await f.close(); }
+});
+
 test('opportunity drafts freeze their purpose, retain the target page across interruption, and preserve import and revision lineage', async () => {
   const f = fixture(), original = globalThis.fetch;
   const target = f.pages.at(-1)!;

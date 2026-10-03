@@ -146,8 +146,10 @@ export async function discoverCompetitors(runner: Runner, job: Job, project: Pro
     if (!evidence.length) continue;
     const prior = confirmed.get(domain);
     const role = prior?.role && candidate.role && prior.role !== candidate.role ? 'both' : candidate.role ?? prior?.role;
+    const reason = candidate.role === 'reference' && prior?.role && prior.role !== 'reference'
+      ? prior.reason ?? candidate.reason : candidate.reason ?? prior?.reason;
     confirmed.set(domain, { name: prior?.name ?? candidate.name, domain,
-      ...(role ? { role } : {}), ...(candidate.reason || prior?.reason ? { reason: candidate.reason ?? prior?.reason } : {}),
+      ...(role ? { role } : {}), ...(reason ? { reason } : {}),
       observationIds: [...new Set([...(prior?.observationIds ?? []), ...evidence.map(answer => answer.id)])] });
   }
   return [...confirmed.values()];

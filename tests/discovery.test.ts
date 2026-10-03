@@ -301,3 +301,31 @@ test('website discovery separates substitutes from references and check evidence
     } finally { await app.close(); }
   } finally { globalThis.fetch = original; await f.close(); }
 });
+
+test('a website with both roles retains the explanation of its competing offering', async () => {
+  const f = fixture(), original = globalThis.fetch;
+  const reason = 'Its support workspace is recommended for the same customer need.';
+  globalThis.fetch = (async (url, init) => {
+    if (String(url).endsWith('/models')) return json({ models: [{ slug: 'fixture-model', display_name: 'Fixture', visibility: 'list', context_window: 32768 }] });
+    const request = JSON.parse(init!.body as string);
+    if (request.tools) return stream('Alternative organizes customer questions and publishes workflow guidance.', [
+      { type: 'url_citation', url: 'https://alternative.example/help', title: 'Alternative' },
+    ]);
+    const input = JSON.parse(request.input[0].content), ids = input.answers.map((answer:any) => answer.id);
+    return stream(JSON.stringify({ competitors: [
+      { name: 'Alternative', domain: 'alternative.example', role: 'competitor', reason, observationIds: ids },
+      { name: 'Alternative', domain: 'alternative.example', role: 'reference', reason: 'Its documentation supports the workflow explanation.', observationIds: ids },
+    ] }));
+  }) as typeof fetch;
+  try {
+    const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'measure', provider: 'chatgpt', discoverCompetitors: true }), 'dual-role-explanation');
+    await f.runner.tick();
+    assert.equal(f.store.job(job.id).status, 'completed');
+    const result = f.store.job(job.id).result as any;
+    assert.equal(result.competitors.length, 1);
+    assert.equal(result.competitors[0].role, 'both');
+    assert.equal(result.competitors[0].reason, reason);
+    assert.deepEqual(result.references, result.competitors);
+    assert.deepEqual(result.competitors[0].observationIds, f.store.observations(f.project.id, job.id).map(answer => answer.id));
+  } finally { globalThis.fetch = original; await f.close(); }
+});

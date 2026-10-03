@@ -408,6 +408,7 @@ export class Runner {
           "Preparing recommendations (" + (index + 1) + " of " + batches.length + ")")));
           const contextPages = evidence.version === 2 ? (evidence.context.website as ReturnType<typeof contentSources>).sources : [];
           const pageIds = new Set([...batch, ...contextPages].map(page => page.id));
+          if (evidence.version === 2 && evidence.context.siteOverview?.id) pageIds.add(evidence.context.siteOverview.id);
           if (reviewed.recommendations.some(recommendation => !pageIds.has(recommendation.targetPageId)))
             throw new ProviderError("evidence", "Analysis referenced a page outside its reviewed evidence. The output is saved for review.");
           if (evidence.version === 2 && reviewed.recommendations.length) {
