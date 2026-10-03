@@ -554,8 +554,8 @@ export function App() {
                     />
                     <Metric
                       title={activeMeasurement ? 'Answers remaining' : 'Missing answers'}
-                      value={String(w.metrics.missing)}
-                      detail={activeMeasurement ? 'Saved as they arrive' : 'Not treated as absent mentions'}
+                      value={activeMeasurement && activeMeasurement.id !== w.measurement?.id ? 'Starting' : String(w.metrics.missing)}
+                      detail={activeMeasurement && activeMeasurement.id !== w.measurement?.id ? 'Previous results shown until answers arrive' : activeMeasurement ? 'Saved as they arrive' : 'Not treated as absent mentions'}
                     />
                     <Metric
                       title="Source links"
@@ -563,12 +563,13 @@ export function App() {
                       detail="Links returned with the answers"
                     />
                   </div>}
-                  {w.measurement && <><VisibilityChart presentation={w.presentation} /><PromptTable rows={w.presentation.prompts} collecting={!!activeMeasurement} evidence={openEvidence} /></>}
+                  {w.measurement && <><VisibilityChart presentation={w.presentation} /><PromptTable rows={w.presentation.prompts} collecting={activeMeasurement?.id === w.measurement.id} evidence={openEvidence} /></>}
                   <section className="panel">
                     <div className="panel-heading">
                       <h2>Measurement history</h2>
                       {measured && <button
                         className="text-button"
+                        disabled={!!activeMeasurement}
                         onClick={() => setJobDialog("recheck")}
                       >
                         Recheck <RefreshCw size={14} />
@@ -758,6 +759,7 @@ export function App() {
           initialTopic={contentTopic}
           finding={contentFinding}
           measurementJobId={w?.measurement?.id}
+          previousMeasurement={w?.jobs.find(completedMeasurement) ?? null}
           run={run}
           onStarted={job => { if (['content', 'revise'].includes(job.kind)) { setPage('Content'); setPendingContent({ projectId: p.id, jobId: job.id }); } }}
           close={() => { setJobDialog(null); setRevision(null); setContentFinding(null); }}
@@ -1015,6 +1017,7 @@ function JobDialog({
   initialTopic,
   finding,
   measurementJobId,
+  previousMeasurement,
   run,
   close,
   openConnections,
@@ -1027,6 +1030,7 @@ function JobDialog({
   initialTopic: string;
   finding: Finding | null;
   measurementJobId?: string;
+  previousMeasurement: Job | null;
   run: (f: () => Promise<unknown>) => Promise<void>;
   close: () => void;
   openConnections: () => void;
@@ -1040,12 +1044,14 @@ function JobDialog({
       : kind === "content"
         ? finding ? ["chatgpt", "openrouter"] : ["chatgpt", "console", "openrouter"]
         : ["chatgpt", "console", "dataforseo", "openrouter"];
+  const baseline = kind === 'recheck' ? previousMeasurement : null;
   const [provider, setProvider] = useState<Provider>(
-      choices.find((p) => connected[p]) ?? choices[0],
+      baseline?.provider ?? choices.find((p) => connected[p]) ?? choices[0],
     ),
     [models, setModels] = useState<Model[]>([]),
     [model, setModel] = useState(""),
-    [platform, setPlatform] = useState("chat_gpt"),
+    [platform, setPlatform] = useState(baseline?.platform ?? "chat_gpt"),
+    [webSearch, setWebSearch] = useState(baseline?.webSearch ?? true),
     [consolePlatforms, setConsolePlatforms] = useState<{ key: string; name: string; enabled: boolean }[]>([]),
     [loading, setLoading] = useState(false),
     [budget, setBudget] = useState(0),
@@ -1057,7 +1063,7 @@ function JobDialog({
   const submission = useRef<{ fingerprint: string; key: string } | null>(null);
   const feedback = useFormFeedback(), { setError } = feedback;
   useEffect(() => {
-    if (!connected[provider]) {
+    if (!connected[provider] && !baseline) {
       const available = choices.find(choice => connected[choice]);
       if (available) { setProvider(available); setError(""); }
     }
@@ -1082,21 +1088,22 @@ function JobDialog({
         }
         const enabled = (capability.platforms ?? []).filter((p: any) => p.enabled === true);
         setConsolePlatforms(enabled);
-        if (!enabled.some((p: any) => p.key === platform)) setPlatform(enabled[0]?.key ?? '');
+        if (!enabled.some((p: any) => p.key === platform)) setPlatform(baseline ? '' : enabled[0]?.key ?? '');
         if (!enabled.length) setDiscoveryError('No answer platforms are available on this connection.');
       }).catch((e) => { if (!stopped) setDiscoveryError(e.message); }).finally(() => { if (!stopped) setLoading(false); });
       return () => { stopped = true; };
     }
     if (provider === 'dataforseo' && !['chat_gpt', 'gemini', 'perplexity'].includes(platform)) {
-      setPlatform('chat_gpt');
+      setPlatform(baseline ? '' : 'chat_gpt');
       setLoading(false);
       return;
     }
+    if (!platform) { setLoading(false); return; }
     void api<Model[]>("/providers/" + provider + "/models?platform=" + platform)
       .then((ms) => {
         if (!stopped) {
           setModels(ms);
-          setModel(ms[0]?.id ?? "");
+          setModel(baseline ? provider === baseline.provider && platform === baseline.platform && ms.some(entry => entry.id === baseline.model) ? baseline.model! : '' : ms[0]?.id ?? "");
           if (!ms.length) setDiscoveryError("No supported models are available on this connection.");
         }
       })
@@ -1124,7 +1131,7 @@ function JobDialog({
               ? "Review competitor evidence"
             : kind === "diagnose"
               ? "Analyze your visibility evidence"
-              : "Measure AI visibility"
+              : kind === 'recheck' ? 'Recheck AI visibility' : "Measure AI visibility"
       }
       close={close}
       dismissible={!submitting}
@@ -1149,7 +1156,7 @@ function JobDialog({
               ...(kind === 'revise' ? { contentId: revision.id, revisionInstructions: d.get('instructions') } : {}),
               ...(kind === 'competitors' ? { measurementJobId } : {}),
               render: d.get("render") === "on",
-              webSearch: provider === "chatgpt" && ["measure", "recheck"].includes(kind) ? d.get("webSearch") === "on" : true,
+              webSearch: provider === "chatgpt" && ["measure", "recheck"].includes(kind) ? webSearch : true,
               maxPages: kind === "audit" ? Number(d.get("maxPages")) : 100,
               };
               const fingerprint = JSON.stringify(request);
@@ -1194,7 +1201,7 @@ function JobDialog({
             ].map(({ value, title, detail, Icon }) => <label key={value} className={contentMode === value ? 'selected' : ''}><input type="radio" name="contentMode" value={value} checked={contentMode === value} onChange={() => setContentMode(value)} /><Icon size={21} /><span><strong>{title}</strong><small>{detail}</small></span><Check size={16} aria-hidden="true" /></label>)}</fieldset>}
             <label>
               Connection
-              <Select label="Connection" {...feedback.field("provider")} value={provider} placeholder="Connect a provider in Settings" options={providerOptions(connected, choices)} onChange={(value) => { setProvider(value as Provider); setError(""); }} />
+              <Select label="Connection" {...feedback.field("provider")} value={provider} placeholder="Choose a connected provider" options={providerOptions(connected, choices)} onChange={(value) => { setProvider(value as Provider); setPlatform(value === baseline?.provider ? baseline.platform : 'chat_gpt'); setError(""); }} />
             </label>
             <p className="small">
               {kind === "competitors" ? "Reviews your saved answers and website evidence. No visibility questions are asked again. Your connection's usage limits or charges apply." : provider === "chatgpt"
@@ -1206,8 +1213,9 @@ function JobDialog({
                     : "Checks answers from your chosen model. OpenRouter usage charges apply."}
             </p>
             {!connected[provider] && (
-              <p role="alert">Connect this provider in Settings first.</p>
+              <p role="alert">{baseline ? 'The previous connection is unavailable. Reconnect it in Settings or choose another connection.' : 'Connect this provider in Settings first.'}</p>
             )}
+            {baseline && connected[provider] && !loading && !discoveryError && <p className="small" role="status">{provider === baseline.provider && platform === baseline.platform && (provider === 'console' || model === baseline.model) && (provider !== 'chatgpt' || webSearch === baseline.webSearch) ? 'Keeps the previous connection and answer settings. Changes to your questions or website settings start a separate comparison.' : !model && provider !== 'console' ? 'Choose an available model. Different answer settings start a separate comparison.' : 'Different answer settings start a separate comparison.'}</p>}
             {["dataforseo", "console"].includes(provider) && !['content', 'revise'].includes(kind) && (
               <label>
                 Answer platform
@@ -1224,7 +1232,7 @@ function JobDialog({
               />
             )}
             {discoveryError && <div className="button-row"><p className="inline-error" role="alert">{discoveryError}</p><button type="button" className="secondary" disabled={loading || submitting} onClick={() => setDiscoveryRevision(value => value + 1)}>Retry availability check</button></div>}
-            {provider === "chatgpt" && ["measure", "recheck"].includes(kind) && <label className="checkbox-field"><input type="checkbox" name="webSearch" defaultChecked />Search the web for this check<small>Requires web search permission for this model and account. Turn it off to collect model-only answers.</small></label>}
+            {provider === "chatgpt" && ["measure", "recheck"].includes(kind) && <label className="checkbox-field"><input type="checkbox" name="webSearch" checked={webSearch} onChange={event => setWebSearch(event.target.checked)} />Search the web for this check<small>Requires web search permission for this model and account. Turn it off to collect model-only answers.</small></label>}
             {kind === "content" && (
               <label>
                 {finding ? 'Focus of the draft' : 'Topic'}
