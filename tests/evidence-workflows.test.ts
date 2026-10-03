@@ -72,7 +72,13 @@ test('large audits are fully analyzed in durable batches across quota and later 
     if(calls===2 && quota) return new Response('{}',{status:429});
     const request=JSON.parse(init!.body as string), input=JSON.parse(request.input[0].content);
     assert.ok(Buffer.byteLength(request.instructions + request.input[0].content,'utf8')+5096<=32768);
-    if(request.instructions===prompts.contentGaps) return stream(JSON.stringify({recommendations:[],uncertainties:[]}));
+    if(request.instructions===prompts.contentGaps) {
+      assert.equal(input.website,undefined,'The same website excerpts must not be included twice');
+      assert.equal(input.coverage.pagesAvailable,100);
+      assert.equal(input.catalog.length,100);
+      assert.ok(input.pages.length>0);
+      return stream(JSON.stringify({recommendations:[],uncertainties:[]}));
+    }
     if(request.instructions===prompts.opportunityReview) return stream(JSON.stringify({accepted:input.candidates.map((item:any)=>({index:item.index,title:item.title,description:item.description,steps:item.steps,opportunity:{type:'page_update',pageLabel:'Resource',pageTitle:'Support workspace',benefit:'Explain the workflow relevant to the saved customer question.'}}))}));
     if(request.instructions===prompts.consolidate) {
       assert.equal(input.candidates.length,100);
@@ -88,7 +94,7 @@ test('large audits are fully analyzed in durable batches across quota and later 
     await f.runner.tick();assert.equal(f.store.job(job.id).error,'quota');
     f.store.updateJob(f.audit.id,{status:'failed'});f.store.updateJob(f.measurement.id,{status:'failed'});
     quota=false;f.runner.resume(job.id,false);await f.runner.tick();
-    assert.equal(f.store.job(job.id).status,'completed');assert.equal(reviewed.size,100);
+    assert.equal(f.store.job(job.id).status,'completed',f.store.job(job.id).progress);assert.equal(reviewed.size,100);
     assert.equal((f.store.job(job.id).result as any).measurementJobId,f.measurement.id);
     const findings=f.store.findings(f.project.id);
     assert.equal(findings.length,100);
@@ -335,7 +341,12 @@ test('an unverifiable suggestion is excluded without discarding supported work o
     assert.equal(request.instructions, prompts.diagnose);
     if (proposed) return stream(JSON.stringify({ recommendations: [], uncertainties: [] }));
     proposed = true;
-    return stream(JSON.stringify({ recommendations: input.pages.slice(0, 1).map((page:any) => ({ title: 'Clarify the supported workflow', description: 'Explain the workspace for the observed customer need.', priority: 'medium', targetPageId: page.id, evidenceIds: [page.id, input.observations[0].id], steps: ['Check the existing workflow explanation.'] })).concat([{ title: 'Unsupported workflow change', description: 'A proposed change with an unverified reference.', priority: 'medium', targetPageId: input.pages[0].id, evidenceIds: ['unknown-reference', input.observations[0].id], steps: ['Review the proposed change.'] }]), uncertainties: [] }));
+    const supported = { title: 'Clarify the supported workflow', description: 'Explain the workspace for the observed customer need.', priority: 'medium', targetPageId: input.pages[0].id, evidenceIds: [input.pages[0].id, input.observations[0].id], steps: ['Check the existing workflow explanation.'] };
+    return stream(JSON.stringify({ recommendations: [supported,
+      { ...supported, steps: ['Link the verified workflow instructions.'] },
+      { ...supported, title: 'Unsupported workflow change', description: 'A proposed change with an unverified reference.', evidenceIds: ['unknown-reference', input.observations[0].id] },
+      { ...supported, title: 'A reference without an explanation', description: 'Evidence: ' + supported.evidenceIds.join(', ') },
+    ], uncertainties: [] }));
   }) as typeof fetch;
   try {
     const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'diagnose', provider: 'chatgpt' }), 'partial-supported-analysis');
@@ -344,8 +355,10 @@ test('an unverifiable suggestion is excluded without discarding supported work o
     const findings = f.store.findings(f.project.id);
     assert.equal(findings.length, 1);
     assert.ok(findings[0].evidenceIds.every(id => id !== 'unknown-reference'));
+    assert.deepEqual(findings[0].steps, ['Check the existing workflow explanation.', 'Link the verified workflow instructions.']);
+    assert.equal(findings[0].description, 'Explain the workspace for the observed customer need.');
     const result = f.store.job(job.id).result as any;
-    assert.equal(result.omittedSuggestions, 1);
+    assert.equal(result.omittedSuggestions, 2);
     assert.ok(result.uncertainties.some((note:string) => note.includes('supporting evidence could not be verified')));
     const completedCalls = calls;
     await f.runner.execute(f.store.job(job.id), f.project, new AbortController().signal);

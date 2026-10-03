@@ -449,10 +449,11 @@ export class Runner {
           result.uncertainties.push(...reviewed.uncertainties);
         }
         if (evidence.version === 2) {
-          const website = evidence.context.website as ReturnType<typeof contentSources>;
+          const { website: suppliedWebsite, ...gapContext } = evidence.context;
+          const website = suppliedWebsite as ReturnType<typeof contentSources>;
           const catalog = sources.map(page => ({ id: page.id, url: page.url, title: page.title }));
           const gaps = diagnosisSchema.parse(parseJson(await this.llmPass(job, model, 'contentGaps', {
-            ...context, pages: website.sources, catalog,
+            ...gapContext, pages: website.sources, coverage: website.coverage, catalog,
             existingImprovements: result.recommendations.map(item => ({ title: item.title, targetPageId: item.targetPageId })),
           }, signal, 'content-gaps', 'Finding new topics from your saved answers')));
           const supplied = new Set(website.sources.map(page => page.id));
@@ -464,12 +465,6 @@ export class Runner {
           result.recommendations.push(...gaps.recommendations);
           result.uncertainties.push(...gaps.uncertainties);
         }
-        const unique = new Set<string>();
-        result.recommendations = result.recommendations.filter(recommendation => {
-          const key = JSON.stringify([recommendation.targetPageId, recommendation.title.trim().toLocaleLowerCase()]);
-          if (unique.has(key)) return false;
-          unique.add(key); return true;
-        });
         result.uncertainties = [...new Set(result.uncertainties)];
         const allowed = new Set([
           ...sources.map((p) => p.id),
@@ -479,7 +474,7 @@ export class Runner {
         result.recommendations = result.recommendations.filter(recommendation => {
           const page = sources.find((p) => p.id === recommendation.targetPageId);
           if (
-            !page ||
+            !page || !withoutEvidenceList(recommendation.description, recommendation.evidenceIds).trim() ||
             recommendation.evidenceIds.some((id) => !allowed.has(id)) ||
             (evidence.version === 2 && (!recommendation.evidenceIds.includes(page.id) ||
               !recommendation.evidenceIds.some(id => context.observations.some(answer => answer.id === id))))
@@ -487,6 +482,7 @@ export class Runner {
           return true;
         });
         if (omittedSuggestions) result.uncertainties.push(omittedSuggestions + ' suggestions were left out because their supporting evidence could not be verified.');
+        result.recommendations = mergePageTasks(result.recommendations);
         if (result.recommendations.length > 1) {
           const candidates = result.recommendations.map((item, index) => ({
             index, title: item.title, summary: item.description.slice(0, 200), type: item.opportunity?.type,
