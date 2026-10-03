@@ -8,7 +8,7 @@ import { Store } from '../server/storage.js';
 import { Vault } from '../server/vault.js';
 import { Connections } from '../server/oauth.js';
 import { Providers } from '../server/providers.js';
-import { Runner } from '../server/workflows.js';
+import { Runner, mergePageTasks } from '../server/workflows.js';
 import { parsePage } from '../server/audit.js';
 import { jobInput, projectInput } from '../server/contracts.js';
 import { prompts } from '../server/prompts.js';
@@ -34,6 +34,23 @@ function fixture() {
 }
 const json = (value:unknown) => new Response(JSON.stringify(value), {headers:{'Content-Type':'application/json'}});
 const stream = (text:string) => new Response('data: ' + JSON.stringify({type:'response.completed',response:{status:'completed',output:[{content:[{type:'output_text',text}]}]}}) + '\n\n');
+
+test('related same-page tasks merge evidence and instructions without merging distinct work', () => {
+  const task = { targetPageId: 'page-one', title: 'Explain the supported workflow', priority: 'medium' as const, evidenceIds: ['page-one', 'answer-one'], steps: ['Check the current explanation.', 'Add the supported example.'], opportunity: { type: 'page_update' } };
+  const merged = mergePageTasks([
+    task,
+    { ...task, priority: 'high' as const, evidenceIds: ['page-one', 'answer-two'], steps: ['Check the current explanation.', 'Link the relevant instructions.'] },
+    { ...task, targetPageId: 'page-two' },
+    { ...task, title: 'Explain a different workflow' },
+    { ...task, opportunity: { type: 'new_content' } },
+  ]);
+  assert.equal(merged.length, 4);
+  assert.deepEqual(merged[0].steps, ['Check the current explanation.', 'Add the supported example.', 'Link the relevant instructions.']);
+  assert.deepEqual(merged[0].evidenceIds, ['page-one', 'answer-one', 'answer-two']);
+  assert.equal(merged[0].priority, 'high');
+  assert.deepEqual(task.steps, ['Check the current explanation.', 'Add the supported example.']);
+  assert.equal(task.priority, 'medium');
+});
 
 test('large audits are fully analyzed in durable batches across quota and later site changes', async () => {
   const f=fixture(), original=globalThis.fetch, reviewed=new Set<string>();

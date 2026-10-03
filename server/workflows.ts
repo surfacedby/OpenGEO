@@ -64,6 +64,22 @@ export function parseJson(text: string) {
     text.replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, ""),
   );
 }
+/** Related changes to one page share a task while retaining distinct instructions and supporting evidence. */
+export function mergePageTasks<T extends { targetPageId: string; title: string; priority: 'high' | 'medium' | 'low'; evidenceIds: string[]; steps: string[]; opportunity?: { type: string } }>(recommendations: T[]) {
+  const tasks = new Map<string, T>();
+  const normalized = (text: string) => text.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+  const priorities = { high: 0, medium: 1, low: 2 };
+  for (const recommendation of recommendations) {
+    const key = JSON.stringify([recommendation.targetPageId, normalized(recommendation.title), recommendation.opportunity?.type]);
+    const prior = tasks.get(key);
+    if (!prior) { tasks.set(key, { ...recommendation }); continue; }
+    const steps = new Map(prior.steps.map(step => [normalized(step), step]));
+    for (const step of recommendation.steps) if (!steps.has(normalized(step))) steps.set(normalized(step), step);
+    tasks.set(key, { ...prior, priority: priorities[recommendation.priority] < priorities[prior.priority] ? recommendation.priority : prior.priority,
+      evidenceIds: [...new Set([...prior.evidenceIds, ...recommendation.evidenceIds])], steps: [...steps.values()] });
+  }
+  return [...tasks.values()];
+}
 export class Runner {
   private timer: ReturnType<typeof setInterval> | undefined;
   private active:
@@ -499,6 +515,7 @@ export class Runner {
               .map(index => ({ ...result.recommendations[index], title: primary.title }));
           });
         }
+        result.recommendations = mergePageTasks(result.recommendations);
         const receipt = {
           findings: result.recommendations.length,
           omittedSuggestions,

@@ -11,9 +11,9 @@
 .competitor-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px; padding: 18px 20px; border-bottom: 1px solid var(--border); }
 .competitor-toolbar .segmented-control button { display: inline-flex; align-items: center; gap: 7px; }
 .competitor-toolbar .segmented-control span { font-size: 11px; opacity: .7; }
+.competitor-toolbar .search { width: 220px; margin-left: auto; }
 .competitor-table-intro { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 18px 22px; }
 .competitor-table-intro > p { max-width: 600px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
-.competitor-table-intro .search { width: 220px; flex: none; }
 .competitor-ranking-head, .competitor-ranking-row { display: grid; grid-template-columns: minmax(180px, 1.05fr) minmax(160px, 1.45fr) 140px 34px; gap: 22px; padding: 18px 22px; align-items: center; border-top: 1px solid var(--border); }
 .competitor-ranking-head { font-size: 11px; color: var(--muted); background: #f8fafd; padding-block: 11px; }
 .competitor-ranking-row:hover { background: #fcfdff; }
@@ -30,7 +30,7 @@
 .competitor-rate span { color: var(--muted); font-size: 10px; }
 .competitor-rate > div { height: 4px; width: 95px; background: #edf2f8; border-radius: 4px; overflow: hidden; }
 .competitor-rate i { display: block; height: 100%; background: #6b9ded; border-radius: inherit; }
-.competitor-discovery-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 0 22px 16px; }
+.competitor-discovery-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 22px; }
 .competitor-discovery-heading h3 { font-size: 12px; margin: 0; }
 .competitor-footnote, .competitor-progress { padding: 14px 22px; margin: 0; font-size: 11px; line-height: 1.6; color: var(--muted); border-top: 1px solid var(--border); }
 .competitor-answer-detail .answer { padding: 22px; }
@@ -52,4 +52,4 @@
 @media(max-width: 1100px) { .competitor-ranking-head, .competitor-ranking-row { grid-template-columns: minmax(160px, 1fr) minmax(140px, 1fr) 110px 34px; gap: 14px; } }
 @media(max-width: 760px) { .competitor-detail-grid { grid-template-columns: 1fr; gap: 20px; } }
 @media(max-width: 1100px) { .competitor-summary { grid-template-columns: 1fr; gap: 18px; } .competitor-check { display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--border); padding-top: 14px; } .competitor-check > .choice { width: 220px; } }
-@media(max-width: 760px) { .competitor-table-intro { flex-wrap: wrap; } .competitor-table-intro .search { width: 100%; } .competitor-summary { padding: 18px; } .competitor-check > .choice { width: 190px; } .competitor-ranking-head { display: none; } .competitor-ranking-row { grid-template-columns: minmax(0, 1fr) 100px 34px; gap: 14px 10px; } .competitor-ranking-row > p { grid-column: 1 / -1; grid-row: 2; } .competitor-metrics { gap: 8px; } .competitor-metrics > div { grid-template-columns: 1fr; padding-right: 0; } .competitor-metrics > div + div { padding-left: 12px; } .competitor-metrics svg { grid-row: auto; } .competitor-metrics span { font-size: 10px; } .competitor-toolbar { padding: 14px; } .competitor-manage form { flex-wrap: wrap; } .competitor-manage label { width: 100%; } .competitor-discovery-heading { flex-wrap: wrap; } }
+@media(max-width: 760px) { .competitor-table-intro { flex-wrap: wrap; } .competitor-toolbar .search { width: 100%; margin-left: 0; } .competitor-summary { padding: 18px; } .competitor-check > .choice { width: 190px; } .competitor-ranking-head { display: none; } .competitor-ranking-row { grid-template-columns: minmax(0, 1fr) 100px 34px; gap: 14px 10px; } .competitor-ranking-row > p { grid-column: 1 / -1; grid-row: 2; } .competitor-metrics { gap: 8px; } .competitor-metrics > div { grid-template-columns: 1fr; padding-right: 0; } .competitor-metrics > div + div { padding-left: 12px; } .competitor-metrics svg { grid-row: auto; } .competitor-metrics span { font-size: 10px; } .competitor-toolbar { padding: 14px; } .competitor-manage form { flex-wrap: wrap; } .competitor-manage label { width: 100%; } .competitor-discovery-heading { flex-wrap: wrap; } }
