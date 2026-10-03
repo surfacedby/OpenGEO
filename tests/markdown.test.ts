@@ -12,3 +12,16 @@ test("reading and HTML exports preserve headings, lists, source links and code w
   const document = htmlDocument("<script>title</script>", "# A draft");
   assert.match(document, /<article><h1>A draft/); assert.match(document, /Content-Security-Policy/); assert.ok(!document.includes("<script>title"));
 });
+
+test('content tables render cells, escaped pipes and code without executing model markup', () => {
+  const markdown = 'Intro\n\n| Cause | Check |\n| :--- | ---: |\n| **Database** | Review `a|b` and A \\| B |\n| <script>evil()</script> | [Unsafe](javascript:evil) |\n\n## Next step';
+  const html = markdownHtml(markdown);
+  assert.match(html, /<th scope="col">Cause<\/th>/);
+  assert.match(html, /<td><strong>Database<\/strong><\/td>/);
+  assert.match(html, /<code>a\|b<\/code> and A \| B/);
+  assert.ok(!html.includes('<script>') && !html.includes('href="javascript:'));
+  assert.match(html, /<\/table><\/div>\n<h2>Next step<\/h2>/);
+  assert.match(htmlDocument('Table', markdown), /<table><thead>/);
+  assert.ok(!markdownHtml('```\n| A | B |\n| --- | --- |\n```').includes('<table>'));
+  assert.ok(!markdownHtml('| A | B |\n| --- |').includes('<table>'));
+});

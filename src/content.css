@@ -26,6 +26,12 @@
 .draft-context details[open] summary > svg:last-child { transform: rotate(180deg); }
 .draft-context details > section, .draft-context details > .document-preview, .draft-context details > p { padding: 16px; border-top: 1px solid var(--border); margin: 0; }
 .draft-document .document-preview { max-width: 720px; }
+.document-preview .markdown-table { max-width: 100%; overflow: auto; margin: 24px 0; border: 1px solid var(--border); border-radius: 8px; }
+.document-preview .markdown-table:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.document-preview .markdown-table table { min-width: 440px; width: 100%; border-collapse: collapse; }
+.document-preview .markdown-table th, .document-preview .markdown-table td { padding: 12px 14px; vertical-align: top; text-align: start; white-space: normal; overflow-wrap: anywhere; border-bottom: 1px solid var(--border); }
+.document-preview .markdown-table th { background: #f5f7fb; color: var(--ink); font-weight: 600; }
+.document-preview .markdown-table tbody tr:last-child td { border-bottom: 0; }
 .content-empty { display: grid; justify-items: center; text-align: center; padding: 54px 24px 34px; }
 .content-empty h2 { font-size: 22px; letter-spacing: -.5px; margin: 24px 0 10px; }
 .content-empty p { max-width: 440px; color: var(--muted); font-size: 13px; }
