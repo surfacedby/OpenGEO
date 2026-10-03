@@ -49,7 +49,7 @@ export async function createApp(
 ) {
   const app = Fastify({ logger: false, bodyLimit: 20_000_000 });
   const sessionCookie = "opengeo_session_" + createHash("sha256").update(token).digest("hex").slice(0, 16);
-  const siteIcons = new SiteIcons();
+  const siteIcons = new SiteIcons(undefined, () => store.setting('cachedWebsiteIcons', true));
   const usage = new UsageSharing(store);
   store.onJobCompleted = (kind, provider) => { if (kind !== "discover") usage.record(({ audit: "audit_completed", measure: "visibility_completed", recheck: "recheck_completed", diagnose: "analysis_completed", competitors: "analysis_completed", content: "content_created", revise: "content_revised" } as const)[kind], kind === "audit" ? null : provider ?? null); };
   store.onImprovementCompleted = () => usage.record("improvement_completed");
@@ -139,6 +139,13 @@ export async function createApp(
     return { product: identity.name };
   });
   app.get("/api/settings/usage-sharing", () => usage.status());
+  app.get('/api/settings/website-icons', () => ({ enabled: store.setting('cachedWebsiteIcons', true) }));
+  app.put('/api/settings/website-icons', (req) => {
+    const input = z.object({ enabled: z.boolean() }).strict().parse(req.body);
+    store.set('cachedWebsiteIcons', input.enabled);
+    if (!input.enabled) siteIcons.disableCached();
+    return input;
+  });
   app.put("/api/settings/usage-sharing", (req, res) => {
     const input = z.object({ enabled: z.boolean() }).strict().safeParse(req.body);
     if (!input.success) return res.code(400).send({ error: "Choose whether to share usage." });

@@ -587,24 +587,28 @@
   margin-top: 8px;
   font-size: 12px;
 }
-.answer-detail[open] .answer-text {
-  font-size: 14px;
-  line-height: 1.75;
-}
-.answer-detail ul {
+.answer-preview p, .answer-preview h1, .answer-preview h2, .answer-preview h3, .answer-preview li { font: inherit; margin: 0; }
+.answer-preview a { color: inherit; }
+.answer-document { margin: 18px 0; padding: 18px 20px; border: 1px solid var(--border); border-radius: 9px; background: #fcfdff; font-size: 14px; line-height: 1.75; }
+.answer-document h1, .answer-document h2 { font-size: 19px; line-height: 1.4; }
+.answer-document h3 { font-size: 16px; line-height: 1.5; }
+.answer-document > :first-child { margin-top: 0; }
+.answer-document > :last-child { margin-bottom: 0; }
+.answer-document ol, .answer-document ul { padding-left: 22px; }
+.answer-detail > h4 { font-size: 12px; margin: 20px 0 12px; }
+.answer-sources {
   list-style: none;
   padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  gap: 8px;
 }
-.answer-detail li {
-  margin: 9px 0;
-  overflow-wrap: anywhere;
-}
-.answer-detail a {
-  display: inline;
-}
-.answer-detail a svg {
-  margin-left: 6px;
-}
+.answer-sources li { margin: 0; min-width: 0; }
+.answer-sources a { display: flex; align-items: center; gap: 9px; padding: 10px; background: #f8faff; border: 1px solid var(--border); border-radius: 8px; min-height: 54px; }
+.answer-sources a > span:not(.site-icon) { display: grid; gap: 4px; min-width: 0; flex: 1; }
+.answer-sources strong { font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
+.answer-sources small { font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.answer-sources svg { flex: none; }
 .evidence-filter {
   padding: 10px 18px;
   background: #f0f6ff;

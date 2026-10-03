@@ -1,6 +1,9 @@
-import { FileText, FilePenLine, Plus, ShieldCheck, BookOpen, ChevronDown, Search } from 'lucide-react';
+import { FileText, FilePenLine, Plus, ShieldCheck, BookOpen, ChevronDown, Search, ArrowUpRight } from 'lucide-react';
 import { useState } from 'react';
 import { ContentEditor, ContentBrief, ContentReview } from './WorkflowControls';
+import type { ContentTask } from '../server/contracts';
+import { SiteIcon } from './SiteIcon';
+import { targetDomain } from './finding-groups';
 import './content.css';
 
 type Draft = {
@@ -8,6 +11,7 @@ type Draft = {
   locale: string; status?: string; reviewCurrent?: boolean;
   review?: { issues?: unknown[]; coverageComplete?: boolean };
   sourceEvidence?: { id: string; url: string; title: string }[];
+  task?: ContentTask;
 };
 type Edit = { id: string; markdown: string; baseMarkdown: string; recoverySession: string };
 
@@ -31,12 +35,13 @@ export function ContentWorkspace({ drafts, selected, select, projectId, run, rev
       <div className="draft-library-heading"><h2>Your drafts <span>{drafts.length}</span></h2><button className="icon-button" aria-label="Create a draft" onClick={create}><Plus size={17} /></button></div>
       <label className="search"><Search size={15} /><input aria-label="Search drafts" placeholder="Find a draft" value={query} onChange={event => setQuery(event.target.value)} /></label>
       <div className="draft-list">{shown.map(item => <button key={item.id} className={'draft-card' + (draft.id === item.id ? ' selected' : '')} aria-label={'Open draft: ' + item.topic} aria-pressed={draft.id === item.id} onClick={() => select(item.id)}>
-        <FileText size={17} /><span><strong>{item.topic}</strong><small>{new Date(item.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</small><span className={'draft-state' + (item.reviewCurrent === false || item.review?.issues?.length ? ' needs-review' : '')}>{item.reviewCurrent === false ? 'Review outdated' : item.review?.issues?.length ? 'Needs review' : 'Draft'}</span></span>
+        {item.task?.mode === 'page_update' ? <FilePenLine size={17} /> : <FileText size={17} />}<span><strong>{item.topic}</strong><small>{item.task?.mode === 'page_update' ? 'Page copy' : 'Article'} / {new Date(item.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</small><span className={'draft-state' + (item.reviewCurrent === false || item.review?.issues?.length ? ' needs-review' : '')}>{item.reviewCurrent === false ? 'Review outdated' : item.review?.issues?.length ? 'Needs review' : 'Draft'}</span></span>
       </button>)}</div>
       {!shown.length && <p className="small">No matching drafts.</p>}
     </aside>
     <article className="draft-document" key={draft.id}>
       <header className="draft-document-heading"><span className="badge">{draft.status === 'needs_review' || draft.reviewCurrent === false ? 'Needs review' : 'Draft'}</span><h3>{draft.topic}</h3><p>Review the content and its sources before publishing.</p></header>
+      {draft.task?.targetUrl && <div className="draft-target"><span>{draft.task.mode === 'page_update' ? 'Copy for' : 'Inspired by'}</span><a href={draft.task.targetUrl} target="_blank" rel="noreferrer">{targetDomain(draft.task.targetUrl) && <SiteIcon projectId={projectId} domain={targetDomain(draft.task.targetUrl)!} size={22} />}<span>{draft.sourceEvidence?.find(source => source.url === draft.task!.targetUrl)?.title || targetDomain(draft.task.targetUrl)}</span><ArrowUpRight size={14} /></a></div>}
       <div className="draft-context">
         <details><summary><BookOpen size={16} />Content brief <ChevronDown size={14} /></summary><ContentBrief brief={draft.brief} sources={draft.sourceEvidence} /></details>
         <details className="draft-review" open={!!draft.review?.issues?.length || draft.review?.coverageComplete === false || draft.reviewCurrent === false || !draft.review}>

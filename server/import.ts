@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { Store } from "./storage.js";
-import { projectInput, providers, jobKinds } from "./contracts.js";
+import { projectInput, providers, jobKinds, contentTask } from "./contracts.js";
 import { publicUrl } from "./network.js";
 import { portableJobResult } from "./portable-results.js";
 import { summarize } from "./analysis.js";
@@ -83,6 +83,7 @@ const content = z
     id,
     jobId: id.optional(),
     topic: z.string(),
+    task: contentTask.optional(),
     locale: projectInput.shape.locale.optional(),
     markdown: z.string(),
     brief: z.string(),
@@ -160,6 +161,11 @@ export function previewImport(store: Store, input: unknown) {
     for (const link of row.links) publicUrl(link);
   }
   for (const row of data.findings) if (row.targetUrl) publicUrl(row.targetUrl);
+  for (const row of data.content) {
+    if (row.task?.targetUrl) publicUrl(row.task.targetUrl);
+    if (row.task?.findingId && !data.findings.some(finding => finding.id === row.task!.findingId && finding.targetUrl === row.task!.targetUrl))
+      throw new Error('Draft references an unknown opportunity or a different target page');
+  }
   const jobs = new Set(data.jobs.map((j) => j.id));
   if (jobs.size !== data.jobs.length) throw new Error("Duplicate job ids");
   const allIds = [...data.jobs, ...data.pages, ...data.observations, ...data.findings, ...data.content].map((row) => row.id);
@@ -315,6 +321,7 @@ export function importProject(store: Store, input: unknown) {
                 },
                 ...(row.sourceEvidence ? { sourceEvidence: row.sourceEvidence.map((source: any) => ({ ...source, id: ids.get(source.id) ?? source.id })) } : {}),
                 ...(row.derivedFrom ? { derivedFrom: ids.get(row.derivedFrom) ?? row.derivedFrom } : {}),
+                ...(row.task ? { task: { ...row.task, ...(row.task.findingId ? { findingId: ids.get(row.task.findingId) } : {}) } } : {}),
               }
             : {}),
         });

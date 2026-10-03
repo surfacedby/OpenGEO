@@ -17,7 +17,7 @@ export function evidenceBatches<T>(items: T[], maximumBytes: number): T[][] {
 }
 
 /** Source selection favors the requested subject while retaining the site's primary context. */
-export function contentSources(pages: PageEvidence[], topic: string, maximumBytes: number) {
+export function contentSources(pages: PageEvidence[], topic: string, maximumBytes: number, requiredUrls: string[] = []) {
   const readable = pages.filter(page => page.status >= 200 && page.status < 300 && !page.noindex && page.text.trim());
   const segmenter = new Intl.Segmenter(undefined, { granularity: "word" });
   const words = (text: string) => new Set([...segmenter.segment(text.normalize("NFKC").toLowerCase())]
@@ -33,13 +33,23 @@ export function contentSources(pages: PageEvidence[], topic: string, maximumByte
     total + weights.get(term)! * ((doc.heading.has(term) ? 4 : 0) + (doc.text.has(term) ? 1 : 0)), 0)
     + (new URL(doc.page.url).pathname === "/" ? 0.5 : 0) }))
     .sort((a, b) => b.score - a.score || a.page.url.localeCompare(b.page.url)).map(doc => doc.page);
+  const required = [...new Set(requiredUrls)].map(url => {
+    const page = readable.filter(page => page.url === url).sort((a, b) => b.fetchedAt.localeCompare(a.fetchedAt))[0];
+    if (!page) throw new ProviderError('evidence', 'The page to improve is not available in your audited sources. Audit it before creating a draft.');
+    return page;
+  });
   const sources: { id: string; url: string; title: string; text: string }[] = [];
   let remaining = maximumBytes - 2;
-  for (const page of ranked) {
+  const used = new Set<string>();
+  for (const page of [...required, ...ranked]) {
+    if (used.has(page.url)) continue;
     const source = { id: page.id, url: page.url, title: page.title.slice(0, 500), text: page.text.slice(0, 8000) };
     const bytes = Buffer.byteLength(JSON.stringify(source), "utf8") + 1;
-    if (bytes > remaining) continue;
-    sources.push(source); remaining -= bytes;
+    if (bytes > remaining) {
+      if (required.includes(page)) throw new ProviderError('context', 'Choose a model with more room for the page you want to improve. No request was sent.');
+      continue;
+    }
+    sources.push(source); remaining -= bytes; used.add(page.url);
   }
   if (!sources.length) throw new ProviderError("context", "Choose a model with more room for the website sources.");
   return { sources, coverage: { pagesAvailable: readable.length, pagesUsed: sources.length, excerpts: true } };

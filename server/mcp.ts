@@ -23,7 +23,7 @@ server.registerTool(
 server.registerTool(
   "read_workspace",
   {
-    description: "Read local evidence, actions and drafts",
+    description: "Read local evidence, opportunities and drafts",
     inputSchema: { projectId: z.string().uuid() },
     annotations: { readOnlyHint: true },
   },
@@ -53,6 +53,8 @@ server.registerTool(
       topic: z.string().optional(),
       platform: z.string().optional(),
       contentId: z.string().uuid().optional(),
+      findingId: z.string().uuid().optional(),
+      contentMode: z.enum(["article", "page_update"]).optional(),
       measurementJobId: z.string().uuid().optional(),
       revisionInstructions: z.string().min(3).max(2000).optional(),
       webSearch: z.boolean().optional(),

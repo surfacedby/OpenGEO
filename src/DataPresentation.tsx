@@ -9,6 +9,8 @@ import {
   CalendarDays,
 } from "lucide-react";
 import { SiteIcon } from "./SiteIcon";
+import { markdownHtml } from '../server/markdown';
+import { targetDomain } from './finding-groups';
 import { FileText, ListChecks, Braces } from "lucide-react";
 import type { Job, Observation } from "../server/contracts";
 import { completedMeasurement, measurementTime } from "../server/portable-results";
@@ -630,11 +632,7 @@ export function AnswerCard({ observation: o }: { observation: Observation }) {
         <time dateTime={o.observedAt}>{dateTime(o.observedAt)}</time>
       </div>
       <h3>{o.prompt}</h3>
-      <p className="answer-preview">
-        {o.answer.length > 260
-          ? o.answer.slice(0, 260).trimEnd() + "..."
-          : o.answer}
-      </p>
+      <div className="answer-preview" dangerouslySetInnerHTML={{ __html: markdownHtml(o.answer.split(/\n\s*\n/)[0]) }} />
       <div className="answer-outcomes">
         <span className={o.mentioned ? "outcome-positive" : ""}>
           {o.mentioned ? "Brand mentioned" : "Brand not detected"}
@@ -648,19 +646,21 @@ export function AnswerCard({ observation: o }: { observation: Observation }) {
         <summary>
           Read full answer and sources <ChevronDown size={15} />
         </summary>
-        <p className="answer-text">{o.answer}</p>
+        <div className="document-preview answer-document" lang={o.locale} dir={['ar', 'fa', 'he', 'ur'].includes(o.locale.split('-')[0]) ? 'rtl' : 'ltr'} dangerouslySetInnerHTML={{ __html: markdownHtml(o.answer) }} />
         <div className="answer-meta">
           <span>{collectionLabel(o)}</span>
           <span>{retrievalLabel(o)}</span>
           <span>Model: {o.model}</span>
         </div>
-        <ul>
+        {o.citations.some(c => targetDomain(c.url)) && <h4>Sources in this answer</h4>}
+        <ul className="answer-sources">
           {o.citations
-            .filter((c) => /^https?:\/\//.test(c.url))
+            .filter((c) => targetDomain(c.url))
             .map((c, index) => (
               <li key={index}>
                 <a href={c.url} target="_blank" rel="noreferrer">
-                  {c.title || c.url}
+                  <SiteIcon projectId={o.projectId} domain={targetDomain(c.url)!} size={26} />
+                  <span><strong>{c.title || targetDomain(c.url)}</strong>{c.title && <small>{targetDomain(c.url)}</small>}</span>
                   <ExternalLink size={12} />
                 </a>
               </li>

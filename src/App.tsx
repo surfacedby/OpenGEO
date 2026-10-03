@@ -17,6 +17,7 @@ import {
   Lightbulb,
   ListChecks,
   FileText,
+  FilePenLine,
   Users,
   ChartColumn,
   Settings,
@@ -45,7 +46,7 @@ import { AnswerCard, AnswerDistribution, AuditEssentials, CitationComparison, Me
 import { SiteIcon } from "./SiteIcon";
 import { AuditSummary } from "./AuditSummary";
 import { Findings } from "./Findings";
-import { findingGroups, opportunityFindings, auditFindings } from "./finding-groups";
+import { findingGroups, opportunityFindings, auditFindings, targetDomain } from "./finding-groups";
 import { ContentWorkspace } from "./ContentWorkspace";
 import { completedMeasurement } from "../server/portable-results";
 import type { Presentation } from "../server/presentation";
@@ -132,7 +133,10 @@ export function App() {
     [query, setQuery] = useState(""),
     [evidenceFilter, setEvidenceFilter] = useState<{ ids: string[]; label: string } | null>(null),
     [contentTopic, setContentTopic] = useState(""),
+    [contentFinding, setContentFinding] = useState<Finding | null>(null),
+    [focusedFinding, setFocusedFinding] = useState<string | null>(null),
     [selectedContent, setSelectedContent] = useState(""),
+    [pendingContent, setPendingContent] = useState<{ projectId: string; jobId: string } | null>(null),
     [unsavedDraft, setUnsavedDraft] = useState<{ projectId: string; id: string; markdown: string; baseMarkdown: string; recoverySession: string } | null>(null),
     [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null),
     [navigationError, setNavigationError] = useState(""),
@@ -211,6 +215,15 @@ export function App() {
   useEffect(() => {
     if (w) setSelectedContent((id) => w.content.some((draft) => draft.id === id) ? id : w.content[0]?.id ?? "");
   }, [w?.project.id, w?.content.map((draft) => draft.id).join(",")]);
+  useEffect(() => {
+    if (!w || !pendingContent || unsavedDraft || w.project.id !== pendingContent.projectId) return;
+    const job = w.jobs.find(job => job.id === pendingContent.jobId);
+    if (job?.status === 'completed') {
+      const id = (job.result as { id?: string } | null)?.id;
+      if (id && w.content.some(draft => draft.id === id)) setSelectedContent(id);
+      setPendingContent(null);
+    } else if (job && ['failed', 'cancelled'].includes(job.status)) setPendingContent(null);
+  }, [w, pendingContent, unsavedDraft]);
   useEffect(() => { setEvidenceFilter(null); }, [w?.project.id, w?.measurement?.id]);
   function navigate(action: () => void) {
     if (unsavedDraft) { setNavigationError(""); setPendingNavigation(() => action); }
@@ -223,6 +236,9 @@ export function App() {
   const openConnections = () => navigate(() => { setPage("Settings"); setQuery(""); setEvidenceFilter(null); setConnectionsRequest(value => value + 1); });
   const openEvidence = (ids: string[], label: string) => navigate(() => {
     setPage("Responses"); setQuery(""); setEvidenceFilter({ ids, label });
+  });
+  const openOpportunity = (finding: Finding) => navigate(() => {
+    setPage('Opportunities'); setFocusedFinding(finding.id);
   });
   if (!setupState) return <div className="startup-state" role="status"><img src="/logo.svg" width="40" height="40" alt="" /><h1>{identity.name}</h1>{error || refreshError ? <><p role="alert">{error || refreshError}</p><button className="secondary" disabled={refreshing} onClick={() => { setError(""); setRefreshError(""); void api("/session").then(() => { setSessionReady(true); return refresh(); }).catch((failure) => setError(failure.message)); }}>Try again</button></> : <p>Opening your workspace...</p>}</div>;
   if (!setupState.completed || !projects.length || newProject || setupState.draft) return <Onboarding connected={connected} profiles={profiles} refresh={refresh} draft={setupState.draft} savedProject={projects.find((project) => project.id === setupState.draft?.projectId)} initialStep={setupState.completed && Object.values(connected).some(Boolean) ? 1 : 0} cancel={projects.length && setupState.completed ? () => setNewProject(false) : undefined} finish={async (project) => { selectedRef.current = project.id; setSelected(project.id); setNewProject(false); changePage("Overview"); await refresh(); }} />;
@@ -242,7 +258,7 @@ export function App() {
     : page === "Visibility" ? activeMeasurement ? null : measurementAction
     : page === "Overview" ? activeMeasurement ? { label: "View current check", action: () => changePage('Visibility') } : !audited ? { label: auditLabel, action: () => setJobDialog("audit") } : !measured ? measurementAction : activeAnalysis ? null : pausedAnalysis ? { label: "Review paused analysis", action: () => changePage('Opportunities') } : !analyzed && canAnalyze ? { label: "Find opportunities", action: () => setJobDialog('diagnose') } : { label: "Review opportunities", action: () => changePage("Opportunities") }
     : page === "Opportunities" && audited && measured && !activeAnalysis && !pausedAnalysis ? { label: "Analyze evidence", action: () => setJobDialog("diagnose") }
-    : page === "Content" && audited && !!w?.content.length ? { label: "Create content", action: () => { setContentTopic(""); setJobDialog("content"); } } : null;
+    : page === "Content" && audited && !!w?.content.length ? { label: "Create content", action: () => { setContentFinding(null); setContentTopic(""); setJobDialog("content"); } } : null;
   return (
     <div className="shell">
       <a className="skip-link" href="#main-content">Skip to workspace</a>
@@ -450,6 +466,7 @@ export function App() {
                       projectId={p!.id}
                       run={run}
                       openAll={() => changePage("Opportunities")}
+                      openFinding={openOpportunity}
                       emptyMessage={w.findings.length ? "Your current improvements are complete. Recheck visibility to see what changed." : audited && measured ? "Analyze your collected evidence in Opportunities to prepare recommendations." : audited ? "Check visibility to connect page improvements to collected answers." : "Run a site audit to find page improvements you can act on."}
                       emptyTitle={w.findings.length ? "Current improvements complete" : "No recommendations yet"}
                     />
@@ -639,13 +656,15 @@ export function App() {
                   emptyTitle={activeAnalysis ? "Your opportunities are on their way" : pausedAnalysis ? "Waiting for the analysis to finish" : "Find your next content opportunity"}
                   emptyMessage={activeAnalysis ? "You can explore your answers while the analysis runs." : pausedAnalysis ? "Recommendations appear after all reviewed pages have been checked. Your saved answers and progress are kept." : measured && audited ? "Analyze your answers alongside your website to identify specific pages to improve. A missing mention alone is not a recommendation." : "Complete a site audit and visibility check to find improvements grounded in your evidence."}
                   jobs={w.jobs} measurementId={w.measurement?.id}
-                  createContent={finding => navigate(() => { setPage('Content'); setContentTopic(finding.title); setJobDialog('content'); })} /></section>
+                  focusedFinding={focusedFinding} onFocused={() => setFocusedFinding(null)}
+                  drafts={w.content} openContent={id => navigate(() => { setPage('Content'); setSelectedContent(id); })}
+                  createContent={finding => navigate(() => { setContentFinding(finding); setContentTopic(finding.title); setJobDialog('content'); })} /></section>
               </>}
               {page === "Content" && <>
                 {w.jobs.some(job => ['content', 'revise'].includes(job.kind)) && <details className="panel activity-panel" open={w.jobs.some(job => ['content', 'revise'].includes(job.kind) && ['queued', 'running', 'paused', 'failed'].includes(job.status))}><summary><h2>Draft activity</h2><ChevronDown size={14} /></summary><Jobs jobs={w.jobs.filter(job => ['content', 'revise'].includes(job.kind)).slice(0, 5)} run={run} /></details>}
                 <ContentWorkspace drafts={w.content} selected={selectedContent} select={id => { if (id !== selectedContent) navigate(() => setSelectedContent(id)); }} projectId={p!.id} run={run}
                   pending={w.jobs.some(job => job.kind === 'content' && ['queued', 'running'].includes(job.status))}
-                  create={() => { setContentTopic(''); setJobDialog('content'); }}
+                  create={() => { setContentFinding(null); setContentTopic(''); setJobDialog('content'); }}
                   revise={draft => { setRevision(draft); setJobDialog('revise'); }}
                   onDraftChange={edit => setUnsavedDraft(edit === null ? null : { projectId: p!.id, ...edit })} />
               </>}
@@ -737,9 +756,11 @@ export function App() {
           connected={connected}
           revision={revision}
           initialTopic={contentTopic}
+          finding={contentFinding}
           measurementJobId={w?.measurement?.id}
           run={run}
-          close={() => { setJobDialog(null); setRevision(null); }}
+          onStarted={job => { if (['content', 'revise'].includes(job.kind)) { setPage('Content'); setPendingContent({ projectId: p.id, jobId: job.id }); } }}
+          close={() => { setJobDialog(null); setRevision(null); setContentFinding(null); }}
         />
       )}
       {mobileNavigation && <Modal title="Navigate workspace" close={() => setMobileNavigation(false)}><div className="mobile-navigation-menu">{navigation.map(([label, Icon]) => <button key={label} aria-current={page === label ? "page" : undefined} onClick={() => { setMobileNavigation(false); changePage(label); }}><Icon size={20} /><span>{label}</span><ArrowRight size={15} /></button>)}</div></Modal>}
@@ -992,20 +1013,24 @@ function JobDialog({
   connected,
   revision,
   initialTopic,
+  finding,
   measurementJobId,
   run,
   close,
   openConnections,
+  onStarted,
 }: {
   kind: Job["kind"];
   project: Project;
   connected: Record<string, boolean>;
   revision: any;
   initialTopic: string;
+  finding: Finding | null;
   measurementJobId?: string;
   run: (f: () => Promise<unknown>) => Promise<void>;
   close: () => void;
   openConnections: () => void;
+  onStarted: (job: Job) => void;
 }) {
   const choices: Provider[] =
     ["diagnose", "competitors"].includes(kind)
@@ -1013,7 +1038,7 @@ function JobDialog({
       : kind === "revise"
         ? ["chatgpt", "openrouter"]
       : kind === "content"
-        ? ["chatgpt", "console", "openrouter"]
+        ? finding ? ["chatgpt", "openrouter"] : ["chatgpt", "console", "openrouter"]
         : ["chatgpt", "console", "dataforseo", "openrouter"];
   const [provider, setProvider] = useState<Provider>(
       choices.find((p) => connected[p]) ?? choices[0],
@@ -1024,6 +1049,7 @@ function JobDialog({
     [consolePlatforms, setConsolePlatforms] = useState<{ key: string; name: string; enabled: boolean }[]>([]),
     [loading, setLoading] = useState(false),
     [budget, setBudget] = useState(0),
+    [contentMode, setContentMode] = useState<'article' | 'page_update'>(finding ? 'page_update' : 'article'),
     [discoveryError, setDiscoveryError] = useState(""),
     [discoveryRevision, setDiscoveryRevision] = useState(0),
     [submitting, setSubmitting] = useState(false);
@@ -1093,7 +1119,7 @@ function JobDialog({
           : kind === "revise"
             ? "Revise content"
           : kind === "content"
-            ? "Create content"
+            ? finding ? "Draft a page improvement" : "Create content"
             : kind === "competitors"
               ? "Review competitor evidence"
             : kind === "diagnose"
@@ -1119,6 +1145,7 @@ function JobDialog({
                 : {}),
               maxCostUsd: kind === "audit" || provider === "chatgpt" ? 0 : budget,
               topic: d.get("topic") ?? undefined,
+              ...(kind === 'content' ? { contentMode, ...(finding ? { findingId: finding.id } : {}) } : {}),
               ...(kind === 'revise' ? { contentId: revision.id, revisionInstructions: d.get('instructions') } : {}),
               ...(kind === 'competitors' ? { measurementJobId } : {}),
               render: d.get("render") === "on",
@@ -1127,7 +1154,8 @@ function JobDialog({
               };
               const fingerprint = JSON.stringify(request);
               if (submission.current?.fingerprint !== fingerprint) submission.current = { fingerprint, key: crypto.randomUUID() };
-              await api("/jobs", request, "POST", submission.current.key);
+              const started = await api<Job>("/jobs", request, "POST", submission.current.key);
+              onStarted(started);
             close(); } catch (failure) { setError(failure); }
           }).finally(() => setSubmitting(false));
         }}
@@ -1156,6 +1184,14 @@ function JobDialog({
           </div>
         ) : (
           <>
+            {kind === 'content' && finding && <section className="draft-origin" aria-label="Selected opportunity">
+              <span className="draft-origin-icon"><Lightbulb size={19} /></span><div><strong>{finding.title}</strong>{targetDomain(finding.targetUrl) && <a href={finding.targetUrl} target="_blank" rel="noreferrer"><SiteIcon projectId={project.id} domain={targetDomain(finding.targetUrl)!} size={18} /><span>View the existing page</span><ArrowUpRight size={13} /></a>}</div>
+              <p>Draft copy for this improvement. Site configuration and publishing remain in your hands.</p>
+            </section>}
+            {kind === 'content' && finding && <fieldset className="content-purpose"><legend>What would you like to write?</legend>{[
+              { value: 'page_update' as const, title: 'Improve this page', detail: 'Focused copy for the existing page', Icon: FilePenLine },
+              { value: 'article' as const, title: 'Write a new article', detail: 'A separate article informed by this opportunity', Icon: FileText },
+            ].map(({ value, title, detail, Icon }) => <label key={value} className={contentMode === value ? 'selected' : ''}><input type="radio" name="contentMode" value={value} checked={contentMode === value} onChange={() => setContentMode(value)} /><Icon size={21} /><span><strong>{title}</strong><small>{detail}</small></span><Check size={16} aria-hidden="true" /></label>)}</fieldset>}
             <label>
               Connection
               <Select label="Connection" {...feedback.field("provider")} value={provider} placeholder="Connect a provider in Settings" options={providerOptions(connected, choices)} onChange={(value) => { setProvider(value as Provider); setError(""); }} />
@@ -1191,7 +1227,7 @@ function JobDialog({
             {provider === "chatgpt" && ["measure", "recheck"].includes(kind) && <label className="checkbox-field"><input type="checkbox" name="webSearch" defaultChecked />Search the web for this check<small>Requires web search permission for this model and account. Turn it off to collect model-only answers.</small></label>}
             {kind === "content" && (
               <label>
-                Topic
+                {finding ? 'Focus of the draft' : 'Topic'}
                 <input
                   name="topic"
                   defaultValue={initialTopic}
@@ -1246,7 +1282,7 @@ function JobDialog({
             ? "Starting..."
             : kind === "audit"
               ? "Start local audit"
-              : "Start workflow"}
+              : kind === 'content' ? contentMode === 'page_update' ? 'Draft page copy' : 'Create draft' : kind === 'revise' ? 'Revise draft' : kind === 'diagnose' ? 'Find opportunities' : kind === 'competitors' ? 'Review competitors' : 'Start visibility check'}
         </button>
       </form>
     </Modal>

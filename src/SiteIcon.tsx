@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-/** Icons are requested from the local backend, never an external favicon aggregator. */
+/** The local backend enforces website scope and the saved icon lookup preference. */
 export function SiteIcon({
   projectId,
   domain,

@@ -18,6 +18,28 @@
 .draft-document { min-width: 0; padding: 26px 30px; }
 .draft-document-heading h3 { font-size: 23px; line-height: 1.35; letter-spacing: -.6px; margin: 12px 0 7px; overflow-wrap: anywhere; }
 .draft-document-heading p { color: var(--muted); font-size: 12px; }
+.draft-target { display: grid; gap: 8px; margin-top: 18px; font-size: 12px; color: var(--muted); }
+.draft-target a { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.draft-target a > span { overflow-wrap: anywhere; }
+.draft-origin { border: 1px solid #d5e3f5; background: #f5f9ff; border-radius: 10px; padding: 16px; display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 9px; }
+.draft-origin-icon { color: var(--primary); padding-top: 2px; }
+.draft-origin strong { font-size: 13px; line-height: 1.5; }
+.draft-origin a { display: flex; align-items: center; gap: 7px; margin-top: 9px; font-size: 12px; }
+.draft-origin a > span { overflow-wrap: anywhere; }
+.draft-origin p { grid-column: 2; color: var(--muted); font-size: 12px; margin: 3px 0 0; }
+.content-purpose { border: 0; padding: 0; margin: 0; display: grid; gap: 8px; }
+.content-purpose legend { padding: 0; margin-bottom: 10px; font-size: 13px; font-weight: 500; }
+.content-purpose label { position: relative; display: flex; align-items: center; gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 9px; cursor: pointer; background: #fafbfd; }
+.content-purpose label.selected { border-color: #79a7e3; background: #f0f6ff; }
+.content-purpose label:focus-within { outline: 2px solid var(--primary); outline-offset: 2px; }
+.content-purpose label > input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.content-purpose label > span { display: grid; gap: 4px; min-width: 0; }
+.content-purpose label strong { font-size: 13px; font-weight: 500; }
+.content-purpose label small { font-size: 12px; color: var(--muted); }
+.content-purpose label > svg { color: var(--muted); flex-shrink: 0; }
+.content-purpose label > svg:last-child { margin-left: auto; opacity: 0; color: var(--primary); }
+.content-purpose label.selected > svg { color: var(--primary); }
+.content-purpose label.selected > svg:last-child { opacity: 1; }
 .draft-context { display: grid; gap: 8px; margin: 22px 0; }
 .draft-context > details { border: 1px solid var(--border); border-radius: 8px; background: #fcfdff; overflow: hidden; }
 .draft-context summary { list-style: none; display: flex; align-items: center; gap: 9px; padding: 12px 14px; font-size: 12px; cursor: pointer; }
@@ -26,6 +48,9 @@
 .draft-context details[open] summary > svg:last-child { transform: rotate(180deg); }
 .draft-context details > section, .draft-context details > .document-preview, .draft-context details > p { padding: 16px; border-top: 1px solid var(--border); margin: 0; }
 .draft-document .document-preview { max-width: 720px; }
+.document-preview ul { list-style: disc; }
+.document-preview ol { list-style: decimal; }
+.document-preview li::marker { color: #64748b; }
 .document-preview .markdown-table { max-width: 100%; overflow: auto; margin: 24px 0; border: 1px solid var(--border); border-radius: 8px; }
 .document-preview .markdown-table:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
 .document-preview .markdown-table table { min-width: 440px; width: 100%; border-collapse: collapse; }

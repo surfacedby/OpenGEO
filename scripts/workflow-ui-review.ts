@@ -32,32 +32,32 @@ try {
   await page.getByRole("button", { name: "Check visibility", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Measure AI visibility" });
   await dialog.getByRole("button", { name: "Retry availability check", exact: true }).waitFor();
-  assert.equal(await dialog.getByRole("button", { name: "Start workflow", exact: true }).isDisabled(), true);
+  assert.equal(await dialog.getByRole("button", { name: "Start visibility check", exact: true }).isDisabled(), true);
   await dialog.getByRole("button", { name: "Retry availability check", exact: true }).click();
-  await dialog.getByRole("button", { name: "Start workflow", exact: true }).waitFor({ state: "visible" });
+  await dialog.getByRole("button", { name: "Start visibility check", exact: true }).waitFor({ state: "visible" });
   await dialog.getByLabel("Approved run budget (USD)").fill("10001");
-  await dialog.getByRole("button", { name: "Start workflow", exact: true }).click();
+  await dialog.getByRole("button", { name: "Start visibility check", exact: true }).click();
   await dialog.getByText("Review the highlighted fields.", { exact: true }).waitFor();
   assert.equal(await dialog.getByLabel("Approved run budget (USD)").getAttribute("aria-invalid"), "true");
   assert.equal(runtime.store.jobs().length, 0);
   await dialog.getByRole("button", { name: /^Run budget:/ }).click();
   assert.equal(await dialog.getByLabel("Approved run budget (USD)").evaluate(element => element === document.activeElement), true);
   await dialog.getByLabel("Approved run budget (USD)").fill("0.20");
-  await dialog.getByRole("button", { name: "Start workflow", exact: true }).waitFor();
+  await dialog.getByRole("button", { name: "Start visibility check", exact: true }).waitFor();
   // A browser transport failure happens before the backend creates any paid work.
   const held = new Promise<void>(resolve => { release = resolve; });
   await page.route("**/api/jobs", async route => {
     if (route.request().method() !== "POST") { await route.continue(); return; }
     await held; await route.abort("failed");
   });
-  await dialog.getByRole("button", { name: "Start workflow", exact: true }).click();
+  await dialog.getByRole("button", { name: "Start visibility check", exact: true }).click();
   await dialog.getByRole("button", { name: "Starting...", exact: true }).waitFor();
   assert.equal(await dialog.getByRole("button", { name: "Close dialog", exact: true }).isDisabled(), true);
   await page.keyboard.press("Escape");
   assert.equal(await dialog.count(), 1);
   release();
   await dialog.getByText("The workspace did not confirm this run. Check Recent activity or retry with the same inputs.", { exact: true }).waitFor();
-  assert.equal(await dialog.getByRole("button", { name: "Start workflow", exact: true }).isEnabled(), true);
+  assert.equal(await dialog.getByRole("button", { name: "Start visibility check", exact: true }).isEnabled(), true);
   assert.equal(await dialog.getByLabel("Approved run budget (USD)").inputValue(), "0.20");
   assert.equal(runtime.store.jobs().length, 0);
   await page.unroute("**/api/jobs");
@@ -69,7 +69,7 @@ try {
     const response = await route.fetch(); assert.equal(response.ok(), true);
     await route.abort("failed");
   });
-  await dialog.getByRole("button", { name: "Start workflow", exact: true }).click();
+  await dialog.getByRole("button", { name: "Start visibility check", exact: true }).click();
   await dialog.locator(".inline-error").waitFor();
   assert.equal(runtime.store.jobs().length, 1);
   const acceptedId = runtime.store.jobs()[0].id;
@@ -78,7 +78,7 @@ try {
   await page.unroute("**/api/jobs");
   let retryKey = "";
   await page.route("**/api/jobs", async route => { retryKey = route.request().headers()["idempotency-key"]; await route.continue(); });
-  await dialog.getByRole("button", { name: "Start workflow", exact: true }).click();
+  await dialog.getByRole("button", { name: "Start visibility check", exact: true }).click();
   await dialog.waitFor({ state: "hidden" });
   assert.equal(runtime.store.jobs().length, 1);
   assert.equal(runtime.store.jobs()[0].id, acceptedId);

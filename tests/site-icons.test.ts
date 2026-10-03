@@ -49,6 +49,13 @@ test("site icon routes require a session and refuse websites outside the selecte
       ).statusCode,
       404,
     );
+    const preferenceUrl = '/api/settings/website-icons';
+    assert.equal((await app.inject({ url: preferenceUrl })).statusCode, 401);
+    const headers = { authorization: 'Bearer icon-route-fixture' };
+    assert.deepEqual((await app.inject({ url: preferenceUrl, headers })).json(), { enabled: true });
+    assert.equal((await app.inject({ url: preferenceUrl, method: 'PUT', headers, payload: { enabled: false, domain: 'unexpected.example' } })).statusCode, 422);
+    assert.deepEqual((await app.inject({ url: preferenceUrl, method: 'PUT', headers, payload: { enabled: false } })).json(), { enabled: false });
+    assert.equal(store.setting('cachedWebsiteIcons', true), false);
     assert.equal(
       (
         await app.inject({
@@ -169,4 +176,46 @@ test('WebP icons require a bounded static canvas and complete chunk framing', ()
   assert.equal(rasterIcon(truncated),null);
   const trailing=Buffer.concat([bytes,Buffer.from('<script>')]);
   assert.equal(rasterIcon(trailing),null);
+});
+
+test('optional cached icons use one fixed destination, send only the public hostname and honor opt-out', async () => {
+  const requests: URL[] = [];
+  let enabled = true;
+  const icons = new SiteIcons(async url => {
+    requests.push(url);
+    return url.hostname === 't0.gstatic.com' ? response(200, png) : response(404, Buffer.alloc(0));
+  }, () => enabled);
+  assert.ok((await icons.get('example.com'))?.bytes.equals(png));
+  const cached = requests.filter(url => url.hostname === 't0.gstatic.com');
+  assert.equal(cached.length, 1);
+  assert.equal(cached[0].origin + cached[0].pathname, 'https://t0.gstatic.com/faviconV2');
+  assert.equal(cached[0].searchParams.get('url'), 'https://example.com');
+  assert.equal(cached[0].searchParams.get('size'), '64');
+  assert.deepEqual([...cached[0].searchParams.keys()].sort(), ['client', 'fallback_opts', 'size', 'type', 'url']);
+  await icons.get('example.com');
+  assert.equal(requests.length, 3);
+  enabled = false; icons.disableCached();
+  assert.equal(await icons.get('example.com'), null);
+  assert.equal(requests.filter(url => url.hostname === 't0.gstatic.com').length, 1);
+});
+
+test('cached icons reject redirects and active content and abort when disabled', async () => {
+  for (const output of [response(302, Buffer.alloc(0), 'https://tracking.example/icon'), response(200, Buffer.from('<svg><script>run()</script></svg>'))]) {
+    const requests: string[] = [];
+    const icons = new SiteIcons(async url => { requests.push(url.hostname); return url.hostname === 't0.gstatic.com' ? output : response(404, Buffer.alloc(0)); }, () => true);
+    assert.equal(await icons.get('example.com'), null);
+    assert.deepEqual(requests, ['example.com', 'example.com', 't0.gstatic.com']);
+  }
+  let enabled = true, start!: () => void;
+  const started = new Promise<void>(resolve => { start = resolve; });
+  const icons = new SiteIcons(async (url, signal) => {
+    if (url.hostname !== 't0.gstatic.com') return response(404, Buffer.alloc(0));
+    start();
+    await new Promise<void>((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+    return response(200, png);
+  }, () => enabled);
+  const loading = icons.get('example.com');
+  await started;
+  enabled = false; icons.disableCached();
+  assert.equal(await loading, null);
 });

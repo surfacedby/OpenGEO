@@ -18,6 +18,7 @@ import { discoverQuestions, discoverCompetitors } from "./discovery.js";
 import { consoleContent, cancelConsoleContent } from "./console-content.js";
 import {
   ProviderError,
+  contentTask,
   type Job,
   type Project,
   type Observation,
@@ -497,16 +498,18 @@ export class Runner {
       if (!original) throw new Error('Content not found');
       if (!snapshot) this.store.setStep(job.id, 'revision-source', 'done', original);
     }
+    const taskSnapshot = this.store.step(job.id, 'content-task');
+    const task = contentTask.parse(original?.task ?? (taskSnapshot?.body ? JSON.parse(taskSnapshot.body) : { mode: 'article' }));
     const model = await this.contentModel(job);
     const latest = this.store
       .jobs(project.id)
       .find((j) => j.kind === "audit" && j.status === "completed");
     const sourceIds = new Set<string>(original?.sourceEvidence?.map((s: any) => s.id) ?? []);
     const sourcePages = sourceIds.size ? this.store.pages(project.id).filter((p) => sourceIds.has(p.id)) : latest ? this.store.pages(project.id, latest.id) : [];
-    if (!sourcePages.length) throw new Error("Complete a local audit first");
     const topic = original?.topic ?? job.topic ?? project.brand;
     const savedSources = this.store.step(job.id, "content-sources");
-    const sourceBudget = Math.min(65000, Math.floor((model.contextLength - 10000 - Buffer.byteLength(project.knowledge + (original?.markdown ?? ""), "utf8")) / 2));
+    if (!savedSources?.body && !sourcePages.length) throw new Error("Complete a local audit first");
+    const sourceBudget = Math.min(65000, Math.floor((model.contextLength - 10000 - Buffer.byteLength(project.knowledge + (original?.markdown ?? "") + JSON.stringify(task), "utf8")) / 2));
     let selected;
     if (savedSources?.body) selected = JSON.parse(savedSources.body);
     else if (original && sourceIds.size) {
@@ -515,11 +518,12 @@ export class Runner {
       if (Buffer.byteLength(JSON.stringify(sources), "utf8") > sourceBudget)
         throw new ProviderError("context", "Choose a model with more room to preserve this draft's original sources. No request was sent.");
       selected = { sources, coverage: original.sourceCoverage ?? { pagesAvailable: sources.length, pagesUsed: sources.length, excerpts: true } };
-    } else selected = contentSources(sourcePages, topic, sourceBudget);
+    } else selected = contentSources(sourcePages, topic, sourceBudget, task.targetUrl ? [task.targetUrl] : []);
     if (!savedSources) this.store.setStep(job.id, "content-sources", "done", selected);
     const sources: { id: string; url: string; title: string; text: string }[] = selected.sources;
     const context = {
       topic,
+      task,
       brand: project.brand,
       locale: project.locale,
       knowledge: {
@@ -544,9 +548,10 @@ export class Runner {
           "The research pass cited unknown evidence. Review the result before retrying.",
           true,
         );
-    const brief = await call("brief", { topic: context.topic, locale: context.locale, research, sourceReferences: sources.map(({ id, url, title }) => ({ id, url, title })) });
+    const brief = await call("brief", { topic: context.topic, task, locale: context.locale, research, sourceReferences: sources.map(({ id, url, title }) => ({ id, url, title })) });
     const draft = await call("draft", {
       locale: context.locale,
+      task,
       brief,
       research,
       sources,
@@ -554,7 +559,7 @@ export class Runner {
       ...(original ? { previousDraft: original.markdown, revisionInstructions: job.revisionInstructions } : {}),
     });
     const review = reviewSchema.parse(
-      parseJson(await call("verify", { locale: context.locale, draft, research, sources })),
+      parseJson(await call("verify", { locale: context.locale, task, draft, research, sources })),
     );
     if (
       review.issues.some((issue) =>
@@ -566,9 +571,9 @@ export class Runner {
         "Verification referenced unknown evidence. Review the saved verification before continuing.",
         true,
       );
-    const markdown = await call("edit", { locale: context.locale, draft, review, research, sources });
+    const markdown = await call("edit", { locale: context.locale, task, draft, review, research, sources });
     const finalReview = reviewSchema.parse(
-      parseJson(await call('verifyFinal', { locale: context.locale, draft: markdown, research, sources })),
+      parseJson(await call('verifyFinal', { locale: context.locale, task, draft: markdown, research, sources })),
     );
     if (finalReview.issues.some((issue) => issue.evidenceIds.some((id) => !allowed.has(id))))
       throw new ProviderError('evidence', 'The final review referenced unknown evidence. Review the saved output before continuing.', true);
@@ -588,6 +593,7 @@ export class Runner {
     const doc = {
       id: randomUUID(),
       topic: context.topic,
+      task,
       locale: context.locale,
       markdown,
       brief,

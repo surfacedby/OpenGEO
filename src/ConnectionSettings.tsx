@@ -7,6 +7,7 @@ import { FormFeedback, useFormFeedback } from "./FormFeedback";
 import { Capabilities, ProviderIcon, providerLabels, providerOrder, consolePlatformCatalog } from "./provider-ui";
 import identity from "../brand/identity.json";
 import { UsagePreference } from "./UsagePreference";
+import { WebsiteIconPreference } from "./WebsiteIconPreference";
 import "./setup-refinements.css";
 import type { Provider } from "../server/contracts";
 export type ChatGPTProfiles = { active: string | null; welcome?: boolean; profiles: { id: string; email: string; label?: string; sharing: boolean }[] };
@@ -115,7 +116,7 @@ export function ConnectionSettings({ connected, profiles, run: execute, variant 
         {variant === "settings" && <p className="connection-privacy"><ShieldCheck size={16} />Credentials stay encrypted on this installation.</p>}
       </>}
       {tab === "Schedules" && <ScheduleControls connected={connected} run={run} />}
-      {tab === "Data & privacy" && <><UsagePreference /><BackupControls run={run} /><section className="panel"><div className="panel-padding"><h2>Your data stays under your control</h2><p>Projects, observations and drafts are stored locally. Credentials are excluded from exports. You can turn usage sharing off anytime. Selected provider calls send the task inputs needed for that operation.</p></div></section></>}
+      {tab === "Data & privacy" && <><UsagePreference /><WebsiteIconPreference /><BackupControls run={run} /><section className="panel"><div className="panel-padding"><h2>Your data stays under your control</h2><p>Projects, observations and drafts are stored locally. Credentials are excluded from exports. You can turn usage sharing off anytime. Selected provider calls send the task inputs needed for that operation.</p></div></section></>}
       {tab === "About" && <section className="panel"><div className="about-product"><img src="/logo.svg" width="56" height="56" alt="" /><h2>{identity.name}</h2><p>{identity.tagline}</p><p>Free, open source software, with no artificial project limits.</p><small>Maintained by SurfacedBy. Managed services are optional.</small></div></section>}
     </div>
   </>;

@@ -99,12 +99,27 @@ export type Finding = {
   status: "open" | "doing" | "done";
   kind: string;
 };
+export const contentTask = z.object({
+  mode: z.enum(["article", "page_update"]),
+  findingId: z.string().min(1).max(200).optional(),
+  targetUrl: z.string().url().optional(),
+  recommendation: z.object({
+    title: z.string().max(200),
+    description: z.string().max(3000),
+    steps: z.array(z.string().max(2000)),
+  }).strict().optional(),
+}).strict()
+  .refine(task => Boolean(task.findingId) === Boolean(task.targetUrl) && Boolean(task.findingId) === Boolean(task.recommendation), 'Keep the opportunity and target page together')
+  .refine(task => task.mode !== 'page_update' || Boolean(task.findingId), 'A page update requires its source opportunity');
+export type ContentTask = z.infer<typeof contentTask>;
 export const jobKinds = ["audit", "discover", "competitors", "measure", "diagnose", "content", "revise", "recheck"] as const;
 export const jobInput = z
   .object({
     projectId: z.string().uuid(),
     kind: z.enum(jobKinds),
     contentId: z.string().uuid().optional(),
+    findingId: z.string().uuid().optional(),
+    contentMode: z.enum(["article", "page_update"]).optional(),
     revisionInstructions: z.string().trim().min(3).max(2000).optional(),
     provider: z.enum(providers).optional(),
     model: z.string().max(150).optional(),
@@ -119,7 +134,9 @@ export const jobInput = z
   })
   .strict()
   .refine((input) => input.kind !== 'revise' || (!!input.contentId && !!input.revisionInstructions), 'Choose a draft and describe the revision')
-  .refine((input) => input.kind !== 'competitors' || !!input.measurementJobId, 'Choose a saved visibility check');
+  .refine((input) => input.kind !== 'competitors' || !!input.measurementJobId, 'Choose a saved visibility check')
+  .refine(input => (!input.findingId && !input.contentMode) || input.kind === 'content', 'Content options apply only to a new draft')
+  .refine(input => input.contentMode !== 'page_update' || !!input.findingId, 'Choose a page improvement before drafting its changes');
 export type JobInput = z.infer<typeof jobInput>;
 export type Job = JobInput & {
   id: string;

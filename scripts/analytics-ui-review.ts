@@ -89,7 +89,7 @@ try {
               cited: p < [0, 1, 1, 2, 2][index],
               costUsd: 0,
               answer:
-                "Synthetic UX review evidence. These are test records, not measured AI visibility. " +
+                "Synthetic **UX review evidence**. These are test records, not measured AI visibility. " +
                 "Example domains are reserved for documentation and testing. ".repeat(
                   8,
                 ) +
@@ -330,6 +330,9 @@ try {
     await page.locator(".answer-detail[open]").innerText(),
     /End of full test answer\./,
   );
+  assert.equal(await page.locator('.answer-detail[open] .answer-document strong').innerText(), 'UX review evidence');
+  assert.equal(await page.locator('.answer-detail[open] .answer-sources .site-icon').count(), 3);
+  assert.ok((await page.locator('.answer-detail[open] .answer-sources a').first().getAttribute('href'))?.startsWith('https://'));
   await page
     .getByRole("button", { name: "Show all answers", exact: true })
     .click();

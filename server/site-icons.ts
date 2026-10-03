@@ -76,13 +76,18 @@ export function rasterIcon(bytes: Buffer): SiteIcon | null {
   return { bytes, contentType: "image/vnd.microsoft.icon" };
 }
 
-/** Fetch directly from a known website, with the crawler's DNS protections and no third-party favicon service. */
+/** Known websites use direct icons first; an optional fixed cache service supplies a bounded raster fallback. */
 export class SiteIcons {
   private cache = new Map<string, { until: number; icon: SiteIcon | null }>();
   private pending = new Map<string, Promise<SiteIcon | null>>();
   private active = 0;
   private waiters: (() => void)[] = [];
-  constructor(private fetcher: FetchIcon = request) {}
+  private cachedRequests = new Set<AbortController>();
+  constructor(private fetcher: FetchIcon = request, private allowCached: () => boolean = () => false) {}
+  disableCached() {
+    for (const controller of this.cachedRequests) controller.abort();
+    this.cache.clear();
+  }
   async get(domain: string): Promise<SiteIcon | null> {
     const url = publicUrl("https://" + domain + "/favicon.ico");
     if (
@@ -91,19 +96,21 @@ export class SiteIcons {
       url.pathname !== "/favicon.ico"
     )
       throw new Error("Invalid icon domain");
-    const cached = this.cache.get(domain);
+    const useCached = this.allowCached(), key = domain + ':' + useCached;
+    const cached = this.cache.get(key);
     if (cached && cached.until > Date.now()) return cached.icon;
-    if (this.pending.has(domain)) return this.pending.get(domain)!;
+    if (this.pending.has(key)) return this.pending.get(key)!;
     // Queue decorative requests so large result tables remain usable with bounded sockets.
     const task = (async () => {
       if (this.active >= 8)
         await new Promise<void>((resolve) => this.waiters.push(resolve));
       else this.active++;
-      return this.load(url).catch(() => null);
+      const direct = await this.load(url).catch(() => null);
+      return direct ?? (useCached && this.allowCached() ? this.cachedIcon(domain).catch(() => null) : null);
     })()
       .then((icon) => {
-        this.cache.delete(domain);
-        this.cache.set(domain, {
+        this.cache.delete(key);
+        this.cache.set(key, {
           until: Date.now() + (icon ? 86400000 : 7200000),
           icon,
         });
@@ -115,10 +122,32 @@ export class SiteIcons {
         const next = this.waiters.shift();
         if (next) next();
         else this.active--;
-        this.pending.delete(domain);
+        this.pending.delete(key);
       });
-    this.pending.set(domain, task);
+    this.pending.set(key, task);
     return task;
+  }
+  private async cachedIcon(domain: string) {
+    const controller = new AbortController();
+    this.cachedRequests.add(controller);
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    try {
+      const url = new URL('https://t0.gstatic.com/faviconV2');
+      for (const [key, value] of Object.entries({ client: 'SOCIAL', type: 'FAVICON', fallback_opts: 'TYPE,SIZE,URL', url: 'https://' + domain, size: '64' })) url.searchParams.set(key, value);
+      // The cache receives only a public hostname; redirects cannot widen this fixed destination.
+      const response = await this.fetcher(url, controller.signal);
+      try {
+        if (response.status !== 200 || !response.body || !this.allowCached()) return null;
+        const chunks: Buffer[] = [];
+        let length = 0;
+        for await (const chunk of response.body) {
+          length += chunk.length;
+          if (length > 131072 || !this.allowCached()) return null;
+          chunks.push(Buffer.from(chunk));
+        }
+        return rasterIcon(Buffer.concat(chunks));
+      } finally { await response.body?.cancel?.().catch(() => {}); }
+    } finally { clearTimeout(timeout); this.cachedRequests.delete(controller); }
   }
   private async load(initial: URL) {
     const signal = AbortSignal.timeout(5000);

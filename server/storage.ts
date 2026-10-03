@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
-import { ProviderError } from "./contracts.js";
+import { ProviderError, contentTask } from "./contracts.js";
 import type {
   Project,
   ProjectInput,
@@ -110,6 +110,13 @@ export class Store {
         throw new ProviderError('in_progress', 'A competitor review is already saved for this check. Resume it or follow its progress.');
       if (input.kind === 'revise' && !this.artifacts<any>(input.projectId, 'content').some((doc) => doc.id === input.contentId))
         throw new Error('Content not found');
+      const finding = input.findingId ? this.findings(input.projectId).find(row => row.id === input.findingId) : undefined;
+      if (input.findingId && (!finding || !['analysis', 'console'].includes(finding.kind)))
+        throw new ProviderError('evidence', 'Choose a saved opportunity from this website.');
+      if (input.findingId && input.provider === 'console')
+        throw new ProviderError('capability', 'Choose ChatGPT or OpenRouter to draft a saved page improvement.');
+      if (input.findingId && this.jobs(input.projectId).some(job => job.kind === 'content' && job.findingId === input.findingId && ['queued', 'running', 'paused'].includes(job.status)))
+        throw new ProviderError('in_progress', 'A draft for this opportunity is already saved. Follow its progress or resume it in Content.');
       const now = new Date().toISOString();
       const j: Job = {
         ...input,
@@ -126,6 +133,11 @@ export class Store {
       this.db
         .prepare("INSERT INTO jobs VALUES(?,?,?,?,?)")
         .run(j.id, input.projectId, j.status, JSON.stringify(j), key);
+      if (input.kind === 'content') this.setStep(j.id, 'content-task', 'done', contentTask.parse({
+        mode: input.contentMode ?? (finding ? 'page_update' : 'article'),
+        ...(finding ? { findingId: finding.id, targetUrl: finding.targetUrl,
+          recommendation: { title: finding.title, description: finding.description, steps: finding.steps } } : {}),
+      }));
       return j;
     })();
   }
