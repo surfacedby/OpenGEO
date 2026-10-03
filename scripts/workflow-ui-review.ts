@@ -1,5 +1,6 @@
 import { navigate } from "./ui-navigation.js";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,7 +23,7 @@ const browser = await chromium.launch({ channel: "chrome", headless: true });
 let release: (() => void) | undefined;
 try {
   await runtime.runner.stop(); runtime.scheduler.stop();
-  runtime.store.createProject(projectInput.parse({ domain: "example.com", brand: "Example", prompts: ["What is an example domain?"] }));
+  const project = runtime.store.createProject(projectInput.parse({ domain: "example.com", brand: "Example", prompts: ["What is an example domain?"] }));
   runtime.store.set("onboarding", { completed: true });
   runtime.runner.providers.vault.set("console", { key: "synthetic-console-key" });
   const page = await browser.newPage({ viewport: { width: 390, height: 780 } });
@@ -94,6 +95,42 @@ try {
   assert.equal(await content.getAttribute("aria-current"), "page");
   assert.equal(await page.getByRole("button", { name: "Actions", exact: true }).count(), 0);
   await page.getByRole("button", { name: "Close dialog", exact: true }).click();
+  const originals: string[] = [];
+  for (const index of [0, 1, 2]) {
+    const id = randomUUID(), derivedFrom = index === 2 ? originals[0] : undefined;
+    const job = runtime.store.enqueue({ projectId: project.id, kind: derivedFrom ? 'revise' : 'content', provider: 'chatgpt', model: 'synthetic-ui-model', maxCostUsd: 0,
+      ...(derivedFrom ? { contentId: derivedFrom, revisionInstructions: 'Clarify the opening.' } : { topic: 'Documentation examples' }) }, randomUUID());
+    runtime.store.put('content', project.id, job.id, { id, topic: 'Documentation examples', markdown: '# Test draft\n\nSaved version ' + index, brief: 'A documentation example.', locale: 'en-US',
+      createdAt: '2026-01-0' + (index + 1) + 'T12:00:00Z', ...(derivedFrom ? { derivedFrom } : {}) });
+    runtime.store.updateJob(job.id, { status: 'completed', result: { id } });
+    if (!derivedFrom) originals.push(id);
+  }
+  await page.getByRole('button', { name: 'Refresh workspace', exact: true }).click();
+  await page.getByRole('heading', { name: 'Your drafts 2', exact: true }).waitFor();
+  assert.equal(await page.locator('.draft-card').count(), 2);
+  assert.match(await page.locator('.draft-library').innerText(), /2 versions/);
+  await page.getByRole('button', { name: 'Draft version', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Search draft version', exact: true }).press('End');
+  await page.keyboard.press('Enter');
+  await page.getByText('Saved version 0', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Edit Markdown', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Draft for Documentation examples', exact: true }).fill('# Preserved edits');
+  await page.getByRole('button', { name: 'Draft version', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Search draft version', exact: true }).press('Home');
+  await page.keyboard.press('Enter');
+  const saveChanges = page.getByRole('dialog', { name: 'Save your changes?', exact: true });
+  await saveChanges.getByRole('button', { name: 'Keep editing', exact: true }).click();
+  assert.equal(await page.getByRole('textbox', { name: 'Draft for Documentation examples', exact: true }).inputValue(), '# Preserved edits');
+  await page.getByRole('button', { name: 'Draft version', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Search draft version', exact: true }).press('Home');
+  await page.keyboard.press('Enter');
+  await saveChanges.getByRole('button', { name: 'Save and continue', exact: true }).click();
+  await page.getByText('Saved version 2', { exact: true }).waitFor();
+  assert.equal(runtime.store.artifacts<any>(project.id, 'content').find(draft => draft.id === originals[0]).markdown, '# Preserved edits');
+  for (const width of [1360, 760, 390]) {
+    await page.setViewportSize({ width, height: 780 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'Content history at ' + width + 'px');
+  }
   await navigate(page, "Settings");
   await page.getByRole("tab", { name: "Schedules", exact: true }).click();
   await page.getByRole("button", { name: "Add schedule", exact: true }).click();

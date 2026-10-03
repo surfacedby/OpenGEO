@@ -15,6 +15,9 @@
 .draft-card.selected > svg { color: var(--primary); }
 .draft-state { font-size: 11px; color: var(--muted); }
 .draft-state.needs-review { color: #975e10; }
+.draft-version-count { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
+.draft-history { display: flex; align-items: center; gap: 9px; color: var(--muted); margin-top: 16px; }
+.draft-history .choice { width: 190px; }
 .draft-document { min-width: 0; padding: 26px 30px; }
 .draft-document-heading h3 { font-size: 23px; line-height: 1.35; letter-spacing: -.6px; margin: 12px 0 7px; overflow-wrap: anywhere; }
 .draft-document-heading p { color: var(--muted); font-size: 12px; }
@@ -41,11 +44,13 @@
 .content-purpose label.selected > svg { color: var(--primary); }
 .content-purpose label.selected > svg:last-child { opacity: 1; }
 .draft-context { display: grid; gap: 8px; margin: 22px 0; }
-.draft-context > details { border: 1px solid var(--border); border-radius: 8px; background: #fcfdff; overflow: hidden; }
+.draft-context > details { border: 1px solid var(--border); border-radius: 8px; background: #fcfdff; overflow: hidden; padding: 0; margin: 0; }
 .draft-context summary { list-style: none; display: flex; align-items: center; gap: 9px; padding: 12px 14px; font-size: 12px; cursor: pointer; }
 .draft-context summary::-webkit-details-marker { display: none; }
 .draft-context summary > svg:last-child { margin-left: auto; }
 .draft-context details[open] summary > svg:last-child { transform: rotate(180deg); }
+.draft-context .needs-review { border-color: #eadbbb; }
+.draft-context .needs-review summary { color: #85530e; background: #fffaf0; }
 .draft-context details > section, .draft-context details > .document-preview, .draft-context details > p { padding: 16px; border-top: 1px solid var(--border); margin: 0; }
 .draft-document .document-preview { max-width: 720px; }
 .document-preview ul { list-style: disc; }
