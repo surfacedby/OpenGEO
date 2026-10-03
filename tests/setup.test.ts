@@ -118,3 +118,25 @@ test("resume requires review only for uncertain requests and changes budgets onl
     assert.equal(f.store.job(job.id).spentUsd, 0.5);
   } finally { connections.close(); await f.close(); }
 });
+
+test("queued competitor discovery retains collected answers while an unstarted check preserves the prior scope", async () => {
+  const f = await fixture(), connections = new Connections(f.store, f.vault), runner = new Runner(f.store, new Providers(f.vault, connections));
+  try {
+    const project = f.store.createProject(projectInput.parse({ domain: "example.com", brand: "Example", prompts: ["What can help our team?"] }));
+    const job = f.store.enqueue(jobInput.parse({ projectId: project.id, kind: "measure", provider: "chatgpt", discoverCompetitors: true }), "saved-answers");
+    const collectedAt = "2026-10-01T10:00:00Z";
+    f.store.setStep(job.id, "project", "done", project);
+    f.store.put("observation", project.id, job.id, { id: "saved-answer", projectId: project.id, jobId: job.id, prompt: project.prompts[0], provider: "chatgpt", platform: "chat_gpt", model: "fixture", locale: "en-US", observedAt: collectedAt, answer: "Example can help.", citations: [], surface: "api", mentioned: true, cited: false, costUsd: 0 });
+    f.store.updateJob(job.id, { status: "paused", error: "quota", result: { comparisonKey: "a".repeat(64), collectionCompletedAt: collectedAt, metrics: { requested: 1, completed: 1, missing: 0, mentionRate: 100, citationRate: 0, citations: 0 } } });
+    runner.resume(job.id, false);
+    const workspace = async () => (await f.app.inject({ url: `/api/projects/${project.id}/workspace`, headers: f.headers })).json();
+    const resumed = await workspace();
+    assert.equal(resumed.measurement.id, job.id);
+    assert.equal(resumed.measurement.status, "queued");
+    assert.equal(resumed.metrics.completed, 1);
+    assert.equal(resumed.metrics.mentionRate, 100);
+    assert.deepEqual(resumed.observations.map((answer: any) => answer.id), ["saved-answer"]);
+    f.store.enqueue(jobInput.parse({ projectId: project.id, kind: "recheck", provider: "chatgpt" }), "unstarted-check");
+    assert.equal((await workspace()).measurement.id, job.id);
+  } finally { connections.close(); await f.close(); }
+});

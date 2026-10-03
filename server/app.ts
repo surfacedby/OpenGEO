@@ -25,6 +25,7 @@ import {
 import { publicUrl } from "./network.js";
 import { workspacePresentation, currentFindings } from "./presentation.js";
 import { SiteIcons } from "./site-icons.js";
+import { completedMeasurement } from "./portable-results.js";
 import { UsageSharing } from "./usage.js";
 import {
   measurementMetrics,
@@ -271,7 +272,8 @@ export async function createApp(
       measure = jobs.find(
         (j) =>
           ["measure", "recheck"].includes(j.kind) &&
-          ["completed", "paused", "running", "failed"].includes(j.status),
+          (["completed", "paused", "running", "failed"].includes(j.status) ||
+            (j.status === "queued" && completedMeasurement(j))),
       );
     const observations = measure ? store.observations(id, measure.id) : [];
     const snapshot = measure ? store.step(measure.id, "project") : undefined;
