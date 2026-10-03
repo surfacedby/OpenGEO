@@ -652,7 +652,8 @@ export function App() {
               {page === "Competitors" && (
                 <>
                   {measured ? <CitationComparison projectId={p!.id} ownDomain={p!.domain} rows={[ownWebsite!,...w.competitors]} evidence={openEvidence} openCompetitors={() => document.getElementById("comparison-websites")?.focus()} /> : <section className="panel"><Empty title="Compare the websites in your answers">Add competitors below, then run a visibility check.</Empty></section>}
-                  <CompetitorSettings project={p!} run={run} />
+                  <CompetitorSuggestions project={p!} measurement={w.measurement} observations={w.observations} run={run} evidence={openEvidence} />
+                  <CompetitorSettings key={p!.id + ":" + p!.competitors.join("|")} project={p!} run={run} />
                 </>
               )}
               {page === "Reports" && (
@@ -956,6 +957,21 @@ function ProjectSettings({ project, run }: { project: Project; run: (action: () 
       <button className="primary" disabled={saving}>{saving ? "Saving..." : "Save questions"}</button>
     </form>}
   </section>;
+}
+function CompetitorSuggestions({ project, measurement, observations, run, evidence }: { project: Project; measurement: Job | null; observations: Observation[]; run: (action: () => Promise<unknown>) => Promise<void>; evidence: (ids: string[], label: string) => void }) {
+  const [selected, setSelected] = useState<string[]>([]), [saving, setSaving] = useState(false), [message, setMessage] = useState("");
+  const feedback = useFormFeedback();
+  useEffect(() => { setSelected([]); setMessage(""); feedback.setError(""); }, [project.id, measurement?.id]);
+  const rows = (measurement?.result as { competitors?: { name: string; domain: string; observationIds: string[] }[] } | null)?.competitors ?? [];
+  const followed = new Set(project.competitors.map(value => { try { return new URL(value.includes("://") ? value : "https://" + value).hostname.replace(/^www\./, ""); } catch { return value; } }));
+  const candidates = rows.filter(item => !followed.has(item.domain.replace(/^www\./, ""))).map(item => ({ ...item, observationIds: item.observationIds.filter(id => observations.some(answer => answer.id === id)) })).filter(item => item.observationIds.length);
+  if (!candidates.length) return null;
+  return <section className="panel competitor-suggestions"><div className="panel-heading"><h2>Discover competitors</h2><span>{candidates.length} to review</span></div><p className="competitor-intro">Named and cited in your collected answers. Choose the businesses you want to compare.</p><div className="competitor-candidates">{candidates.map(item => <div className="competitor-candidate" key={item.domain}><label><input type="checkbox" aria-label={"Follow " + item.name} checked={selected.includes(item.domain)} disabled={saving} onChange={event => { setMessage(""); setSelected(current => event.target.checked ? [...current, item.domain] : current.filter(domain => domain !== item.domain)); }} /><SiteIcon projectId={project.id} domain={item.domain} size={30} /><span><strong>{item.name}</strong><small>{item.domain}</small></span></label><button type="button" className="secondary compact" onClick={() => evidence(item.observationIds, "Answers naming " + item.name)}>{item.observationIds.length} {item.observationIds.length === 1 ? "answer" : "answers"}<ArrowRight size={14} /></button></div>)}</div><footer><FormFeedback feedback={feedback} />{message && <p className="save-notice" role="status">{message}</p>}<button className="primary" disabled={saving || !selected.some(domain => candidates.some(item => item.domain === domain))} onClick={() => {
+    const domains = selected.filter(domain => candidates.some(item => item.domain === domain));
+    const { id, createdAt, ...settings } = project;
+    setSaving(true); feedback.setError("");
+    void run(async () => { try { await api("/projects/" + id, { ...settings, competitors: [...new Set([...project.competitors, ...domains])] }, "PUT"); setSelected([]); setMessage("Competitors added to your comparison."); } catch (error) { feedback.setError(error); } finally { setSaving(false); } });
+  }}><Plus size={15} />{saving ? "Adding..." : "Add selected competitors"}</button></footer></section>;
 }
 function CompetitorSettings({ project, run }: { project: Project; run: (action: () => Promise<unknown>) => Promise<void> }) {
   const [saving, setSaving] = useState(false), [message, setMessage] = useState("");

@@ -269,6 +269,19 @@ try {
     }
   }
   await navigate(page, "Competitors");
+  const latest = runtime.store.job(currentId);
+  runtime.store.updateJob(currentId, { result: { ...(latest.result as object), competitors: [{ name: "Documentation example", domain: "example.net", observationIds: runtime.store.observations(project.id, currentId).slice(0, 1).map(answer => answer.id) }] } });
+  await page.getByRole("button", { name: "Refresh workspace", exact: true }).click();
+  await page.getByRole("heading", { name: "Discover competitors", exact: true }).waitFor();
+  const addCompetitors = page.getByRole("button", { name: "Add selected competitors", exact: true });
+  assert.equal(await addCompetitors.isEnabled(), false);
+  await page.getByRole("checkbox", { name: "Follow Documentation example", exact: true }).check();
+  await addCompetitors.click();
+  await page.getByRole("textbox", { name: "Competitor websites", exact: true }).waitFor();
+  await page.waitForFunction(() => (document.getElementById("comparison-websites") as HTMLTextAreaElement)?.value.includes("example.net"));
+  assert.deepEqual(runtime.store.project(project.id).competitors, ["iana.org", "w3.org", "example.net"]);
+  assert.deepEqual(runtime.store.project(project.id).prompts, prompts);
+  assert.equal(await page.getByRole("heading", { name: "Discover competitors", exact: true }).count(), 0);
   assert.equal(
     await page
       .getByRole("textbox", { name: "Customer questions", exact: true })

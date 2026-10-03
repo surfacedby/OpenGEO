@@ -760,3 +760,14 @@
     align-self: center;
   }
 }
+.competitor-intro { margin: 0; padding: 0 20px 14px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.competitor-candidates { padding: 0 20px; }
+.competitor-candidate { display: flex; align-items: center; gap: 14px; padding: 13px 0; border-top: 1px solid var(--border); min-width: 0; }
+.competitor-candidate label { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; cursor: pointer; }
+.competitor-candidate input[type=checkbox] { width: 17px; height: 17px; flex: none; margin: 0; accent-color: var(--primary-text); }
+.competitor-candidate label > span:last-child { min-width: 0; }
+.competitor-candidate strong { display: block; font-size: 13px; color: var(--ink); overflow-wrap: anywhere; }
+.competitor-candidate small { display: block; font-size: 11px; color: var(--muted); margin-top: 3px; overflow-wrap: anywhere; }
+.competitor-candidate .secondary { flex: none; font-size: 11px; padding: 7px 9px; min-height: 32px; }
+.competitor-suggestions footer { padding: 16px 20px; border-top: 1px solid var(--border); }
+@media (max-width: 600px) { .competitor-candidate { flex-wrap: wrap; gap: 8px; } .competitor-candidate label { flex-basis: 100%; } .competitor-candidate .secondary { margin-left: 29px; } .competitor-suggestions footer .primary { width: 100%; } }
