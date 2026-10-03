@@ -237,6 +237,14 @@ export class Runner {
     const update = (progress: string) =>
       this.store.updateJob(job.id, { progress });
     if (job.kind === "discover") return discoverQuestions(this, job, project, signal);
+    if (job.kind === "competitors") {
+      if (!["chatgpt", "openrouter"].includes(job.provider ?? "")) throw new ProviderError("capability", "Choose ChatGPT or OpenRouter to review saved answers.");
+      const measurement = this.store.job(job.measurementJobId!);
+      if (measurement.projectId !== project.id || !completedMeasurement(measurement) || !this.store.observations(project.id, measurement.id).length)
+        throw new ProviderError("evidence", "Choose a completed visibility check from this website.");
+      const model = await this.contentModel(job);
+      return { measurementJobId: measurement.id, competitors: await discoverCompetitors(this, job, project, model, signal, measurement.id) };
+    }
     if (job.kind === "audit") {
       const coverage = await crawl(
         project.domain,

@@ -169,6 +169,48 @@ test("competitor evidence permits a cited alternative regardless of website cate
   } finally { globalThis.fetch = original; await f.close(); }
 });
 
+test("competitor refresh owns its saved evidence, preserves measurements and never requests answers again", async () => {
+  const f = fixture(), original = globalThis.fetch;
+  let answerCalls = 0, reviews = 0, quota = true;
+  globalThis.fetch = (async (url, init) => {
+    if (String(url).endsWith("/models")) return json({ models: [{ slug: "fixture-model", display_name: "Fixture model", visibility: "list", context_window: 32768 }] });
+    const request = JSON.parse(init!.body as string);
+    if (request.tools) { answerCalls++; return stream("Alternative can organize customer questions.", [{ type: "url_citation", url: "https://alternative.example/" }]); }
+    reviews++;
+    const input = JSON.parse(request.input[0].content);
+    assert.equal(input.website.sources[0].url, f.page.url);
+    assert.ok(input.website.sources[0].text.includes("customer support workspace"));
+    assert.equal(input.businessNotes, "");
+    if (quota) return new Response("{}", { status: 429 });
+    return stream(JSON.stringify({ competitors: [{ name: "Alternative", domain: "alternative.example", observationIds: input.answers.map((answer: any) => answer.id) }] }));
+  }) as typeof fetch;
+  try {
+    const measured = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: "measure", provider: "chatgpt" }), "saved-check");
+    await f.runner.tick();
+    const before = f.store.job(measured.id), answers = f.store.observations(f.project.id, measured.id);
+    const reviewInput = jobInput.parse({ projectId: f.project.id, kind: "competitors", provider: "chatgpt", measurementJobId: measured.id });
+    const review = f.store.enqueue(reviewInput, "competitor-refresh");
+    assert.equal(f.store.enqueue(reviewInput, "competitor-refresh").id, review.id);
+    assert.throws(() => f.store.enqueue(reviewInput, "duplicate-competitor-refresh"));
+    await f.runner.tick();
+    assert.equal(f.store.job(review.id).status, "paused");
+    f.store.updateProject(f.project.id, { ...f.project, knowledge: "New notes after this run started" });
+    quota = false; f.runner.resume(review.id, false); await f.runner.tick();
+    assert.equal(f.store.job(review.id).status, "completed");
+    assert.equal(answerCalls, 1); assert.equal(reviews, 2);
+    assert.deepEqual(f.store.job(measured.id), before);
+    assert.deepEqual(f.store.observations(f.project.id, measured.id), answers);
+    assert.equal((f.store.job(review.id).result as any).measurementJobId, measured.id);
+    assert.equal(comparableHistory(f.store.jobs(), f.store.job(measured.id)).history.length, 1);
+    assert.deepEqual(f.store.project(f.project.id).competitors, []);
+    const other = f.store.createProject(projectInput.parse({ domain: "other.example", brand: "Other" }));
+    const foreign = f.store.enqueue(jobInput.parse({ ...reviewInput, projectId: other.id }), "foreign-review");
+    await f.runner.tick();
+    assert.equal(f.store.job(foreign.id).error, "evidence");
+    assert.equal(reviews, 2);
+  } finally { globalThis.fetch = original; await f.close(); }
+});
+
 test("setup records preserve row selections, deduplicate requests, snapshot inputs and refuse other-project task references", async () => {
   const f = fixture(), { app } = await createApp(f.store, f.vault, "synthetic-session");
   const headers = { host: "127.0.0.1:4318", authorization: "Bearer synthetic-session" };

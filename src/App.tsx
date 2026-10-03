@@ -652,7 +652,8 @@ export function App() {
               {page === "Competitors" && (
                 <>
                   {measured ? <CitationComparison projectId={p!.id} ownDomain={p!.domain} rows={[ownWebsite!,...w.competitors]} evidence={openEvidence} openCompetitors={() => document.getElementById("comparison-websites")?.focus()} /> : <section className="panel"><Empty title="Compare the websites in your answers">Add competitors below, then run a visibility check.</Empty></section>}
-                  <CompetitorSuggestions project={p!} measurement={w.measurement} observations={w.observations} run={run} evidence={openEvidence} />
+                  {measured && <section className="panel"><div className="panel-heading"><h2>Find relevant alternatives</h2><button className="secondary compact" disabled={w.jobs.some(job => job.kind === 'competitors' && job.measurementJobId === w.measurement?.id && ['queued', 'running', 'paused'].includes(job.status))} onClick={() => setJobDialog('competitors')}><RefreshCw size={14} />Review saved answers</button></div><p className="competitor-intro">Review the businesses recommended in this check against your website. Your collected answers stay unchanged.</p>{w.jobs.some(job => job.kind === 'competitors' && job.measurementJobId === w.measurement?.id) && <Jobs jobs={w.jobs.filter(job => job.kind === 'competitors' && job.measurementJobId === w.measurement?.id).slice(0, 1)} run={run} />}</section>}
+                  <CompetitorSuggestions project={p!} measurement={w.measurement} review={w.jobs.find(job => job.kind === 'competitors' && job.measurementJobId === w.measurement?.id && job.status === 'completed')} observations={w.observations} run={run} evidence={openEvidence} />
                   <CompetitorSettings key={p!.id + ":" + p!.competitors.join("|")} project={p!} run={run} />
                 </>
               )}
@@ -736,6 +737,7 @@ export function App() {
           connected={connected}
           revision={revision}
           initialTopic={contentTopic}
+          measurementJobId={w?.measurement?.id}
           run={run}
           close={() => { setJobDialog(null); setRevision(null); }}
         />
@@ -815,7 +817,7 @@ function Jobs({
         <li key={j.id}>
           <div>
             <strong>
-              {({ audit:"Site audit", discover:"Question suggestions", measure:"Visibility check", recheck:"Visibility recheck", diagnose:"Recommendations", content:"Content draft", revise:"Draft revision" } as Record<Job["kind"], string>)[j.kind]}
+              {({ audit:"Site audit", discover:"Question suggestions", competitors:"Competitor review", measure:"Visibility check", recheck:"Visibility recheck", diagnose:"Recommendations", content:"Content draft", revise:"Draft revision" } as Record<Job["kind"], string>)[j.kind]}
             </strong>
             <small>{completedMeasurement(j) && j.status !== 'completed' ? "All answers saved. Competitor suggestions: " + j.progress : j.progress}</small>
             <small>
@@ -958,11 +960,11 @@ function ProjectSettings({ project, run }: { project: Project; run: (action: () 
     </form>}
   </section>;
 }
-function CompetitorSuggestions({ project, measurement, observations, run, evidence }: { project: Project; measurement: Job | null; observations: Observation[]; run: (action: () => Promise<unknown>) => Promise<void>; evidence: (ids: string[], label: string) => void }) {
+function CompetitorSuggestions({ project, measurement, review, observations, run, evidence }: { project: Project; measurement: Job | null; review?: Job; observations: Observation[]; run: (action: () => Promise<unknown>) => Promise<void>; evidence: (ids: string[], label: string) => void }) {
   const [selected, setSelected] = useState<string[]>([]), [saving, setSaving] = useState(false), [message, setMessage] = useState("");
   const feedback = useFormFeedback();
-  useEffect(() => { setSelected([]); setMessage(""); feedback.setError(""); }, [project.id, measurement?.id]);
-  const rows = (measurement?.result as { competitors?: { name: string; domain: string; observationIds: string[] }[] } | null)?.competitors ?? [];
+  useEffect(() => { setSelected([]); setMessage(""); feedback.setError(""); }, [project.id, measurement?.id, review?.id]);
+  const rows = ((review ?? measurement)?.result as { competitors?: { name: string; domain: string; observationIds: string[] }[] } | null)?.competitors ?? [];
   const followed = new Set(project.competitors.map(value => { try { return new URL(value.includes("://") ? value : "https://" + value).hostname.replace(/^www\./, ""); } catch { return value; } }));
   const candidates = rows.filter(item => !followed.has(item.domain.replace(/^www\./, ""))).map(item => ({ ...item, observationIds: item.observationIds.filter(id => observations.some(answer => answer.id === id)) })).filter(item => item.observationIds.length);
   if (!candidates.length) return null;
@@ -990,6 +992,7 @@ function JobDialog({
   connected,
   revision,
   initialTopic,
+  measurementJobId,
   run,
   close,
   openConnections,
@@ -999,12 +1002,13 @@ function JobDialog({
   connected: Record<string, boolean>;
   revision: any;
   initialTopic: string;
+  measurementJobId?: string;
   run: (f: () => Promise<unknown>) => Promise<void>;
   close: () => void;
   openConnections: () => void;
 }) {
   const choices: Provider[] =
-    kind === "diagnose"
+    ["diagnose", "competitors"].includes(kind)
       ? ["chatgpt", "openrouter"]
       : kind === "revise"
         ? ["chatgpt", "openrouter"]
@@ -1090,6 +1094,8 @@ function JobDialog({
             ? "Revise content"
           : kind === "content"
             ? "Create content"
+            : kind === "competitors"
+              ? "Review competitor evidence"
             : kind === "diagnose"
               ? "Analyze your visibility evidence"
               : "Measure AI visibility"
@@ -1114,6 +1120,7 @@ function JobDialog({
               maxCostUsd: kind === "audit" || provider === "chatgpt" ? 0 : budget,
               topic: d.get("topic") ?? undefined,
               ...(kind === 'revise' ? { contentId: revision.id, revisionInstructions: d.get('instructions') } : {}),
+              ...(kind === 'competitors' ? { measurementJobId } : {}),
               render: d.get("render") === "on",
               webSearch: provider === "chatgpt" && ["measure", "recheck"].includes(kind) ? d.get("webSearch") === "on" : true,
               maxPages: kind === "audit" ? Number(d.get("maxPages")) : 100,
@@ -1154,7 +1161,7 @@ function JobDialog({
               <Select label="Connection" {...feedback.field("provider")} value={provider} placeholder="Connect a provider in Settings" options={providerOptions(connected, choices)} onChange={(value) => { setProvider(value as Provider); setError(""); }} />
             </label>
             <p className="small">
-              {provider === "chatgpt"
+              {kind === "competitors" ? "Reviews your saved answers and website evidence. No visibility questions are asked again. Your connection's usage limits or charges apply." : provider === "chatgpt"
                 ? "Uses your ChatGPT plan within its limits. Answers can differ from the ChatGPT website."
                 : provider === "console"
                   ? kind === "content" ? "A researched draft with source links and review notes. Pay as you go, within your approved maximum." : "Managed measurement and analysis through one connection. Pay as you go."

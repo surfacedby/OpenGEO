@@ -99,7 +99,7 @@ export type Finding = {
   status: "open" | "doing" | "done";
   kind: string;
 };
-export const jobKinds = ["audit", "discover", "measure", "diagnose", "content", "revise", "recheck"] as const;
+export const jobKinds = ["audit", "discover", "competitors", "measure", "diagnose", "content", "revise", "recheck"] as const;
 export const jobInput = z
   .object({
     projectId: z.string().uuid(),
@@ -114,10 +114,12 @@ export const jobInput = z
     render: z.boolean().default(false),
     webSearch: z.boolean().default(true),
     discoverCompetitors: z.boolean().optional(),
+    measurementJobId: z.string().uuid().optional(),
     maxPages: z.number().int().positive().max(100000).default(100),
   })
   .strict()
-  .refine((input) => input.kind !== 'revise' || (!!input.contentId && !!input.revisionInstructions), 'Choose a draft and describe the revision');
+  .refine((input) => input.kind !== 'revise' || (!!input.contentId && !!input.revisionInstructions), 'Choose a draft and describe the revision')
+  .refine((input) => input.kind !== 'competitors' || !!input.measurementJobId, 'Choose a saved visibility check');
 export type JobInput = z.infer<typeof jobInput>;
 export type Job = JobInput & {
   id: string;

@@ -5,6 +5,7 @@ import type { Runner } from "./workflows.js";
 import { parseJson } from "./workflows.js";
 import { publicUrl } from "./network.js";
 import { prompts } from "./prompts.js";
+import { contentSources } from "./evidence-context.js";
 
 export const questionDiscoveryVersion = 4;
 const offeringInventory = z.object({
@@ -88,9 +89,19 @@ export async function discoverQuestions(runner: Runner, job: Job, project: Proje
 }
 
 /** A suggested alternative needs an answer mention and its own cited domain before user review. */
-export async function discoverCompetitors(runner: Runner, job: Job, project: Project, model: Model, signal: AbortSignal) {
-  const observations = runner.store.observations(project.id, job.id);
-  const context = { brand: project.brand, domain: project.domain, locale: project.locale };
+export async function discoverCompetitors(runner: Runner, job: Job, project: Project, model: Model, signal: AbortSignal, measurementJobId = job.id) {
+  const saved = runner.store.step(job.id, "competitor-inputs");
+  let inputs;
+  if (saved?.body) inputs = JSON.parse(saved.body);
+  else {
+    const observations = runner.store.observations(project.id, measurementJobId);
+    const audit = runner.store.jobs(project.id).find(item => item.kind === "audit" && item.status === "completed" && JSON.parse(runner.store.step(item.id, "project")?.body ?? "null")?.domain === project.domain);
+    const pages = audit ? runner.store.pages(project.id, audit.id) : [];
+    const website = pages.length ? contentSources(pages, observations.map(answer => answer.prompt).join(" "), Math.min(12000, Math.max(0, model.contextLength - 14000))) : { sources: [], coverage: { pagesAvailable: 0, pagesUsed: 0, excerpts: true } };
+    inputs = { observations, context: { brand: project.brand, domain: project.domain, locale: project.locale, businessNotes: project.knowledge.slice(0, 4000), website } };
+    runner.store.setStep(job.id, "competitor-inputs", "done", inputs);
+  }
+  const { observations, context } = inputs as { observations: ReturnType<typeof runner.store.observations>; context: Record<string, unknown> };
   const legacy = runner.store.step(job.id, "competitors");
   const batches: { id: string; question: string; text: string; citations: typeof observations[number]["citations"] }[][] = [];
   if (legacy) {
