@@ -14,6 +14,12 @@
 .improvement-item-heading > div:first-child > span { color: var(--ink); font-weight: 500; overflow-wrap: anywhere; }
 .improvement-item-heading > .choice { width: 145px; flex: none; }
 .improvement-item > p { font-size: 13px; color: #475569; }
+.finding-next-step { padding: 16px 18px; margin: 12px 0 18px; border-left: 3px solid #6da3f3; background: #f2f7ff; border-radius: 0 8px 8px 0; }
+.finding-next-step > span { display: block; font-size: 11px; color: #34659d; font-weight: 600; margin-bottom: 7px; }
+.finding-next-step > p { margin: 0; font-size: 13px; color: #253d5c; line-height: 1.7; max-width: 880px; }
+.improvement-detail > .finding-reason { margin-bottom: 16px; }
+.finding-reason p { font-size: 13px; line-height: 1.7; max-width: 880px; margin-bottom: 0; }
+.improvement-toolbar > .choice { width: 190px; }
 .improvement-detail { margin-top: 12px; font-size: 13px; }
 .improvement-detail ol { padding-left: 20px; line-height: 1.8; margin: 10px 0 14px; }
 .improvement-detail > a { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 12px; }

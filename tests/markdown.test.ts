@@ -11,6 +11,7 @@ test("reading and HTML exports preserve headings, lists, source links and code w
   assert.ok(!markdownHtml("![Remote](https://example.com/image.png)").includes("<img"));
   assert.match(markdownHtml('Read **[the official guide](https://example.com/guide)** and [a **clear label**](https://example.com/).'), /<strong><a href="https:\/\/example.com\/guide"[^>]*>the official guide<\/a><\/strong>/);
   assert.match(markdownHtml('[a **clear label**](https://example.com/)'), /<a[^>]*>a <strong>clear label<\/strong><\/a>/);
+  assert.match(markdownHtml('1. First step\n\n- Supporting detail\n\n2. Second step'), /<ol start="2">\n<li>Second step<\/li>/);
   const document = htmlDocument("<script>title</script>", "# A draft");
   assert.match(document, /<article><h1>A draft/); assert.match(document, /Content-Security-Policy/); assert.ok(!document.includes("<script>title"));
 });

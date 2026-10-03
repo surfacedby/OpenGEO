@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Job, Model, Project } from "./contracts.js";
+import type { Job, Model, Project, DiscoveredWebsite } from "./contracts.js";
 import { ProviderError } from "./contracts.js";
 import type { Runner } from "./workflows.js";
 import { parseJson } from "./workflows.js";
@@ -19,7 +19,9 @@ const suggestedQuestions = z.object({
 }).strict();
 const reviewedQuestions = z.object({ questions: z.array(z.object({ index: z.number().int().min(0), text: z.string().trim().min(10).max(500) }).strict()).max(20) }).strict();
 const suggestedCompetitors = z.object({
-  competitors: z.array(z.object({ name: z.string().trim().min(2).max(100), domain: z.string().max(253), observationIds: z.array(z.string()).min(1) }).strict()).max(20),
+  competitors: z.array(z.object({ name: z.string().trim().min(2).max(100), domain: z.string().max(253), observationIds: z.array(z.string()).min(1),
+    role: z.enum(['competitor', 'reference', 'both']).optional(), reason: z.string().trim().min(1).max(600).optional(),
+  }).strict()).max(50),
 }).strict();
 
 /** Suggestions reuse the durable pass receipts; generated questions never become tracked prompts without review. */
@@ -98,7 +100,9 @@ export async function discoverCompetitors(runner: Runner, job: Job, project: Pro
     const audit = runner.store.jobs(project.id).find(item => item.kind === "audit" && item.status === "completed" && JSON.parse(runner.store.step(item.id, "project")?.body ?? "null")?.domain === project.domain);
     const pages = audit ? runner.store.pages(project.id, audit.id) : [];
     const website = pages.length ? contentSources(pages, observations.map(answer => answer.prompt).join(" "), Math.min(12000, Math.max(0, model.contextLength - 14000))) : { sources: [], coverage: { pagesAvailable: 0, pagesUsed: 0, excerpts: true } };
-    inputs = { observations, context: { brand: project.brand, domain: project.domain, locale: project.locale, businessNotes: project.knowledge.slice(0, 4000), website } };
+    const home = pages.find(page => page.status >= 200 && page.status < 300 && new URL(page.url).pathname === '/');
+    inputs = { observations, context: { brand: project.brand, domain: project.domain, locale: project.locale, businessNotes: project.knowledge.slice(0, 4000), website,
+      siteOverview: home ? { id: home.id, url: home.url, title: home.title, headings: home.h1, text: home.text.slice(0, 3500) } : null } };
     runner.store.setStep(job.id, "competitor-inputs", "done", inputs);
   }
   const { observations, context } = inputs as { observations: ReturnType<typeof runner.store.observations>; context: Record<string, unknown> };
@@ -127,17 +131,23 @@ export async function discoverCompetitors(runner: Runner, job: Job, project: Pro
     const data = suggestedCompetitors.parse(parseJson(await runner.llmPass(job, model, "competitors", { ...context, answers }, signal, legacy ? "competitors" : "competitors:" + index)));
     candidates.push(...data.competitors);
   }
-  const confirmed = new Map<string, { name: string; domain: string; observationIds: string[] }>();
+  const confirmed = new Map<string, DiscoveredWebsite>();
   for (const candidate of candidates) {
     let domain: string;
     try { domain = publicUrl(candidate.domain).hostname.replace(/^www\./, ""); } catch { continue; }
     if (domain === project.domain || domain.endsWith("." + project.domain)) continue;
-    const evidence = observations.filter(answer => candidate.observationIds.includes(answer.id) && answer.answer.toLocaleLowerCase().includes(candidate.name.toLocaleLowerCase()) && answer.citations.some(citation => {
+    const named = (answer: typeof observations[number]) => answer.answer.toLocaleLowerCase().includes(candidate.name.toLocaleLowerCase());
+    const referenceName = (answer: typeof observations[number]) => candidate.name.toLocaleLowerCase() === domain || answer.citations.some(citation => {
+      try { return publicUrl(citation.url).hostname.replace(/^www\./, '') === domain && citation.title?.toLocaleLowerCase().includes(candidate.name.toLocaleLowerCase()); } catch { return false; }
+    });
+    const evidence = observations.filter(answer => candidate.observationIds.includes(answer.id) && (named(answer) || (candidate.role === 'reference' && referenceName(answer))) && answer.citations.some(citation => {
       try { const host = publicUrl(citation.url).hostname.replace(/^www\./, ""); return host === domain || host.endsWith("." + domain); } catch { return false; }
     }));
     if (!evidence.length) continue;
     const prior = confirmed.get(domain);
+    const role = prior?.role && candidate.role && prior.role !== candidate.role ? 'both' : candidate.role ?? prior?.role;
     confirmed.set(domain, { name: prior?.name ?? candidate.name, domain,
+      ...(role ? { role } : {}), ...(candidate.reason || prior?.reason ? { reason: candidate.reason ?? prior?.reason } : {}),
       observationIds: [...new Set([...(prior?.observationIds ?? []), ...evidence.map(answer => answer.id)])] });
   }
   return [...confirmed.values()];

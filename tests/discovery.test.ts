@@ -265,3 +265,39 @@ test("Console connection metadata projects only public features and refuses malf
   assert.ok(!JSON.stringify(data).includes("synthetic-private"));
   assert.throws(() => consoleCapabilities({ platforms: [{ key: "chatgpt", name: "ChatGPT", enabled: "yes" }] }));
 });
+
+test('website discovery separates substitutes from references and check evidence cannot cross projects', async () => {
+  const f = fixture(), original = globalThis.fetch;
+  globalThis.fetch = (async (url, init) => {
+    if (String(url).endsWith('/models')) return json({ models: [{ slug: 'fixture-model', display_name: 'Fixture', visibility: 'list', context_window: 32768 }] });
+    const request = JSON.parse(init!.body as string);
+    if (request.tools) return stream('Alternative organizes customer questions. Read the documented support workflow.', [
+      { type: 'url_citation', url: 'https://alternative.example/help', title: 'Alternative' },
+      { type: 'url_citation', url: 'https://reference.example/guide', title: 'Workflow reference' },
+    ]);
+    const input = JSON.parse(request.input[0].content), ids = input.answers.map((answer:any) => answer.id);
+    return stream(JSON.stringify({ competitors: [
+      { name: 'Alternative', domain: 'alternative.example', role: 'competitor', reason: 'Recommended support workspace for the same customer need.', observationIds: ids },
+      { name: 'Workflow reference', domain: 'reference.example', role: 'reference', reason: 'Cited workflow documentation, not a recommended substitute.', observationIds: ids },
+      { name: 'Unmentioned substitute', domain: 'reference.example', role: 'competitor', reason: 'Unsupported substitute claim.', observationIds: ids },
+    ] }));
+  }) as typeof fetch;
+  try {
+    const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'measure', provider: 'chatgpt', discoverCompetitors: true }), 'classified-sites');
+    await f.runner.tick();
+    assert.equal(f.store.job(job.id).status, 'completed');
+    const result = f.store.job(job.id).result as any;
+    assert.deepEqual(result.competitors.map((site:any) => site.domain), ['alternative.example']);
+    assert.deepEqual(result.references.map((site:any) => site.domain), ['reference.example']);
+    assert.deepEqual(f.store.project(f.project.id).competitors, []);
+    const { app } = await createApp(f.store, f.vault, 'synthetic-session');
+    const headers = { host: '127.0.0.1:4318', authorization: 'Bearer synthetic-session' };
+    try {
+      const response = await app.inject({ url: '/api/projects/' + f.project.id + '/checks/' + job.id + '/answers', headers });
+      assert.deepEqual(response.json(), f.store.observations(f.project.id, job.id));
+      const other = f.store.createProject(projectInput.parse({ domain: 'other.example', brand: 'Other' }));
+      assert.equal((await app.inject({ url: '/api/projects/' + other.id + '/checks/' + job.id + '/answers', headers })).statusCode, 404);
+      assert.equal((await app.inject({ url: '/api/projects/' + f.project.id + '/checks/' + job.id + '/answers', headers: { host: '127.0.0.1:4318' } })).statusCode, 401);
+    } finally { await app.close(); }
+  } finally { globalThis.fetch = original; await f.close(); }
+});

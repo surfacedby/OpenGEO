@@ -9,7 +9,7 @@ export const auditFindings = (findings: Finding[]) => findings.filter(finding =>
 export function findingGroups(findings: Finding[]) {
   const groups = new Map<string, { key: string; title: string; priority: Finding['priority']; findings: Finding[] }>();
   for (const finding of findings) {
-    const key = JSON.stringify([finding.kind, finding.title]);
+    const key = JSON.stringify([finding.kind, finding.title, ...(finding.opportunity ? [finding.opportunity.type] : [])]);
     const group = groups.get(key) ?? { key, title: finding.title, priority: finding.priority, findings: [] };
     group.findings.push(finding);
     if (priority[finding.priority] < priority[group.priority]) group.priority = finding.priority;

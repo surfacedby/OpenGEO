@@ -61,9 +61,9 @@ export function markdownHtml(markdown: string) {
       output.push('</tbody></table></div>');
       continue;
     }
-    const heading = line.match(/^(#{1,6})\s+(.+)$/), item = line.match(/^\s*(?:([-*])|\d+\.)\s+(.+)$/);
+    const heading = line.match(/^(#{1,6})\s+(.+)$/), item = line.match(/^\s*(?:([-*])|(\d+)\.)\s+(.+)$/);
     if (heading) { flush(); closeList(); output.push(`<h${heading[1].length}>${inline(heading[2])}</h${heading[1].length}>`); }
-    else if (item) { flush(); const type = item[1] ? "ul" : "ol"; if (list !== type) { closeList(); list = type; output.push("<" + type + ">"); } output.push("<li>" + inline(item[2]) + "</li>"); }
+    else if (item) { flush(); const type = item[1] ? "ul" : "ol"; if (list !== type) { closeList(); list = type; output.push(type === 'ol' && Number(item[2]) > 1 ? '<ol start="' + Math.min(Number(item[2]), 2147483647) + '">' : '<' + type + '>'); } output.push("<li>" + inline(item[3]) + "</li>"); }
     else { closeList(); paragraph.push(line); }
   }
   flush(); closeList();

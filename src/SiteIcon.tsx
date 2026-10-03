@@ -16,10 +16,6 @@ export function SiteIcon({
     setFailed(false);
     setLoaded(false);
   }, [projectId, domain]);
-  const initial = domain
-    .replace(/^www\./, "")
-    .charAt(0)
-    .toUpperCase();
   return (
     <span
       className="site-icon"
@@ -29,17 +25,11 @@ export function SiteIcon({
       {!loaded && (
         <svg viewBox="0 0 32 32" width={size} height={size}>
           <rect width="32" height="32" rx="8" fill="#edf3fd" />
-          <text
-            x="16"
-            y="21"
-            textAnchor="middle"
-            fill="#075cc7"
-            fontSize="16"
-            fontFamily="Inter, sans-serif"
-            fontWeight="600"
-          >
-            {initial}
-          </text>
+          <g fill="none" stroke="#7890b2" strokeWidth="1.5">
+            <circle cx="16" cy="16" r="9" />
+            <ellipse cx="16" cy="16" rx="4" ry="9" />
+            <path d="M7 16h18" />
+          </g>
         </svg>
       )}
       {!failed && (

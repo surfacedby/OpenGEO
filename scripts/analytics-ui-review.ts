@@ -29,7 +29,7 @@ const runtime = await start({
     decrypt: (bytes) => bytes.toString(),
   },
 });
-const browser = await chromium.launch({ channel: "chrome", headless: true });
+const browser = await chromium.launch({ ...(process.env.OPENGEO_TEST_BROWSER ? { executablePath: process.env.OPENGEO_TEST_BROWSER } : { channel: "chrome" }), headless: true });
 const failures: string[] = [];
 try {
   await runtime.runner.stop();
@@ -277,8 +277,7 @@ try {
   assert.equal(await addCompetitors.isEnabled(), false);
   await page.getByRole("checkbox", { name: "Follow Documentation example", exact: true }).check();
   await addCompetitors.click();
-  await page.getByRole("textbox", { name: "Competitor websites", exact: true }).waitFor();
-  await page.waitForFunction(() => (document.getElementById("comparison-websites") as HTMLTextAreaElement)?.value.includes("example.net"));
+  await page.getByRole('button', { name: 'Remove example.net from comparison', exact: true }).waitFor();
   assert.deepEqual(runtime.store.project(project.id).competitors, ["iana.org", "w3.org", "example.net"]);
   assert.deepEqual(runtime.store.project(project.id).prompts, prompts);
   assert.equal(await page.getByRole("heading", { name: "Discover competitors", exact: true }).count(), 0);
@@ -288,19 +287,32 @@ try {
       .count(),
     0,
   );
-  await page
-    .getByRole("textbox", { name: "Competitor websites", exact: true })
-    .fill("iana.org\nw3.org\nexample.net");
-  await page
-    .getByRole("button", { name: "Save comparison", exact: true })
-    .click();
-  await page.getByText("Comparison websites saved.", { exact: true }).waitFor();
+  await page.getByRole('textbox', { name: 'Add a competitor website', exact: true }).fill('example.net');
+  await page.getByRole('button', { name: 'Add website', exact: true }).click();
+  await page.getByText('Comparison website added.', { exact: true }).waitFor();
   assert.deepEqual(runtime.store.project(project.id).competitors, [
     "iana.org",
     "w3.org",
     "example.net",
   ]);
   assert.deepEqual(runtime.store.project(project.id).prompts, prompts);
+  const supporting = runtime.store.observations(project.id, currentId);
+  runtime.store.updateJob(currentId, { result: { ...(latest.result as object),
+    competitors: [{ name: 'W3C', domain: 'w3.org', role: 'both', reason: 'A comparison example backed by saved answers.', observationIds: supporting.filter(answer => answer.citations.some(citation => new URL(citation.url).hostname === 'www.w3.org')).map(answer => answer.id) }],
+    references: [{ name: 'IANA', domain: 'iana.org', role: 'reference', reason: 'Provides documentation used in these answers.', observationIds: supporting.map(answer => answer.id) }],
+  } });
+  await page.getByRole('button', { name: 'Refresh workspace', exact: true }).click();
+  await page.getByRole('button', { name: 'View answers for W3C', exact: true }).click();
+  await page.getByRole('heading', { name: 'Questions where your website wasn\'t cited', exact: true }).waitFor();
+  assert.equal(await page.locator('.competitor-detail-grid > div').first().getByRole('link').count(), 2);
+  assert.equal(await page.locator('.competitor-detail-grid > div').last().getByRole('link').count(), 1);
+  await page.locator('.competitor-detail-grid > div').first().getByRole('link').first().click();
+  assert.equal(await page.locator('.competitor-full-answers').getAttribute('open'), '');
+  assert.equal(await page.locator('.competitor-full-answers .answer').count(), 2);
+  await page.getByRole('button', { name: /^References/ }).click();
+  await page.getByText('Provides documentation used in these answers.', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('checkbox', { name: 'Follow IANA', exact: true }).count(), 0);
+  assert.equal(runtime.store.project(project.id).competitors.includes('example.org'), false);
   await navigate(page, "Sources");
   await page.getByRole("button", { name: /^Pages/ }).click();
   assert.equal(

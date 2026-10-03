@@ -113,6 +113,10 @@ export class Store {
       const finding = input.findingId ? this.findings(input.projectId).find(row => row.id === input.findingId) : undefined;
       if (input.findingId && (!finding || !['analysis', 'console'].includes(finding.kind)))
         throw new ProviderError('evidence', 'Choose a saved opportunity from this website.');
+      if (finding?.opportunity?.type === 'site_change')
+        throw new ProviderError('capability', 'This improvement requires website changes rather than a content draft.');
+      if (finding?.opportunity?.type === 'new_content' && input.contentMode === 'page_update')
+        throw new ProviderError('capability', 'This opportunity is for a new resource. Choose a new article draft.');
       if (input.findingId && input.provider === 'console')
         throw new ProviderError('capability', 'Choose ChatGPT or OpenRouter to draft a saved page improvement.');
       if (input.findingId && this.jobs(input.projectId).some(job => job.kind === 'content' && job.findingId === input.findingId && ['queued', 'running', 'paused'].includes(job.status)))
@@ -134,7 +138,7 @@ export class Store {
         .prepare("INSERT INTO jobs VALUES(?,?,?,?,?)")
         .run(j.id, input.projectId, j.status, JSON.stringify(j), key);
       if (input.kind === 'content') this.setStep(j.id, 'content-task', 'done', contentTask.parse({
-        mode: input.contentMode ?? (finding ? 'page_update' : 'article'),
+        mode: input.contentMode ?? (finding && finding.opportunity?.type !== 'new_content' ? 'page_update' : 'article'),
         ...(finding ? { findingId: finding.id, targetUrl: finding.targetUrl,
           recommendation: { title: finding.title, description: finding.description, steps: finding.steps } } : {}),
       }));

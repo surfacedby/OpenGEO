@@ -41,6 +41,11 @@ export const setupDraft = z.object({
 }).strict();
 export type SetupDraft = z.infer<typeof setupDraft>;
 export type Citation = { url: string; title?: string };
+export type DiscoveredWebsite = {
+  name: string; domain: string; observationIds: string[];
+  role?: 'competitor' | 'reference' | 'both';
+  reason?: string;
+};
 export type Observation = {
   id: string;
   projectId: string;
@@ -85,6 +90,13 @@ export const auditCoverage = z.object({
   maxPages: z.number().int().positive(),
 });
 export type AuditCoverage = z.infer<typeof auditCoverage>;
+export const opportunityDetails = z.object({
+  type: z.enum(['page_update', 'new_content', 'site_change']),
+  pageLabel: z.string().trim().min(1).max(100),
+  pageTitle: z.string().trim().min(1).max(300),
+  benefit: z.string().trim().min(1).max(600),
+  topic: z.string().trim().min(1).max(500).optional(),
+}).strict();
 export type Finding = {
   id: string;
   projectId: string;
@@ -98,6 +110,7 @@ export type Finding = {
   confidence: "known" | "inferred";
   status: "open" | "doing" | "done";
   kind: string;
+  opportunity?: z.infer<typeof opportunityDetails>;
 };
 export const contentTask = z.object({
   mode: z.enum(["article", "page_update"]),

@@ -44,12 +44,14 @@ test('large audits are fully analyzed in durable batches across quota and later 
     if(calls===2 && quota) return new Response('{}',{status:429});
     const request=JSON.parse(init!.body as string), input=JSON.parse(request.input[0].content);
     assert.ok(Buffer.byteLength(request.instructions + request.input[0].content,'utf8')+5096<=32768);
+    if(request.instructions===prompts.contentGaps) return stream(JSON.stringify({recommendations:[],uncertainties:[]}));
+    if(request.instructions===prompts.opportunityReview) return stream(JSON.stringify({accepted:input.candidates.map((item:any)=>({index:item.index,title:item.title,description:item.description,steps:item.steps,opportunity:{type:'page_update',pageLabel:'Resource',pageTitle:'Support workspace',benefit:'Explain the workflow relevant to the saved customer question.'}}))}));
     if(request.instructions===prompts.consolidate) {
       assert.equal(input.candidates.length,100);
       return stream(JSON.stringify({groups:[{primaryIndex:0,indices:input.candidates.map((item:any)=>item.index)}]}));
     }
     for(const page of input.pages) {assert.ok(!reviewed.has(page.id),'Completed batches cannot replay');reviewed.add(page.id);}
-    return stream(JSON.stringify({recommendations:input.pages.map((page:any)=>({title:'Clarify the supported workflow',description:'Confirm whether this page explains how teams organize their questions.',priority:'medium',targetPageId:page.id,evidenceIds:[page.id],steps:['Review the published page and add a supported explanation where needed.']})),uncertainties:[]}));
+    return stream(JSON.stringify({recommendations:input.pages.map((page:any)=>({title:'Clarify the supported workflow',description:'Confirm whether this page explains how teams organize their questions.',priority:'medium',targetPageId:page.id,evidenceIds:[page.id,input.observations[0].id],steps:['Review the published page and add a supported explanation where needed.']})),uncertainties:[]}));
   }) as typeof fetch;
   try {
     const job=f.store.enqueue(jobInput.parse({projectId:f.project.id,kind:'diagnose',provider:'chatgpt'}),'analysis');
@@ -63,12 +65,45 @@ test('large audits are fully analyzed in durable batches across quota and later 
     const findings=f.store.findings(f.project.id);
     assert.equal(findings.length,100);
     assert.equal(new Set(findings.map(item=>item.title)).size,1);
-    assert.equal(new Set(findings.flatMap(item=>item.evidenceIds)).size,100);
+    assert.equal(new Set(findings.flatMap(item=>item.evidenceIds)).size,101);
+    assert.ok(findings.every(item => item.evidenceIds.includes(f.store.observations(f.project.id, f.measurement.id)[0].id)), 'Every accepted opportunity links its page change to a saved answer');
     assert.equal(findings.reduce((total,item)=>total+item.steps.length,0),100);
     const count=f.store.findings(f.project.id).length;
     await f.runner.execute(f.store.job(job.id),f.project,new AbortController().signal);
     assert.equal(f.store.findings(f.project.id).length,count);
   } finally {globalThis.fetch=original;await f.close();}
+});
+
+test('batch analysis can review a supplied context page but rejects a page absent from all supplied evidence', async () => {
+  const f = fixture(), original = globalThis.fetch;
+  let reviewedContext = false, foreign = false;
+  globalThis.fetch = (async (url, init) => {
+    if (String(url).endsWith('/models')) return json({ models: [{ slug: 'fixture', display_name: 'Fixture', visibility: 'list', context_window: 32768 }] });
+    const request = JSON.parse(init!.body as string), input = JSON.parse(request.input[0].content);
+    if (request.instructions === prompts.contentGaps) return stream(JSON.stringify({ recommendations: [], uncertainties: [] }));
+    if (request.instructions === prompts.opportunityReview) {
+      const candidate = input.candidates[0];
+      assert.ok(input.pages.some((page:any) => page.id === candidate.targetPageId && page.text.length > 2000), 'Review receives the full target excerpt, beyond the shorter site context');
+      reviewedContext = true;
+      return stream(JSON.stringify({ accepted: [{ index: 0, title: candidate.title, description: candidate.description, steps: candidate.steps, opportunity: { type: 'page_update', pageLabel: 'Resource', pageTitle: 'Support workspace', benefit: 'Explain the supported customer workflow.' } }] }));
+    }
+    assert.equal(request.instructions, prompts.diagnose);
+    const contextPage = input.website.sources.find((page:any) => !input.pages.some((target:any) => target.id === page.id));
+    return stream(JSON.stringify({ recommendations: contextPage || foreign ? [{ title: 'Explain the supported workflow', description: 'Clarify the workflow covered in the saved answer.', priority: 'medium', targetPageId: foreign ? 'unknown-page' : contextPage.id, evidenceIds: [foreign ? 'unknown-page' : contextPage.id, input.observations[0].id], steps: ['Check the published explanation before editing.'] }] : [], uncertainties: [] }));
+  }) as typeof fetch;
+  try {
+    const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'diagnose', provider: 'chatgpt' }), 'context-page');
+    await f.runner.tick();
+    assert.equal(f.store.job(job.id).status, 'completed');
+    assert.equal(reviewedContext, true);
+    assert.equal(f.store.findings(f.project.id).length, 1);
+    foreign = true;
+    const invalid = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'diagnose', provider: 'chatgpt' }), 'foreign-page');
+    await f.runner.tick();
+    assert.equal(f.store.job(invalid.id).status, 'paused');
+    assert.equal(f.store.job(invalid.id).error, 'evidence');
+    assert.equal(f.store.findings(f.project.id).filter(finding => finding.jobId === invalid.id).length, 0);
+  } finally { globalThis.fetch = original; await f.close(); }
 });
 
 test('content uses bounded relevant evidence and revisions preserve every original source', async () => {
@@ -189,4 +224,39 @@ test('a draft cannot use another project opportunity or silently discard its req
     assert.equal(f.store.jobs(f.project.id).length, count);
     assert.equal(f.store.jobs(other.id).length, 0);
   } finally { await f.close(); }
+});
+
+test('opportunities review relevance, separate new resources and preserve draft purpose through exports', async () => {
+  const f = fixture(), original = globalThis.fetch;
+  const answer = f.store.observations(f.project.id, f.measurement.id)[0];
+  let calls = 0;
+  globalThis.fetch = (async (url, init) => {
+    if (String(url).endsWith('/models')) return json({ models: [{ slug: 'fixture', display_name: 'Fixture', visibility: 'list', context_window: 200000 }] });
+    calls++;
+    const request = JSON.parse(init!.body as string), input = JSON.parse(request.input[0].content);
+    if (request.instructions === prompts.diagnose) return stream(JSON.stringify({ recommendations: input.pages.slice(0, 1).map((page:any) => ({
+      title: 'Clarify the supported workflow', description: 'Help the reader understand how questions are organized.', priority: 'medium', targetPageId: page.id, evidenceIds: [page.id, answer.id], steps: ['Check the existing explanation.'],
+    })), uncertainties: [] }));
+    if (request.instructions === prompts.opportunityReview) return stream(JSON.stringify({ accepted: [] }));
+    assert.equal(request.instructions, prompts.contentGaps);
+    const page = input.pages[0];
+    return stream(JSON.stringify({ recommendations: [{ title: 'Write a guide to keeping customer questions organized', description: 'The saved answer covers organizing questions. A guide can explain the supported workflow.', priority: 'medium', targetPageId: page.id, evidenceIds: [page.id, answer.id], steps: ['Check whether an existing guide covers this need.', 'Explain the supported workflow with a clear example.'], opportunity: { type: 'new_content', pageLabel: 'Guide', pageTitle: page.title, benefit: 'Answer the practical question in the saved evidence.', topic: 'How to keep customer questions organized' } }], uncertainties: [] }));
+  }) as typeof fetch;
+  try {
+    const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'diagnose', provider: 'chatgpt' }), 'reviewed-content-gaps');
+    await f.runner.tick();
+    assert.equal(f.store.job(job.id).status, 'completed');
+    const findings = f.store.findings(f.project.id);
+    assert.equal(findings.length, 1, 'Rejected page advice must not survive the independent relevance review');
+    assert.equal(findings[0].opportunity?.type, 'new_content');
+    assert.deepEqual(findings[0].evidenceIds, [findings[0].targetUrl && f.pages.find(page => page.url === findings[0].targetUrl)!.id, answer.id]);
+    const count = calls;
+    await f.runner.execute(f.store.job(job.id), f.project, new AbortController().signal);
+    assert.equal(calls, count, 'Completed analysis and gap passes must not replay');
+    const content = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'content', provider: 'chatgpt', findingId: findings[0].id }), 'new-resource');
+    assert.equal(JSON.parse(f.store.step(content.id, 'content-task')!.body!).mode, 'article');
+    assert.throws(() => f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'content', provider: 'chatgpt', findingId: findings[0].id, contentMode: 'page_update' }), 'wrong-purpose'), /new resource/);
+    const exported = exportProject(f.store, f.project.id), imported = importProject(f.store, exported);
+    assert.deepEqual(f.store.findings(imported.project.id)[0].opportunity, findings[0].opportunity);
+  } finally { globalThis.fetch = original; await f.close(); }
 });

@@ -319,6 +319,13 @@ export async function createApp(
     if (!icon) return res.code(404).send();
     return res.header("Cache-Control", "private, max-age=86400").type(icon.contentType).send(icon.bytes);
   });
+  app.get('/api/projects/:id/checks/:check/answers', (req, res) => {
+    const { id, check } = z.object({ id: z.string().uuid(), check: z.string().uuid() }).parse(req.params);
+    store.project(id);
+    const job = store.job(check);
+    if (job.projectId !== id || !['measure', 'recheck'].includes(job.kind)) return res.code(404).send();
+    return store.observations(id, check);
+  });
   app.patch("/api/projects/:id/findings/:finding", (req) => {
     const status = z
       .enum(["open", "doing", "done"])

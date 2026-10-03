@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { Store } from "./storage.js";
-import { projectInput, providers, jobKinds, contentTask } from "./contracts.js";
+import { projectInput, providers, jobKinds, contentTask, opportunityDetails } from "./contracts.js";
 import { publicUrl } from "./network.js";
 import { portableJobResult } from "./portable-results.js";
 import { summarize } from "./analysis.js";
@@ -73,6 +73,7 @@ const finding = z
     confidence: z.enum(["known", "inferred"]),
     status: z.enum(["open", "doing", "done"]),
     kind: z.string(),
+    opportunity: opportunityDetails.optional(),
     remoteId: id.optional(),
     evidenceAsOf: z.string().nullable().optional(),
     remoteScanId: id.optional(),

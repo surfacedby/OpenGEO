@@ -48,6 +48,7 @@ import { AuditSummary } from "./AuditSummary";
 import { Findings } from "./Findings";
 import { findingGroups, opportunityFindings, auditFindings, targetDomain } from "./finding-groups";
 import { ContentWorkspace } from "./ContentWorkspace";
+import { Competitors } from "./Competitors";
 import { completedMeasurement } from "../server/portable-results";
 import type { Presentation } from "../server/presentation";
 import identity from "../brand/identity.json";
@@ -134,6 +135,7 @@ export function App() {
     [evidenceFilter, setEvidenceFilter] = useState<{ ids: string[]; label: string } | null>(null),
     [contentTopic, setContentTopic] = useState(""),
     [contentFinding, setContentFinding] = useState<Finding | null>(null),
+    [competitorCheck, setCompetitorCheck] = useState<string | undefined>(),
     [focusedFinding, setFocusedFinding] = useState<string | null>(null),
     [selectedContent, setSelectedContent] = useState(""),
     [pendingContent, setPendingContent] = useState<{ projectId: string; jobId: string } | null>(null),
@@ -243,8 +245,9 @@ export function App() {
   if (!setupState) return <div className="startup-state" role="status"><img src="/logo.svg" width="40" height="40" alt="" /><h1>{identity.name}</h1>{error || refreshError ? <><p role="alert">{error || refreshError}</p><button className="secondary" disabled={refreshing} onClick={() => { setError(""); setRefreshError(""); void api("/session").then(() => { setSessionReady(true); return refresh(); }).catch((failure) => setError(failure.message)); }}>Try again</button></> : <p>Opening your workspace...</p>}</div>;
   if (!setupState.completed || !projects.length || newProject || setupState.draft) return <Onboarding connected={connected} profiles={profiles} refresh={refresh} draft={setupState.draft} savedProject={projects.find((project) => project.id === setupState.draft?.projectId)} initialStep={setupState.completed && Object.values(connected).some(Boolean) ? 1 : 0} cancel={projects.length && setupState.completed ? () => setNewProject(false) : undefined} finish={async (project) => { selectedRef.current = project.id; setSelected(project.id); setNewProject(false); changePage("Overview"); await refresh(); }} />;
   const audited = !!w?.pages.length, measured = !!w?.metrics.completed;
+  const analysisMeasurement = w?.jobs.find(completedMeasurement);
   const activeMeasurement = w?.jobs.find(job => ['measure', 'recheck'].includes(job.kind) && ['queued', 'running', 'paused'].includes(job.status) && !completedMeasurement(job));
-  const analyzed = !!w?.measurement && w.jobs.some(job => job.kind === 'diagnose' && job.status === 'completed' && ((job.result as { measurementJobId?: string } | null)?.measurementJobId ? (job.result as { measurementJobId: string }).measurementJobId === w.measurement!.id : job.createdAt >= w.measurement!.createdAt));
+  const analyzed = !!analysisMeasurement && w!.jobs.some(job => job.kind === 'diagnose' && job.status === 'completed' && ((job.result as { measurementJobId?: string } | null)?.measurementJobId ? (job.result as { measurementJobId: string }).measurementJobId === analysisMeasurement.id : job.createdAt >= analysisMeasurement.createdAt));
   const activeAnalysis = w?.jobs.find(job => job.kind === 'diagnose' && ['queued', 'running'].includes(job.status));
   const pausedAnalysis = w?.jobs.find(job => job.kind === 'diagnose' && job.status === 'paused' && (!w.measurement || job.createdAt >= w.measurement.createdAt));
   const canAnalyze = connected.chatgpt || connected.openrouter;
@@ -357,7 +360,7 @@ export function App() {
             <p aria-live="polite">Loading your workspace...</p>
           ) : (
             <>
-              {w.measurement && ["Overview", "Visibility", "Responses", "Sources", "Competitors"].includes(page) && <MeasurementScope measurement={w.measurement} observations={w.observations} missing={w.metrics.missing} />}
+              {w.measurement && ["Overview", "Visibility", "Responses", "Sources"].includes(page) && <MeasurementScope measurement={w.measurement} observations={w.observations} missing={w.metrics.missing} />}
               {page === "Overview" && (
                 <>
                   {measured ? <div className="metrics">
@@ -646,6 +649,7 @@ export function App() {
                 <SourcesTable presentation={w.presentation} collected={w.metrics.completed} evidence={openEvidence} projectId={p!.id} />
               )}
               {page === "Opportunities" && <>
+                {analysisMeasurement && <p className="small">Recommendations use the completed visibility check from {new Date(analysisMeasurement.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} and your audited pages.</p>}
                 {(analyzed || opportunities.length > 0) && <div className="opportunity-summary" aria-label="Opportunity summary">
                   <div><Lightbulb size={20} /><strong>{findingGroups(opportunities.filter(f => f.status !== 'done')).length}</strong><span>Open opportunities</span></div>
                   <div><ListChecks size={20} /><strong>{findingGroups(opportunities.filter(f => f.priority === 'high' && f.status !== 'done')).length}</strong><span>High priority</span></div>
@@ -656,10 +660,10 @@ export function App() {
                 <section className="panel"><Findings findings={opportunities} projectId={p!.id} run={run}
                   emptyTitle={activeAnalysis ? "Your opportunities are on their way" : pausedAnalysis ? "Waiting for the analysis to finish" : "Find your next content opportunity"}
                   emptyMessage={activeAnalysis ? "You can explore your answers while the analysis runs." : pausedAnalysis ? "Recommendations appear after all reviewed pages have been checked. Your saved answers and progress are kept." : measured && audited ? "Analyze your answers alongside your website to identify specific pages to improve. A missing mention alone is not a recommendation." : "Complete a site audit and visibility check to find improvements grounded in your evidence."}
-                  jobs={w.jobs} measurementId={w.measurement?.id}
+                  jobs={w.jobs} measurementId={analysisMeasurement?.id}
                   focusedFinding={focusedFinding} onFocused={() => setFocusedFinding(null)}
                   drafts={w.content} openContent={id => navigate(() => { setPage('Content'); setSelectedContent(id); })}
-                  createContent={finding => navigate(() => { setContentFinding(finding); setContentTopic(finding.title); setJobDialog('content'); })} /></section>
+                  createContent={finding => navigate(() => { setContentFinding(finding); setContentTopic(finding.opportunity?.topic ?? finding.title); setJobDialog('content'); })} /></section>
               </>}
               {page === "Content" && <>
                 {w.jobs.some(job => ['content', 'revise'].includes(job.kind)) && <details className="panel activity-panel" open={w.jobs.some(job => ['content', 'revise'].includes(job.kind) && ['queued', 'running', 'paused', 'failed'].includes(job.status))}><summary><h2>Draft activity</h2><ChevronDown size={14} /></summary><Jobs jobs={w.jobs.filter(job => ['content', 'revise'].includes(job.kind)).slice(0, 5)} run={run} /></details>}
@@ -669,14 +673,7 @@ export function App() {
                   revise={draft => { setRevision(draft); setJobDialog('revise'); }}
                   onDraftChange={edit => setUnsavedDraft(edit === null ? null : { projectId: p!.id, ...edit })} />
               </>}
-              {page === "Competitors" && (
-                <>
-                  {measured ? <CitationComparison projectId={p!.id} ownDomain={p!.domain} rows={[ownWebsite!,...w.competitors]} evidence={openEvidence} openCompetitors={() => document.getElementById("comparison-websites")?.focus()} /> : <section className="panel"><Empty title="Compare the websites in your answers">Add competitors below, then run a visibility check.</Empty></section>}
-                  {measured && <section className="panel"><div className="panel-heading"><h2>Find relevant alternatives</h2><button className="secondary compact" disabled={w.jobs.some(job => job.kind === 'competitors' && job.measurementJobId === w.measurement?.id && ['queued', 'running', 'paused'].includes(job.status))} onClick={() => setJobDialog('competitors')}><RefreshCw size={14} />Review saved answers</button></div><p className="competitor-intro">Review the businesses recommended in this check against your website. Your collected answers stay unchanged.</p>{w.jobs.some(job => job.kind === 'competitors' && job.measurementJobId === w.measurement?.id) && <Jobs jobs={w.jobs.filter(job => job.kind === 'competitors' && job.measurementJobId === w.measurement?.id).slice(0, 1)} run={run} />}</section>}
-                  <CompetitorSuggestions project={p!} measurement={w.measurement} review={w.jobs.find(job => job.kind === 'competitors' && job.measurementJobId === w.measurement?.id && job.status === 'completed')} observations={w.observations} run={run} evidence={openEvidence} />
-                  <CompetitorSettings key={p!.id + ":" + p!.competitors.join("|")} project={p!} run={run} />
-                </>
-              )}
+              {page === "Competitors" && <Competitors project={p!} jobs={w.jobs} run={run} activity={job => <Jobs jobs={[job]} run={run} />} review={measurementId => { setCompetitorCheck(measurementId); setJobDialog('competitors'); }} />}
               {page === "Reports" && (
                 <section className="panel">
                   <div className="panel-heading">
@@ -758,7 +755,7 @@ export function App() {
           revision={revision}
           initialTopic={contentTopic}
           finding={contentFinding}
-          measurementJobId={w?.measurement?.id}
+          measurementJobId={jobDialog === 'competitors' ? competitorCheck : w?.measurement?.id}
           previousMeasurement={w?.jobs.find(completedMeasurement) ?? null}
           run={run}
           onStarted={job => { if (['content', 'revise'].includes(job.kind)) { setPage('Content'); setPendingContent({ projectId: p.id, jobId: job.id }); } }}
@@ -983,32 +980,6 @@ function ProjectSettings({ project, run }: { project: Project; run: (action: () 
     </form>}
   </section>;
 }
-function CompetitorSuggestions({ project, measurement, review, observations, run, evidence }: { project: Project; measurement: Job | null; review?: Job; observations: Observation[]; run: (action: () => Promise<unknown>) => Promise<void>; evidence: (ids: string[], label: string) => void }) {
-  const [selected, setSelected] = useState<string[]>([]), [saving, setSaving] = useState(false), [message, setMessage] = useState("");
-  const feedback = useFormFeedback();
-  useEffect(() => { setSelected([]); setMessage(""); feedback.setError(""); }, [project.id, measurement?.id, review?.id]);
-  const rows = ((review ?? measurement)?.result as { competitors?: { name: string; domain: string; observationIds: string[] }[] } | null)?.competitors ?? [];
-  const followed = new Set(project.competitors.map(value => { try { return new URL(value.includes("://") ? value : "https://" + value).hostname.replace(/^www\./, ""); } catch { return value; } }));
-  const candidates = rows.filter(item => !followed.has(item.domain.replace(/^www\./, ""))).map(item => ({ ...item, observationIds: item.observationIds.filter(id => observations.some(answer => answer.id === id)) })).filter(item => item.observationIds.length);
-  if (!candidates.length) return null;
-  return <section className="panel competitor-suggestions"><div className="panel-heading"><h2>Discover competitors</h2><span>{candidates.length} to review</span></div><p className="competitor-intro">Named and cited in your collected answers. Choose the businesses you want to compare.</p><div className="competitor-candidates">{candidates.map(item => <div className="competitor-candidate" key={item.domain}><label><input type="checkbox" aria-label={"Follow " + item.name} checked={selected.includes(item.domain)} disabled={saving} onChange={event => { setMessage(""); setSelected(current => event.target.checked ? [...current, item.domain] : current.filter(domain => domain !== item.domain)); }} /><SiteIcon projectId={project.id} domain={item.domain} size={30} /><span><strong>{item.name}</strong><small>{item.domain}</small></span></label><button type="button" className="secondary compact" onClick={() => evidence(item.observationIds, "Answers naming " + item.name)}>{item.observationIds.length} {item.observationIds.length === 1 ? "answer" : "answers"}<ArrowRight size={14} /></button></div>)}</div><footer><FormFeedback feedback={feedback} />{message && <p className="save-notice" role="status">{message}</p>}<button className="primary" disabled={saving || !selected.some(domain => candidates.some(item => item.domain === domain))} onClick={() => {
-    const domains = selected.filter(domain => candidates.some(item => item.domain === domain));
-    const { id, createdAt, ...settings } = project;
-    setSaving(true); feedback.setError("");
-    void run(async () => { try { await api("/projects/" + id, { ...settings, competitors: [...new Set([...project.competitors, ...domains])] }, "PUT"); setSelected([]); setMessage("Competitors added to your comparison."); } catch (error) { feedback.setError(error); } finally { setSaving(false); } });
-  }}><Plus size={15} />{saving ? "Adding..." : "Add selected competitors"}</button></footer></section>;
-}
-function CompetitorSettings({ project, run }: { project: Project; run: (action: () => Promise<unknown>) => Promise<void> }) {
-  const [saving, setSaving] = useState(false), [message, setMessage] = useState("");
-  const feedback = useFormFeedback();
-  return <section className="panel"><div className="panel-heading"><h2>Websites to compare</h2><span>{project.competitors.length} configured</span></div><form key={project.id} className="settings-form" onSubmit={(event) => {
-    event.preventDefault(); const data = new FormData(event.currentTarget);
-    const competitors = String(data.get("competitors") ?? "").split("\n").map(value => value.trim()).filter(Boolean);
-    const { id, createdAt, ...settings } = project;
-    setSaving(true); setMessage(""); feedback.setError("");
-    void run(async () => { try { await api("/projects/" + id, { ...settings, competitors }, "PUT"); setMessage("Comparison websites saved."); } catch (error) { feedback.setError(error); } finally { setSaving(false); } });
-  }}><label htmlFor="comparison-websites">Competitor websites<textarea id="comparison-websites" name="competitors" {...feedback.field("competitors")} rows={3} defaultValue={project.competitors.join("\n")} placeholder="One website per line" /></label><FormFeedback feedback={feedback} />{message && <p className="save-notice" role="status">{message}</p>}<button className="primary" disabled={saving}>{saving ? "Saving..." : "Save comparison"}</button></form></section>;
-}
 function JobDialog({
   kind,
   project,
@@ -1055,7 +1026,7 @@ function JobDialog({
     [consolePlatforms, setConsolePlatforms] = useState<{ key: string; name: string; enabled: boolean }[]>([]),
     [loading, setLoading] = useState(false),
     [budget, setBudget] = useState(0),
-    [contentMode, setContentMode] = useState<'article' | 'page_update'>(finding ? 'page_update' : 'article'),
+    [contentMode, setContentMode] = useState<'article' | 'page_update'>(finding && finding.opportunity?.type !== 'new_content' ? 'page_update' : 'article'),
     [discoveryError, setDiscoveryError] = useState(""),
     [discoveryRevision, setDiscoveryRevision] = useState(0),
     [submitting, setSubmitting] = useState(false);
@@ -1126,7 +1097,7 @@ function JobDialog({
           : kind === "revise"
             ? "Revise content"
           : kind === "content"
-            ? finding ? "Draft a page improvement" : "Create content"
+            ? finding ? finding.opportunity?.type === 'new_content' ? "Draft a new resource" : "Draft a page improvement" : "Create content"
             : kind === "competitors"
               ? "Review competitor evidence"
             : kind === "diagnose"
@@ -1191,11 +1162,12 @@ function JobDialog({
           </div>
         ) : (
           <>
+            {kind === 'diagnose' && previousMeasurement && <p className="small">Reviews the completed visibility check from {new Date(previousMeasurement.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} alongside your audited pages.</p>}
             {kind === 'content' && finding && <section className="draft-origin" aria-label="Selected opportunity">
-              <span className="draft-origin-icon"><Lightbulb size={19} /></span><div><strong>{finding.title}</strong>{targetDomain(finding.targetUrl) && <a href={finding.targetUrl} target="_blank" rel="noreferrer"><SiteIcon projectId={project.id} domain={targetDomain(finding.targetUrl)!} size={18} /><span>View the existing page</span><ArrowUpRight size={13} /></a>}</div>
-              <p>Draft copy for this improvement. Site configuration and publishing remain in your hands.</p>
+              <span className="draft-origin-icon"><Lightbulb size={19} /></span><div><strong>{finding.title}</strong>{targetDomain(finding.targetUrl) && <a href={finding.targetUrl} target="_blank" rel="noreferrer"><SiteIcon projectId={project.id} domain={targetDomain(finding.targetUrl)!} size={18} /><span>{finding.opportunity?.type === 'new_content' ? 'View context page' : 'View the existing page'}</span><ArrowUpRight size={13} /></a>}</div>
+              <p>{finding.opportunity?.type === 'new_content' ? 'Create a separate resource supported by your website and saved answers.' : 'Draft focused copy for this improvement.'}</p>
             </section>}
-            {kind === 'content' && finding && <fieldset className="content-purpose"><legend>What would you like to write?</legend>{[
+            {kind === 'content' && finding && finding.opportunity?.type !== 'new_content' && <fieldset className="content-purpose"><legend>What would you like to write?</legend>{[
               { value: 'page_update' as const, title: 'Improve this page', detail: 'Focused copy for the existing page', Icon: FilePenLine },
               { value: 'article' as const, title: 'Write a new article', detail: 'A separate article informed by this opportunity', Icon: FileText },
             ].map(({ value, title, detail, Icon }) => <label key={value} className={contentMode === value ? 'selected' : ''}><input type="radio" name="contentMode" value={value} checked={contentMode === value} onChange={() => setContentMode(value)} /><Icon size={21} /><span><strong>{title}</strong><small>{detail}</small></span><Check size={16} aria-hidden="true" /></label>)}</fieldset>}
