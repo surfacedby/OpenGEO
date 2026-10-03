@@ -213,7 +213,7 @@ export function App() {
   const ownWebsite = w ? { domain:w.project.domain, citationRate:w.metrics.citationRate, answersCiting:ownCitations?.count ?? 0, answersCollected:w.metrics.completed, observationIds:ownCitations?.observationIds ?? [] } : null;
   const filteredAnswers = w?.observations.filter((answer) => (!evidenceFilter || evidenceFilter.ids.includes(answer.id)) && (answer.prompt + " " + answer.answer).toLowerCase().includes(query.trim().toLowerCase())) ?? [];
   useEffect(() => {
-    if (w) setSelectedContent((id) => w.content.some((draft) => draft.id === id) ? id : w.content[0]?.id ?? "");
+    if (w) setSelectedContent((id) => w.content.some((draft) => draft.id === id) ? id : "");
   }, [w?.project.id, w?.content.map((draft) => draft.id).join(",")]);
   useEffect(() => {
     if (!w || !pendingContent || unsavedDraft || w.project.id !== pendingContent.projectId) return;
@@ -231,7 +231,7 @@ export function App() {
   }
   const changePage = (label: string) => {
     if (page === label) mainRef.current?.scrollTo(0, 0);
-    else navigate(() => { setPage(label); setQuery(""); setEvidenceFilter(null); });
+    else navigate(() => { setPage(label); setQuery(""); setEvidenceFilter(null); if (label === 'Content') setSelectedContent(''); });
   };
   const openConnections = () => navigate(() => { setPage("Settings"); setQuery(""); setEvidenceFilter(null); setConnectionsRequest(value => value + 1); });
   const openEvidence = (ids: string[], label: string) => navigate(() => {

@@ -11,8 +11,8 @@ function inline(value: string) {
     else if (match[2]) {
       let safe = false;
       try { const url = new URL(match[3]); safe = ["http:", "https:"].includes(url.protocol) && !url.username && !url.password; } catch {}
-      html += safe ? '<a href="' + escapeHtml(match[3]) + '" target="_blank" rel="noreferrer noopener">' + escapeHtml(match[2]) + "</a>" : escapeHtml(match[2]);
-    } else html += match[4] ? "<strong>" + escapeHtml(match[4]) + "</strong>" : "<em>" + escapeHtml(match[5]) + "</em>";
+      html += safe ? '<a href="' + escapeHtml(match[3]) + '" target="_blank" rel="noreferrer noopener">' + inline(match[2]) + "</a>" : escapeHtml(match[2]);
+    } else html += match[4] ? "<strong>" + inline(match[4]) + "</strong>" : "<em>" + inline(match[5]) + "</em>";
     cursor = match.index! + match[0].length;
   }
   return html + escapeHtml(value.slice(cursor));

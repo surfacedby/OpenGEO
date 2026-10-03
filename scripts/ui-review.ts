@@ -12,7 +12,7 @@ const directory = mkdtempSync(join(tmpdir(), "opengeo-ui-review-"));
 const screenshots = join(process.env.LOCALAPPDATA ?? tmpdir(), 'OpenGEO', 'workflow-ux-review');
 mkdirSync(screenshots, { recursive: true });
 const runtime = await start({ directory, port: 0, protector: { encrypt: (text) => Buffer.from(text), decrypt: (bytes) => bytes.toString() } });
-const browser = await chromium.launch({ channel: "chrome", headless: true });
+const browser = await chromium.launch({ ...(process.env.OPENGEO_TEST_BROWSER ? { executablePath: process.env.OPENGEO_TEST_BROWSER } : { channel: 'chrome' }), headless: true });
 try {
   await runtime.runner.stop(); runtime.scheduler.stop();
   const page = await browser.newPage({ viewport: { width: 1360, height: 960 } });
@@ -188,10 +188,12 @@ try {
   assert.equal(stored.markdown, "# Draft\n\nSaved changes."); assert.equal(stored.reviewCurrent, false);
   assert.equal(await page.getByRole("button", { name: /Make an evidence-based improvement/ }).locator(".step.done").count(), 0);
   await page.getByRole("button", { name: "Content", exact: true }).click();
+  await page.getByRole("button", { name: "Open draft: Synthetic documentation draft", exact: true }).click();
   await page.getByRole("button", { name: "Edit Markdown", exact: true }).click();
   await page.getByRole("textbox", { name: "Draft for " + draft.topic }).fill("Unsaved text to discard.");
-  await page.getByRole("button", { name: "Open draft: Another synthetic draft", exact: true }).click();
+  await page.getByRole("button", { name: "All drafts", exact: true }).click();
   await page.getByRole("button", { name: "Discard changes", exact: true }).click();
+  await page.getByRole("button", { name: "Open draft: Another synthetic draft", exact: true }).click();
   await page.getByRole("heading", { name: "Another synthetic draft", exact: true }).waitFor();
   await page.screenshot({ path: join(screenshots, 'content-desktop-test-data.png') });
   assert.equal(runtime.store.artifacts<any>(projectId, "content").find((entry) => entry.id === draft.id).markdown, "# Draft\n\nSaved changes.");

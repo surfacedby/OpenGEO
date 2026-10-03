@@ -556,6 +556,8 @@
 .compact-answer {
   padding: 18px 22px;
 }
+.answer-meta .badge { display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px; }
+.answer-meta .badge > svg { flex: none; }
 .compact-answer h3 {
   font-size: 14px;
   line-height: 1.5;

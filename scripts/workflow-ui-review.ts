@@ -19,7 +19,7 @@ globalThis.fetch = (async url => {
     status: discoveryRequests === 1 ? 503 : 200, headers: { "Content-Type": "application/json" },
   });
 }) as typeof fetch;
-const browser = await chromium.launch({ channel: "chrome", headless: true });
+const browser = await chromium.launch({ ...(process.env.OPENGEO_TEST_BROWSER ? { executablePath: process.env.OPENGEO_TEST_BROWSER } : { channel: 'chrome' }), headless: true });
 let release: (() => void) | undefined;
 try {
   await runtime.runner.stop(); runtime.scheduler.stop();
@@ -109,6 +109,8 @@ try {
   await page.getByRole('heading', { name: 'Your drafts 2', exact: true }).waitFor();
   assert.equal(await page.locator('.draft-card').count(), 2);
   assert.match(await page.locator('.draft-library').innerText(), /2 versions/);
+  assert.equal(await page.locator('.draft-document').count(), 0);
+  await page.getByRole('button', { name: 'Open draft: Documentation examples', exact: true }).first().click();
   await page.getByRole('button', { name: 'Draft version', exact: true }).click();
   await page.getByRole('combobox', { name: 'Search draft version', exact: true }).press('End');
   await page.keyboard.press('Enter');
@@ -127,6 +129,8 @@ try {
   await saveChanges.getByRole('button', { name: 'Save and continue', exact: true }).click();
   await page.getByText('Saved version 2', { exact: true }).waitFor();
   assert.equal(runtime.store.artifacts<any>(project.id, 'content').find(draft => draft.id === originals[0]).markdown, '# Preserved edits');
+  await page.getByRole('button', { name: 'All drafts', exact: true }).click();
+  await page.getByRole('heading', { name: 'Your drafts 2', exact: true }).waitFor();
   for (const width of [1360, 760, 390]) {
     await page.setViewportSize({ width, height: 780 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'Content history at ' + width + 'px');

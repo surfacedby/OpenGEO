@@ -9,6 +9,8 @@ test("reading and HTML exports preserve headings, lists, source links and code w
   for (const url of ["javascript:alert(1)", "data:text/html,evil", "https://user:secret@example.com/"]) assert.ok(!markdownHtml("[Unsafe](" + url + ")").includes("href="));
   assert.ok(!markdownHtml('<img src="https://example.com/tracking" onerror="evil()">').includes("<img"));
   assert.ok(!markdownHtml("![Remote](https://example.com/image.png)").includes("<img"));
+  assert.match(markdownHtml('Read **[the official guide](https://example.com/guide)** and [a **clear label**](https://example.com/).'), /<strong><a href="https:\/\/example.com\/guide"[^>]*>the official guide<\/a><\/strong>/);
+  assert.match(markdownHtml('[a **clear label**](https://example.com/)'), /<a[^>]*>a <strong>clear label<\/strong><\/a>/);
   const document = htmlDocument("<script>title</script>", "# A draft");
   assert.match(document, /<article><h1>A draft/); assert.match(document, /Content-Security-Policy/); assert.ok(!document.includes("<script>title"));
 });
