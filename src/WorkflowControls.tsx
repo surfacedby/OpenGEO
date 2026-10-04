@@ -6,6 +6,7 @@ import { ProviderIcon, providerOptions, providerLabels } from "./provider-ui";
 import { AnswerCard } from "./DataPresentation";
 import { CalendarClock, Plus, Trash2, Upload, Download } from "lucide-react";
 import identity from "../brand/identity.json";
+import { dateTime, shortDate } from "./format";
 import { markdownHtml, htmlDocument } from "../server/markdown";
 import type { Model, Project, Provider } from "../server/contracts";
 import type { Observation, PageEvidence } from "../server/contracts";
@@ -22,7 +23,7 @@ export function FindingEvidence({ projectId, findingId }: { projectId: string; f
     {evidence && <>
       {evidence.pages.map((page) => <article key={page.id}>
         <h3><a href={page.url} target="_blank" rel="noreferrer">{page.title || page.url}</a></h3>
-        <p className="small">Inspected {new Date(page.fetchedAt).toLocaleDateString()}{page.status >= 400 ? " / Page unavailable" : ""}</p>
+        <p className="small">Inspected {shortDate(page.fetchedAt)}{page.status >= 400 ? " / Page unavailable" : ""}</p>
         <p className="answer-text">{page.text}</p>
       </article>)}
       {evidence.observations.map((answer) => <AnswerCard observation={answer} key={answer.id} />)}
@@ -136,7 +137,7 @@ export function BackupControls({
               >
                 Import reviewed work
               </button>
-              <button onClick={() => setPending(null)}>Cancel</button>
+              <button className="secondary" onClick={() => setPending(null)}>Cancel</button>
             </div>
           </div>
         )}
@@ -335,13 +336,13 @@ export function ScheduleControls({ run, connected }: { run: (f: () => Promise<un
   }, [provider, platform, local, kind, connected[provider], discoveryRevision]);
   return <section className="panel">
     <div className="panel-heading"><h2>Schedules</h2><button className="secondary" disabled={saving} onClick={() => { submission.current = null; setError(""); setAdding(!adding); }}><Plus size={15} />Add schedule</button></div>
-    <div className="panel-padding"><p className="small">Runs while {identity.name} is open. Docker can run continuously on your host. Missed runs become one fresh run.</p></div>
+    <p className="small schedule-intro">Runs while {identity.name} is open. Docker can run continuously on your host. Missed runs become one fresh run.</p>
     {!schedules.length && !adding && <div className="empty"><CalendarClock size={28} /><h3>Keep your workflow moving</h3><p>Choose a website, task and time. Start with a free local audit, or schedule AI work using a connected provider.</p></div>}
     {schedules.map((entry) => <div className="schedule-row" key={entry.id}>
       <CalendarClock size={18} /><div>
         <strong>{projects.find((project) => project.id === entry.job.projectId)?.domain ?? "Website unavailable"}</strong>
-        <p className="small">{entry.job.kind === "audit" ? "Local audit" : entry.job.kind === "content" ? "Content draft" : "Visibility recheck"} / {entry.frequency} / {entry.timezone}{entry.job.provider ? " / " + providerLabels[entry.job.provider as Provider] : ""}</p>
-        <small>Next: {new Date(entry.nextAt).toLocaleString()}</small>
+        <p className="small">{entry.job.kind === "audit" ? "Local audit" : entry.job.kind === "content" ? "Content draft" : "Visibility recheck"}, {entry.frequency === "daily" ? "daily" : "weekly"}{entry.job.provider ? " with " + providerLabels[entry.job.provider as Provider] : ""}</p>
+        <small>Next run {dateTime(entry.nextAt)} ({entry.timezone.replaceAll("_", " ")})</small>
         {entry.job.provider && !connected[entry.job.provider] && <p className="small">Reconnect this provider before the next run.</p>}
         {entry.lastError && <p role="status" className="small">{entry.lastError}</p>}
       </div>

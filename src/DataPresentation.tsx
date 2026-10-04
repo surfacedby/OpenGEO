@@ -9,7 +9,7 @@ import {
   CalendarDays,
 } from "lucide-react";
 import { SiteIcon } from "./SiteIcon";
-import { markdownHtml } from '../server/markdown';
+import { markdownHtml, markdownSummary } from '../server/markdown';
 import { targetDomain } from './finding-groups';
 import { FileText, ListChecks, Braces } from "lucide-react";
 import type { Job, Observation } from "../server/contracts";
@@ -28,20 +28,7 @@ import {
 } from "./provider-ui";
 import "./analytics.css";
 
-const percent = (value: number | null) =>
-  value === null ? "No data" : value.toFixed(1) + "%";
-const date = (value: string) =>
-  new Date(value).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  });
-const dateTime = (value: string) =>
-  new Date(value).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+import { percent, shortDate as date, dateTime } from "./format";
 function languageName(locale: string) {
   try {
     return new Intl.DisplayNames(["en"], { type: "language" }).of(locale);
@@ -270,7 +257,7 @@ export function VisibilityChart({
                         aria-label={
                           s.label +
                           ", " +
-                          new Date(point.at).toLocaleString() +
+                          dateTime(point.at) +
                           ", " +
                           percent(point[s.key])
                         }
@@ -289,18 +276,16 @@ export function VisibilityChart({
                 )}
               </g>
             ))}
-            <text
-              x={history.length === 1 ? x(0) : left}
-              y="199"
-              textAnchor={history.length === 1 ? "middle" : "start"}
-            >
-              {date(history[0].at)}
-            </text>
-            {history.length > 1 && (
-              <text x={right} y="199" textAnchor="end">
-                {date(history.at(-1)!.at)}
+            {axisLabels(history.map((_, index) => x(index))).map((index) => (
+              <text
+                key={history[index].jobId}
+                x={x(index)}
+                y="199"
+                textAnchor={history.length === 1 ? "middle" : index === 0 ? "start" : index === history.length - 1 ? "end" : "middle"}
+              >
+                {date(history[index].at)}
               </text>
-            )}
+            ))}
           </svg>
           {active && (
             <div className="chart-readout" aria-live="polite">
@@ -338,7 +323,7 @@ export function VisibilityChart({
                 <tbody>
                   {history.map((point) => (
                     <tr key={point.jobId}>
-                      <td>{new Date(point.at).toLocaleString()}</td>
+                      <td>{dateTime(point.at)}</td>
                       <td>{percent(point.mentionRate)}</td>
                       <td>{percent(point.citationRate)}</td>
                       <td>
@@ -364,6 +349,16 @@ export function VisibilityChart({
       )}
     </section>
   );
+}
+
+/** Date labels for the checks, always keeping the first and last and skipping any that would collide. */
+function axisLabels(positions: number[], gap = 64) {
+  if (!positions.length) return [];
+  const last = positions.length - 1, labels = [0];
+  for (let index = 1; index < last; index++)
+    if (positions[index] - positions[labels.at(-1)!] >= gap && positions[last] - positions[index] >= gap) labels.push(index);
+  if (last > 0 && positions[last] - positions[0] >= gap) labels.push(last);
+  return labels;
 }
 
 export function SourcesTable({
@@ -622,50 +617,43 @@ export function PromptTable({
 }
 
 export function AnswerCard({ observation: o }: { observation: Observation }) {
+  const sources = o.citations.filter((c) => targetDomain(c.url));
+  const domains = [...new Set(sources.map((c) => targetDomain(c.url)!))];
   return (
     <article className="answer compact-answer">
-      <div className="answer-meta">
-        <span className="badge">
-          <ProviderIcon provider={o.platform} size={14} />
-          {platformLabel(o.platform)}
-        </span>
-        <time dateTime={o.observedAt}>{dateTime(o.observedAt)}</time>
+      <div className="answer-heading">
+        <h3>{o.prompt}</h3>
+        <div className="answer-outcomes">
+          {o.cited && <span className="outcome cited"><Link size={12} />Website cited</span>}
+          <span className={"outcome " + (o.mentioned ? "named" : "absent")}>{o.mentioned ? "Brand mentioned" : "Brand not detected"}</span>
+          {!o.cited && <span className="visually-hidden">Website not cited</span>}
+        </div>
       </div>
-      <h3>{o.prompt}</h3>
-      <div className="answer-preview" dangerouslySetInnerHTML={{ __html: markdownHtml(o.answer.split(/\n\s*\n/)[0]) }} />
-      <div className="answer-outcomes">
-        <span className={o.mentioned ? "outcome-positive" : ""}>
-          {o.mentioned ? "Brand mentioned" : "Brand not detected"}
-        </span>
-        <span className={o.cited ? "outcome-positive" : ""}>
-          {o.cited ? "Website cited" : "Website not cited"}
-        </span>
-        <span>{o.citations.length} source links</span>
+      <div className="answer-preview" dangerouslySetInnerHTML={{ __html: markdownHtml(markdownSummary(o.answer)) }} />
+      <div className="answer-meta">
+        <span><ProviderIcon provider={o.platform} size={14} />{platformLabel(o.platform)}</span>
+        <time dateTime={o.observedAt}>{dateTime(o.observedAt)}</time>
+        {domains.length > 0 && <span className="source-stack" aria-label={sources.length + " source links"}>{domains.slice(0, 4).map((domain) => <SiteIcon key={domain} projectId={o.projectId} domain={domain} size={18} />)}<span>{sources.length} {sources.length === 1 ? "source" : "sources"}</span></span>}
+        {!domains.length && <span>No source links</span>}
       </div>
       <details className="answer-detail">
         <summary>
-          Read full answer and sources <ChevronDown size={15} />
+          Read full answer and sources <ChevronDown size={14} />
         </summary>
         <div className="document-preview answer-document" lang={o.locale} dir={['ar', 'fa', 'he', 'ur'].includes(o.locale.split('-')[0]) ? 'rtl' : 'ltr'} dangerouslySetInnerHTML={{ __html: markdownHtml(o.answer) }} />
-        <div className="answer-meta">
-          <span>{collectionLabel(o)}</span>
-          <span>{retrievalLabel(o)}</span>
-          <span>Model: {o.model}</span>
-        </div>
-        {o.citations.some(c => targetDomain(c.url)) && <h4>Sources in this answer</h4>}
+        {sources.length > 0 && <h4>Sources in this answer</h4>}
         <ul className="answer-sources">
-          {o.citations
-            .filter((c) => targetDomain(c.url))
-            .map((c, index) => (
-              <li key={index}>
-                <a href={c.url} target="_blank" rel="noreferrer">
-                  <SiteIcon projectId={o.projectId} domain={targetDomain(c.url)!} size={26} />
-                  <span><strong>{c.title || targetDomain(c.url)}</strong>{c.title && <small>{targetDomain(c.url)}</small>}</span>
-                  <ExternalLink size={12} />
-                </a>
-              </li>
-            ))}
+          {sources.map((c, index) => (
+            <li key={index}>
+              <a href={c.url} target="_blank" rel="noreferrer">
+                <SiteIcon projectId={o.projectId} domain={targetDomain(c.url)!} size={24} />
+                <span><strong>{c.title || targetDomain(c.url)}</strong>{c.title && <small>{targetDomain(c.url)}</small>}</span>
+                <ExternalLink size={12} />
+              </a>
+            </li>
+          ))}
         </ul>
+        <p className="answer-provenance">{collectionLabel(o)}. {retrievalLabel(o)}. Model: {o.model}.</p>
       </details>
     </article>
   );
@@ -811,7 +799,7 @@ export function CitationComparison({
       </div>
       <div className="citation-comparison">
         {rows.map((row) => (
-          <div className="citation-comparison-row" key={row.domain}>
+          <div className={"citation-comparison-row" + (row.domain === ownDomain ? " own" : "")} key={row.domain}>
             <SiteIcon projectId={projectId} domain={row.domain} size={30} />
             <div>
               <div className="citation-comparison-label">

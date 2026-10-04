@@ -28,3 +28,15 @@ test('content tables render cells, escaped pipes and code without executing mode
   assert.ok(!markdownHtml('```\n| A | B |\n| --- | --- |\n```').includes('<table>'));
   assert.ok(!markdownHtml('| A | B |\n| --- |').includes('<table>'));
 });
+
+test("quotes and rules render as structure, and previews skip headings to the first prose block", async () => {
+  const { markdownSummary } = await import("../server/markdown.js");
+  const html = markdownHtml("Before\n> Tip: **grind coarser**\n> for less bitterness\n\n---\n\nAfter");
+  assert.match(html, /<p>Before<\/p>\n<blockquote><p>Tip: <strong>grind coarser<\/strong>\nfor less bitterness<\/p><\/blockquote>/);
+  assert.match(html, /<hr>\n<p>After<\/p>/);
+  assert.ok(!html.includes("&gt;"));
+  assert.ok(!markdownHtml("> <script>evil()</script>").includes("<script>"));
+  assert.equal(markdownSummary("## Short answer\n\nUse **fresh** beans.\n\n- Grind"), "Use **fresh** beans.");
+  assert.equal(markdownSummary("| A | B |\n| --- | --- |\n\n> Quoted advice"), "Quoted advice");
+  assert.equal(markdownSummary("# Only a heading"), "# Only a heading");
+});

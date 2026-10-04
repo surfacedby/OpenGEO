@@ -34,22 +34,28 @@ import {
   X,
   ShieldCheck,
   Menu,
+  ExternalLink,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  Sparkles,
 } from "lucide-react";
+import { percent, shortDate, relativeTime, dateTime, pointChange, usd } from "./format";
 import { api, download } from "./api";
 import { ConnectionSettings, type ChatGPTProfiles } from "./ConnectionSettings";
 import { Onboarding } from "./Onboarding";
 import { QuestionRows, type QuestionRow } from "./QuestionRows";
 import { Select } from "./Select";
 import { FormFeedback, useFormFeedback } from "./FormFeedback";
-import { ProviderIcon, providerLabels, providerOptions } from "./provider-ui";
+import { ProviderIcon, providerLabels, providerOptions, providerOrder } from "./provider-ui";
 import { AnswerCard, AnswerDistribution, AuditEssentials, CitationComparison, MeasurementScope, PromptTable, SourcesTable, VisibilityChart } from "./DataPresentation";
 import { SiteIcon } from "./SiteIcon";
 import { AuditSummary } from "./AuditSummary";
 import { Findings } from "./Findings";
-import { findingGroups, opportunityFindings, auditFindings, targetDomain } from "./finding-groups";
+import { findingGroups, opportunityFindings, auditFindings, targetDomain, targetLabel } from "./finding-groups";
 import { ContentWorkspace } from "./ContentWorkspace";
 import { Competitors } from "./Competitors";
-import { completedMeasurement } from "../server/portable-results";
+import { completedMeasurement, portableJobResult } from "../server/portable-results";
 import type { Presentation } from "../server/presentation";
 import identity from "../brand/identity.json";
 import type {
@@ -103,8 +109,6 @@ const navigation = [
   ["Reports", ChartColumn],
   ["Settings", Settings],
 ] as const;
-const fmt = (value: number | null) =>
-  value === null ? "No data" : value.toFixed(1) + "%";
 function Empty({ title, children }: { title: string; children: ReactNode }) {
   const Icon = /draft|create|content/i.test(title) ? FileText : /audit|page/i.test(title) ? ScanSearch : /answer|response/i.test(title) ? MessagesSquare : /recommendation|improvement/i.test(title) ? Lightbulb : Search;
   return (
@@ -209,6 +213,7 @@ export function App() {
   useEffect(() => { mainRef.current?.scrollTo(0, 0); }, [page, selected]);
   const w = workspace,
     p = w?.project;
+  const connectedProviders = providerOrder.filter((provider) => connected[provider]);
   const opportunities = opportunityFindings(w?.findings ?? []);
   const auditIssues = auditFindings(w?.findings ?? []);
   const ownCitations = w?.presentation.outcomes.find((group) => group.kind === "cited");
@@ -245,6 +250,7 @@ export function App() {
   if (!setupState) return <div className="startup-state" role="status"><img src="/logo.svg" width="40" height="40" alt="" /><h1>{identity.name}</h1>{error || refreshError ? <><p role="alert">{error || refreshError}</p><button className="secondary" disabled={refreshing} onClick={() => { setError(""); setRefreshError(""); void api("/session").then(() => { setSessionReady(true); return refresh(); }).catch((failure) => setError(failure.message)); }}>Try again</button></> : <p>Opening your workspace...</p>}</div>;
   if (!setupState.completed || !projects.length || newProject || setupState.draft) return <Onboarding connected={connected} profiles={profiles} refresh={refresh} draft={setupState.draft} savedProject={projects.find((project) => project.id === setupState.draft?.projectId)} initialStep={setupState.completed && Object.values(connected).some(Boolean) ? 1 : 0} cancel={projects.length && setupState.completed ? () => setNewProject(false) : undefined} finish={async (project) => { selectedRef.current = project.id; setSelected(project.id); setNewProject(false); changePage("Overview"); await refresh(); }} />;
   const audited = !!w?.pages.length, measured = !!w?.metrics.completed;
+  const comparison = w?.comparison?.status === "comparable" && w.jobs.find(completedMeasurement)?.id === w.measurement?.id ? w.comparison as { previousAt: string; mentionPoints: number | null; citationPoints: number | null } : null;
   const analysisMeasurement = w?.jobs.find(completedMeasurement);
   const activeMeasurement = w?.jobs.find(job => ['measure', 'recheck'].includes(job.kind) && ['queued', 'running', 'paused'].includes(job.status) && !completedMeasurement(job));
   const completedAnalysis = analysisMeasurement && w!.jobs.find(job => job.kind === 'diagnose' && job.status === 'completed' && ((job.result as { measurementJobId?: string } | null)?.measurementJobId ? (job.result as { measurementJobId: string }).measurementJobId === analysisMeasurement.id : job.createdAt >= analysisMeasurement.createdAt));
@@ -313,8 +319,8 @@ export function App() {
         <header className="topbar">
           <button className="icon-button mobile-navigation-trigger" aria-label="Open navigation" aria-haspopup="dialog" onClick={() => setMobileNavigation(true)}><Menu size={20} /></button>
           <div className="mobile-project-switch"><Select label="Mobile website" compact value={selected} onChange={(id) => { if (id !== selected) navigate(() => setSelected(id)); }} options={projects.map((project) => ({ value: project.id, label: project.domain, detail: project.brand, icon: <SiteIcon projectId={project.id} domain={project.domain} size={22} /> }))} /><button className="icon-button" aria-label="Add website on mobile" onClick={() => navigate(() => setNewProject(true))}><Plus size={17} /></button></div>
-          <div className="workspace-identity">{p && <SiteIcon projectId={p.id} domain={p.domain} size={30} />}<div><strong>{p?.brand ?? "Your workspace"}</strong><span>{p?.domain}</span></div></div>
-          <div className="topbar-actions"><button className="connection-shortcut" onClick={openConnections} aria-label="Manage connections">{Object.values(connected).some(Boolean) ? Object.entries(connected).filter(([, enabled]) => enabled).slice(0, 4).map(([provider]) => <ProviderIcon key={provider} provider={provider} size={17} />) : <Link size={17} />}<span>{Object.values(connected).some(Boolean) ? "Connected" : "Connect provider"}</span><ChevronDown size={13} /></button>
+          <div className="workspace-identity">{p && <SiteIcon projectId={p.id} domain={p.domain} size={30} />}<div><strong>{p?.brand ?? "Your workspace"}</strong>{p && <a href={"https://" + p.domain} target="_blank" rel="noreferrer">{p.domain}<ExternalLink size={11} /></a>}</div></div>
+          <div className="topbar-actions"><button className="connection-shortcut" onClick={openConnections} aria-label="Manage connections"><span className={"connection-dot" + (connectedProviders.length ? "" : " off")} aria-hidden="true" />{connectedProviders.slice(0, 3).map((provider) => <ProviderIcon key={provider} provider={provider} size={16} />)}<span>{connectedProviders.length === 1 ? providerLabels[connectedProviders[0]] : connectedProviders.length ? connectedProviders.length + " connections" : "Connect a provider"}</span><ChevronDown size={13} /></button>
           <button
             className="icon-button"
             aria-label="Refresh workspace"
@@ -368,13 +374,17 @@ export function App() {
                   {measured ? <div className="metrics">
                     <Metric
                       title="Brand mentions"
-                      value={fmt(w.metrics.mentionRate)}
+                      value={percent(w.metrics.mentionRate)}
                       detail="Collected answers naming your brand"
+                      points={comparison?.mentionPoints}
+                      since={comparison?.previousAt}
                     />
                     <Metric
                       title="Website citations"
-                      value={fmt(w.metrics.citationRate)}
+                      value={percent(w.metrics.citationRate)}
                       detail="Collected answers linking to your site"
+                      points={comparison?.citationPoints}
+                      since={comparison?.previousAt}
                     />
                     <Metric
                       title="Answers collected"
@@ -507,15 +517,15 @@ export function App() {
                         <tbody>
                           {w.pages.map((e) => (
                             <tr key={e.id}>
-                              <td>
+                              <td className="page-cell">
                                 <a
                                   href={e.url}
                                   target="_blank"
                                   rel="noreferrer"
                                 >
-                                  {e.title || e.url}
+                                  {e.title || targetLabel(e.url)}
                                 </a>
-                                <small>{e.url}</small>
+                                <small title={e.url}>{e.title ? targetLabel(e.url) : "No page title"}</small>
                               </td>
                               <td>
                                 <span
@@ -530,7 +540,7 @@ export function App() {
                               <td>{e.h1.length === 0 ? "Missing" : e.h1.length === 1 ? "Present" : e.h1.length + " headings"}</td>
                               <td title={e.schemaTypes.join(", ")}>{e.schemaTypes.length ? "Present" : "Not found"}</td>
                               <td>
-                                {new Date(e.fetchedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                                {shortDate(e.fetchedAt)}
                               </td>
                             </tr>
                           ))}
@@ -549,13 +559,17 @@ export function App() {
                   {measured && <div className="metrics">
                     <Metric
                       title="Brand mentions"
-                      value={fmt(w.metrics.mentionRate)}
+                      value={percent(w.metrics.mentionRate)}
                       detail="Answers naming your brand"
+                      points={comparison?.mentionPoints}
+                      since={comparison?.previousAt}
                     />
                     <Metric
                       title="Website citations"
-                      value={fmt(w.metrics.citationRate)}
+                      value={percent(w.metrics.citationRate)}
                       detail="Answers linking to your site"
+                      points={comparison?.citationPoints}
+                      since={comparison?.previousAt}
                     />
                     <Metric
                       title={activeMeasurement ? 'Answers remaining' : 'Missing answers'}
@@ -580,39 +594,10 @@ export function App() {
                         Recheck <RefreshCw size={14} />
                       </button>}
                     </div>
-                    {w.comparison && w.jobs.find(completedMeasurement)?.id === w.measurement?.id && (
-                      <div className="panel-padding">
-                        {w.comparison.status === "comparable" ? (
-                          <>
-                            <h3>
-                              Change from the comparable check on{" "}
-                              {new Date(
-                                w.comparison.previousAt,
-                              ).toLocaleDateString()}
-                            </h3>
-                            <p>
-                              Mention rate:{" "}
-                              {w.comparison.mentionPoints === null
-                                ? "No data"
-                                : w.comparison.mentionPoints.toFixed(1) +
-                                  " percentage points"}
-                              . Citation rate:{" "}
-                              {w.comparison.citationPoints === null
-                                ? "No data"
-                                : w.comparison.citationPoints.toFixed(1) +
-                                  " percentage points"}
-                              .
-                            </p>
-                            <p className="small">
-                              The same collection scope was used. A change does
-                              not establish that an edit caused it.
-                            </p>
-                          </>
-                        ) : (
-                          <p>{w.comparison.message}</p>
-                        )}
-                      </div>
-                    )}
+                    {comparison ? <div className="comparison-strip">
+                      <p><strong>Since the comparable check on {shortDate(comparison.previousAt)}</strong><small>Same questions, connection and answer settings. A change does not establish that an edit caused it.</small></p>
+                      {([["Brand mentions", comparison.mentionPoints], ["Website citations", comparison.citationPoints]] as const).map(([label, points]) => { const change = pointChange(points); return <span key={label}>{label}<b className={"metric-change " + (change?.direction ?? "flat")}>{change?.label ?? "No data"}</b></span>; })}
+                    </div> : w.comparison?.message && w.jobs.find(completedMeasurement)?.id === w.measurement?.id && <p className="comparison-strip small">{w.comparison.message}</p>}
                     <Jobs
                       jobs={w.jobs.filter((j) =>
                         ["measure", "recheck"].includes(j.kind),
@@ -651,8 +636,10 @@ export function App() {
                 <SourcesTable presentation={w.presentation} collected={w.metrics.completed} evidence={openEvidence} projectId={p!.id} />
               )}
               {page === "Opportunities" && <>
-                {analysisMeasurement && <p className="small">Recommendations use the completed visibility check from {new Date(analysisMeasurement.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} and your audited pages.</p>}
-                {omittedSuggestions > 0 && <p className="small">{omittedSuggestions} {omittedSuggestions === 1 ? 'suggestion was' : 'suggestions were'} left out because the supporting evidence could not be verified.</p>}
+                {(analysisMeasurement || omittedSuggestions > 0) && <div className="opportunity-context">
+                  {analysisMeasurement && <p className="small">Recommendations use the completed visibility check from {shortDate(analysisMeasurement.createdAt)} and your audited pages.</p>}
+                  {omittedSuggestions > 0 && <p className="small">{omittedSuggestions} {omittedSuggestions === 1 ? 'suggestion was' : 'suggestions were'} left out because the supporting evidence could not be verified.</p>}
+                </div>}
                 {(analyzed || opportunities.length > 0) && <div className="opportunity-summary" aria-label="Opportunity summary">
                   <div><Lightbulb size={20} /><strong>{findingGroups(opportunities.filter(f => f.status !== 'done')).length}</strong><span>Open opportunities</span></div>
                   <div><ListChecks size={20} /><strong>{findingGroups(opportunities.filter(f => f.priority === 'high' && f.status !== 'done')).length}</strong><span>High priority</span></div>
@@ -780,20 +767,28 @@ const descriptions: Record<string, string> = {
   Reports: "Keep, share and move your work.",
   Settings: "Manage provider connections and scheduled work.",
 };
+/** Rate changes come only from the server's same-scope comparison, never from adjacent checks. */
 function Metric({
   title,
   value,
   detail,
+  points,
+  since,
 }: {
   title: string;
   value: string;
   detail: string;
+  points?: number | null;
+  since?: string;
 }) {
   const Icon = ({ "Brand mentions": MessagesSquare, "Website citations": Link, "Answers collected": Check, "Opportunities": Lightbulb, "Missing answers": MessagesSquare, "Answers remaining": MessagesSquare, "Source links": Globe } as Record<string, typeof MessagesSquare>)[title] ?? ChartColumn;
+  const change = points === undefined ? null : pointChange(points);
+  const ChangeIcon = change?.direction === "up" ? TrendingUp : change?.direction === "down" ? TrendingDown : Minus;
   return (
     <section className="metric">
-      <span className="metric-title">{title}<span className="metric-icon"><Icon size={17} aria-hidden="true" /></span></span>
-      <strong className={value.length > 10 ? 'metric-text' : undefined}>{value}</strong>
+      <span className="metric-title">{title}<span className="metric-icon"><Icon size={16} aria-hidden="true" /></span></span>
+      <div className="metric-value"><strong className={value.length > 10 ? 'metric-text' : undefined}>{value}</strong>
+        {change && since && <span className={"metric-change " + change.direction} title={"Compared with the comparable check on " + shortDate(since)}><ChangeIcon size={13} aria-hidden="true" />{change.label}<span className="visually-hidden"> since the comparable check on {shortDate(since)}</span></span>}</div>
       <small>{detail}</small>
     </section>
   );
@@ -826,6 +821,18 @@ function WorkflowRow({
     </button>
   );
 }
+const jobLabels: Record<Job["kind"], string> = { audit: "Site audit", discover: "Question suggestions", competitors: "Competitor review", measure: "Visibility check", recheck: "Visibility recheck", diagnose: "Recommendations", content: "Content draft", revise: "Draft revision" };
+const jobIcons: Record<Job["kind"], typeof ScanSearch> = { audit: ScanSearch, discover: Sparkles, competitors: Users, measure: ChartNoAxesCombined, recheck: RefreshCw, diagnose: Lightbulb, content: FileText, revise: FilePenLine };
+/** Completed runs summarize their saved result; running and interrupted runs show their live status. */
+function jobSummary(job: Job) {
+  if (completedMeasurement(job) && job.status !== "completed") return "All answers saved. Competitor suggestions: " + job.progress;
+  if (job.status !== "completed") return job.progress;
+  const measurement = portableJobResult(job);
+  if (measurement) return `${measurement.metrics.completed} of ${measurement.metrics.requested} answers collected`;
+  const coverage = (job.result as { coverage?: { fetched?: number } } | null)?.coverage;
+  if (job.kind === "audit" && typeof coverage?.fetched === "number") return `${coverage.fetched} ${coverage.fetched === 1 ? "page" : "pages"} inspected`;
+  return /^complete$/i.test(job.progress) ? "" : job.progress;
+}
 function Jobs({
   jobs,
   run,
@@ -837,16 +844,15 @@ function Jobs({
   return jobs.length ? (
     <ul className="jobs">
       {jobs.map((j) => (
-        <li key={j.id}>
-          <div>
-            <strong>
-              {({ audit:"Site audit", discover:"Question suggestions", competitors:"Competitor review", measure:"Visibility check", recheck:"Visibility recheck", diagnose:"Recommendations", content:"Content draft", revise:"Draft revision" } as Record<Job["kind"], string>)[j.kind]}
-            </strong>
-            <small>{completedMeasurement(j) && j.status !== 'completed' ? "All answers saved. Competitor suggestions: " + j.progress : j.progress}</small>
-            <small>
-              {new Date(j.createdAt).toLocaleString()}
-              {j.spentUsd > 0 ? " / $" + j.spentUsd.toFixed(3) + (j.costBasis === 'includes_estimates' ? ' including held estimates' : ' reported cost') : ""}
-            </small>
+        <li key={j.id} className={"job " + j.status}>
+          <span className="job-icon" aria-hidden="true">{(() => { const Icon = jobIcons[j.kind]; return <Icon size={16} />; })()}</span>
+          <div className="job-body">
+            <strong>{jobLabels[j.kind]}</strong>
+            {jobSummary(j) && <small title={jobSummary(j)}>{jobSummary(j)}</small>}
+          </div>
+          <div className="job-meta">
+            <time dateTime={j.createdAt} title={dateTime(j.createdAt)}>{relativeTime(j.createdAt)}</time>
+            {j.spentUsd > 0 && <small title={j.costBasis === 'includes_estimates' ? 'Includes held estimates' : 'Reported cost'}>{usd(j.spentUsd, 3)}{j.costBasis === 'includes_estimates' ? ' est.' : ''}</small>}
           </div>
           <span className={"badge " + j.status}>{({ queued:"Waiting", running:"In progress", paused:"Paused", completed:"Complete", failed:"Needs attention", cancelled:"Cancelled" } as Record<Job["status"], string>)[j.status]}</span>
           {j.provider === "chatgpt" && j.error === "quota" && <a className="secondary" href="https://chatgpt.com/settings/usage" target="_blank" rel="noreferrer">Manage usage <ArrowUpRight size={14} /></a>}
@@ -1165,7 +1171,7 @@ function JobDialog({
           </div>
         ) : (
           <>
-            {kind === 'diagnose' && previousMeasurement && <p className="small">Reviews the completed visibility check from {new Date(previousMeasurement.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} alongside your audited pages.</p>}
+            {kind === 'diagnose' && previousMeasurement && <p className="small">Reviews the completed visibility check from {shortDate(previousMeasurement.createdAt)} alongside your audited pages.</p>}
             {kind === 'content' && finding && <section className="draft-origin" aria-label="Selected opportunity">
               <span className="draft-origin-icon"><Lightbulb size={19} /></span><div><strong>{finding.title}</strong>{targetDomain(finding.targetUrl) && <a href={finding.targetUrl} target="_blank" rel="noreferrer"><SiteIcon projectId={project.id} domain={targetDomain(finding.targetUrl)!} size={18} /><span>{finding.opportunity?.type === 'new_content' ? 'View context page' : 'View the existing page'}</span><ArrowUpRight size={13} /></a>}</div>
               <p>{finding.opportunity?.type === 'new_content' ? 'Create a separate resource supported by your website and saved answers.' : 'Draft focused copy for this improvement.'}</p>

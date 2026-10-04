@@ -203,7 +203,7 @@ try {
   runtime.store.put("observation", projectId, measurement.id, observation);
   await page.getByRole("button", { name: "Refresh workspace", exact: true }).click();
   await page.getByRole("button", { name: "Responses", exact: true }).click();
-  await page.locator(".answer-meta .badge").getByText("ChatGPT", { exact: true }).waitFor();
+  await page.locator(".answer-meta").getByText("ChatGPT", { exact: true }).waitFor();
   await page.getByRole("textbox", { name: "Search answers", exact: true }).fill("unmatched phrase");
   await page.getByRole("heading", { name: "No matching answers", exact: true }).waitFor();
   await page.getByRole("textbox", { name: "Search answers", exact: true }).fill("");

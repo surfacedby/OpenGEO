@@ -34,8 +34,11 @@ function tableCells(line: string) {
 }
 export function markdownHtml(markdown: string) {
   const output: string[] = [], paragraph: string[] = [], code: string[] = [];
+  const quote: string[] = [];
   let fenced = false, list: "ul" | "ol" | null = null;
-  function flush() { if (paragraph.length) { output.push("<p>" + inline(paragraph.join("\n")) + "</p>"); paragraph.length = 0; } }
+  function flushParagraph() { if (paragraph.length) { output.push("<p>" + inline(paragraph.join("\n")) + "</p>"); paragraph.length = 0; } }
+  function flushQuote() { if (quote.length) { output.push("<blockquote>" + markdownHtml(quote.join("\n")) + "</blockquote>"); quote.length = 0; } }
+  function flush() { flushParagraph(); flushQuote(); }
   function closeList() { if (list) { output.push("</" + list + ">"); list = null; } }
   const lines = markdown.replaceAll("\r\n", "\n").split("\n");
   for (let index = 0; index < lines.length; index++) {
@@ -47,6 +50,10 @@ export function markdownHtml(markdown: string) {
     }
     if (fenced) { code.push(line); continue; }
     if (!line.trim()) { flush(); closeList(); continue; }
+    const quoted = line.match(/^\s*>\s?(.*)$/);
+    if (quoted) { flushParagraph(); closeList(); quote.push(quoted[1]); continue; }
+    flushQuote();
+    if (/^\s*(?:(?:-\s*){3,}|(?:\*\s*){3,})$/.test(line)) { flush(); closeList(); output.push("<hr>"); continue; }
     const headings = tableCells(line), separators = tableCells(lines[index + 1] ?? '');
     if (line.includes('|') && headings.length > 1 && headings.length <= 128 && headings.length === separators.length
       && separators.every(cell => /^:?-{3,}:?$/.test(cell))) {
@@ -69,6 +76,15 @@ export function markdownHtml(markdown: string) {
   flush(); closeList();
   if (fenced) output.push("<pre><code>" + escapeHtml(code.join("\n")) + "</code></pre>");
   return output.join("\n");
+}
+/**
+ * The first prose block of an answer, for list previews. Headings, tables, code and rules are
+ * structure rather than content, so a preview built from them reads as an empty label.
+ */
+export function markdownSummary(markdown: string) {
+  const blocks = markdown.replaceAll("\r\n", "\n").split(/\n\s*\n/).map((block) => block.trim()).filter(Boolean);
+  const structural = (block: string) => /^(#{1,6}\s|```|\||(?:-\s*){3,}$|(?:\*\s*){3,}$)/.test(block);
+  return (blocks.find((block) => !structural(block)) ?? blocks[0] ?? "").replace(/^\s*>\s?/gm, "");
 }
 export function htmlDocument(title: string, markdown: string, locale = "en") {
   let language = "en", direction = "ltr";

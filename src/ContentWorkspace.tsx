@@ -7,6 +7,7 @@ import { targetDomain } from './finding-groups';
 import { contentHistory } from './content-history';
 import { Select } from './Select';
 import './content.css';
+import { dateTime } from './format';
 
 type Draft = {
   id: string; topic: string; markdown: string; brief: string; createdAt: string;
@@ -44,7 +45,7 @@ export function ContentWorkspace({ drafts, selected, select, projectId, run, rev
           <span className="draft-list-title"><span className="draft-file-icon">{item.task?.mode === 'page_update' ? <FilePenLine size={21} /> : <FileText size={21} />}</span><span><strong>{item.topic}</strong>{item.task?.targetUrl && <small>{targetDomain(item.task.targetUrl)}</small>}{group.length > 1 && <small className="draft-version-count"><History size={12} />{group.length} versions</small>}</span></span>
           <span className="draft-type">{item.task?.mode === 'page_update' ? 'Page update' : 'Article'}</span>
           <span className={'draft-state' + (needsReview ? ' needs-review' : '')}>{item.reviewCurrent === false ? 'Review outdated' : needsReview ? 'Needs review' : 'Draft'}</span>
-          <time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</time><ArrowRight size={17} />
+          <time dateTime={item.createdAt}>{dateTime(item.createdAt)}</time><ArrowRight size={17} />
         </button>;
       })}</div>
       {!shown.length && <p className="small">No matching drafts.</p>}
@@ -53,7 +54,7 @@ export function ContentWorkspace({ drafts, selected, select, projectId, run, rev
     <div className="draft-document-toolbar"><button className="secondary compact" onClick={() => select('')}><ArrowLeft size={15} />All drafts</button><span>{draft.task?.mode === 'page_update' ? 'Page update' : 'Article'}</span></div>
     <article className="draft-document" key={draft.id}>
       <header className="draft-document-heading"><span className="badge">{draft.status === 'needs_review' || draft.reviewCurrent === false ? 'Needs review' : 'Draft'}</span><h3>{draft.topic}</h3><p>Review the content and its sources before publishing.</p></header>
-      {versions.length > 1 && <div className="draft-history"><History size={16} /><Select label="Draft version" value={draft.id} onChange={select} compact searchable={false} options={versions.map((item, index) => ({ value: item.id, label: index === 0 ? 'Latest version' : 'Version ' + (versions.length - index), detail: new Date(item.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) }))} /></div>}
+      {versions.length > 1 && <div className="draft-history"><History size={16} /><Select label="Draft version" value={draft.id} onChange={select} compact searchable={false} options={versions.map((item, index) => ({ value: item.id, label: index === 0 ? 'Latest version' : 'Version ' + (versions.length - index), detail: dateTime(item.createdAt) }))} /></div>}
       {draft.task?.targetUrl && <div className="draft-target"><span>{draft.task.mode === 'page_update' ? 'Copy for' : 'Inspired by'}</span><a href={draft.task.targetUrl} target="_blank" rel="noreferrer">{targetDomain(draft.task.targetUrl) && <SiteIcon projectId={projectId} domain={targetDomain(draft.task.targetUrl)!} size={22} />}<span>{draft.sourceEvidence?.find(source => source.url === draft.task!.targetUrl)?.title || targetDomain(draft.task.targetUrl)}</span><ArrowUpRight size={14} /></a></div>}
       <div className="draft-context">
         <details><summary><BookOpen size={16} />Content brief <ChevronDown size={14} /></summary><ContentBrief brief={draft.brief} sources={draft.sourceEvidence} /></details>

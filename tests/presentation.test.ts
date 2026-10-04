@@ -222,3 +222,17 @@ test("history uses only actual comparable completed checks and leaves incomplete
   });
   assert.equal(comparableHistory([current], current).history.length, 1);
 });
+
+test("a failed or unstarted recheck never hides the last completed check", async () => {
+  const { displayedMeasurement } = await import("../server/portable-results.js");
+  const job = (id: string, status: Job["status"], createdAt: string) => ({ id, kind: "recheck", status, createdAt }) as Job;
+  const done = job("done", "completed", "2026-10-01T10:00:00Z");
+  const saved: Record<string, number> = { done: 6, failedEmpty: 0, failedPartial: 3, running: 2, queued: 0 };
+  const pick = (...jobs: Job[]) => displayedMeasurement(jobs, (item) => saved[item.id] ?? 0)?.id;
+  assert.equal(pick(job("failedEmpty", "failed", "2026-10-02T10:00:00Z"), done), "done");
+  assert.equal(pick(job("failedPartial", "failed", "2026-10-02T10:00:00Z"), done), "done");
+  assert.equal(pick(job("queued", "queued", "2026-10-02T10:00:00Z"), done), "done");
+  assert.equal(pick(job("running", "running", "2026-10-02T10:00:00Z"), done), "running", "a newer run with saved answers is current");
+  assert.equal(pick(job("failedPartial", "failed", "2026-10-02T10:00:00Z")), "failedPartial", "partial answers remain visible when nothing completed");
+  assert.equal(pick(job("failedEmpty", "failed", "2026-10-02T10:00:00Z")), "failedEmpty");
+});

@@ -1,0 +1,68 @@
+.connection-intro { margin-bottom: 18px; }
+.connection-intro h2 { font-size: 17px; letter-spacing: -0.01em; }
+.connection-intro p { font-size: 13px; color: var(--muted); margin-top: 2px; }
+.provider-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 18px; align-items: start; }
+.provider-card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); overflow: hidden; box-shadow: var(--shadow); display: flex; flex-direction: column; }
+.provider-card.chatgpt { border-color: var(--primary-200); box-shadow: var(--shadow), 0 0 0 3px var(--primary-50); }
+.provider-card-heading { display: flex; align-items: center; gap: 12px; padding: 18px 20px 0; }
+.provider-card-heading > div:nth-child(2) { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.provider-card-heading h2 { font-size: 15px; letter-spacing: -0.01em; }
+.provider-card-heading .small { font-size: 12px; }
+.provider-avatar { width: 42px; height: 42px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; display: grid; place-items: center; color: var(--ink); flex: none; }
+.chatgpt .provider-avatar, .console .provider-avatar { background: var(--surface); }
+.connection-status { font-size: 12px; font-weight: 500; display: inline-flex; align-items: center; gap: 4px; color: var(--muted); white-space: nowrap; padding: 2px 9px; border-radius: 999px; background: var(--surface-3); }
+.connection-status.is-connected { color: var(--success); background: var(--success-50); }
+.provider-description { padding: 12px 20px 0; font-size: 13px; color: var(--text); line-height: 1.6; }
+.capability-list { display: flex; gap: 6px 14px; flex-wrap: wrap; padding: 14px 20px 0; }
+.capability-list > span, .platform-list > span { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); }
+.capability-list > span > svg { color: var(--primary-text); }
+.platform-list { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 20px 16px; }
+.platform-list > span { padding: 3px 9px 3px 6px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); }
+.platform-more { display: inline-flex; align-items: center; gap: 4px; border: 1px dashed var(--border-strong); border-radius: 999px; padding: 3px 9px; color: var(--muted); font-size: 12px; }
+.platform-more:hover { color: var(--ink); border-color: var(--faint); }
+.provider-availability { font-size: 12px; color: var(--muted); padding: 0 20px 14px; }
+.provider-card > .button-row { padding: 0 20px 12px; }
+.provider-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; border-top: 1px solid var(--divider); padding: 12px 20px; background: var(--surface-2); margin-top: auto; }
+.provider-footer small { flex: 1; min-width: min(165px, 100%); font-size: 12px; }
+.provider-footer button { flex: none; }
+.provider-config { padding: 18px 20px; border-top: 1px solid var(--divider); display: grid; gap: 16px; }
+.provider-config form + form { padding-top: 16px; border-top: 1px solid var(--divider); }
+.provider-config form > .secondary { justify-self: start; }
+.console-key-guide { display: grid; gap: 12px; }
+.console-key-guide h3 { font-size: 14px; }
+.console-key-guide .text-button { justify-self: start; }
+.connection-pair-summary { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; padding: 10px 2px 0; margin-top: 4px; border-top: 1px solid var(--border); }
+.connection-pair-summary > div { display: flex; align-items: center; gap: 6px; color: var(--muted); flex: none; }
+.connection-pair-summary > div svg { width: 18px; height: 18px; }
+.connection-pair-summary p { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.connection-pair-summary strong { color: var(--ink); font-size: 14px; font-weight: 600; }
+.connection-pair-summary p span { font-size: 12px; color: var(--muted); }
+.pair-state { font-size: 12px; font-weight: 500; color: var(--text); padding: 2px 9px; border-radius: 999px; background: var(--surface-3); white-space: nowrap; }
+.connection-privacy { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 7px; }
+.text-button.danger { color: var(--danger); }
+.about-product { padding: 40px 24px; display: grid; justify-items: center; text-align: center; gap: 8px; }
+.about-product h2 { font-size: 20px; margin-top: 6px; }
+.about-product p { font-size: 13px; color: var(--muted); max-width: 460px; }
+.schedule-row { display: flex; align-items: flex-start; gap: 12px; padding: 14px 20px; border-top: 1px solid var(--divider); font-size: 13px; }
+.schedule-row > div { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.schedule-row > svg { margin-top: 2px; box-sizing: content-box; padding: 7px; border-radius: var(--radius-md); color: var(--primary-text); background: var(--primary-50); }
+.schedule-row strong { font-size: 13px; color: var(--ink); }
+.schedule-intro { padding: 12px 20px; border-bottom: 1px solid var(--divider); background: var(--surface-2); }
+.file-upload { position: relative; cursor: pointer; display: inline-flex; grid-template-columns: none; font-weight: 600; }
+.file-upload:focus-within { outline: 2px solid var(--primary); outline-offset: 2px; }
+.import-preview { margin-top: 16px; padding: 16px; border: 1px solid var(--primary-100); background: var(--primary-50); border-radius: 10px; display: grid; gap: 8px; font-size: 13px; }
+.import-preview h3 { font-size: 14px; }
+.panel-padding > p + .button-row { margin-top: 14px; }
+.panel-padding > h2 + p { margin-top: 4px; font-size: 13px; color: var(--muted); }
+@media (max-width: 1150px) { .provider-grid { grid-template-columns: 1fr; } }
+@media (max-width: 700px) {
+  .provider-card-heading { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 6px 12px; padding: 16px 16px 0; }
+  .provider-avatar { width: 40px; height: 40px; grid-row: span 2; }
+  .connection-status { grid-column: 2; justify-self: start; }
+  .provider-description, .capability-list, .platform-list { padding-left: 16px; padding-right: 16px; }
+  .provider-footer { flex-direction: column; align-items: stretch; padding: 12px 16px; }
+  .provider-footer button { width: 100%; }
+  .provider-config { padding: 16px; }
+  .connection-pair-summary { flex-wrap: wrap; }
+  .schedule-row { padding: 12px 14px; }
+}

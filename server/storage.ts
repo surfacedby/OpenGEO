@@ -185,6 +185,9 @@ export class Store {
   observations(id: string, jobId?: string) {
     return this.artifacts<Observation>(id, "observation", jobId);
   }
+  answerCount(projectId: string, jobId: string) {
+    return (this.db.prepare("SELECT COUNT(*) AS count FROM artifacts WHERE project_id=? AND job_id=? AND kind='observation'").get(projectId, jobId) as { count: number }).count;
+  }
   findings(id: string) {
     return this.artifacts<Finding>(id, "finding");
   }

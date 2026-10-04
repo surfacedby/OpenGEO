@@ -7,6 +7,7 @@ import { Select } from './Select';
 import { SiteIcon } from './SiteIcon';
 import { AnswerCard } from './DataPresentation';
 import './competitors.css';
+import { dateTime } from './format';
 
 function hostname(value: string) {
   try { return new URL(value.includes('://') ? value : 'https://' + value).hostname.replace(/^www\./, ''); }
@@ -80,7 +81,7 @@ export function Competitors({ project, jobs, review, run, activity }: {
   return <div className="competitor-workspace">
     <section className="panel competitor-summary" aria-label="Comparison summary">
       <div className="competitor-metrics" aria-busy={loading}><div><Users size={19} /><strong>{loading ? '...' : discovered.length}</strong><span>Discovered alternatives</span></div><div><BookOpen size={19} /><strong>{loading ? '...' : references.size}</strong><span>Cited reference sites</span></div><div><Globe size={19} /><strong>{loading ? '...' : answers.length}</strong><span>Answers in this check</span></div></div>
-      <div className="competitor-check"><span>Visibility check</span><Select label="Comparison check" compact searchable={false} value={check?.id ?? ''} onChange={setCheckId} options={checks.map(job => ({ value: job.id, label: new Date(measurementTime(job)).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }), detail: completedMeasurement(job) ? 'Completed check' : 'Partial check' }))} placeholder="No saved checks" /></div>
+      <div className="competitor-check"><span>Visibility check</span><Select label="Comparison check" compact searchable={false} value={check?.id ?? ''} onChange={setCheckId} options={checks.map(job => ({ value: job.id, label: dateTime(measurementTime(job)), detail: completedMeasurement(job) ? 'Completed check' : 'Partial check' }))} placeholder="No saved checks" /></div>
     </section>
     {error && <div className="inline-error" role="alert">{error}<button className="secondary compact" onClick={() => setRetry(value => value + 1)}>Try again</button></div>}
     {check && !completedMeasurement(check) && <p className="competitor-progress">This check is incomplete. You can explore its saved answers; website role review becomes available when collection finishes.</p>}

@@ -9,6 +9,7 @@ import identity from "../brand/identity.json";
 import { UsagePreference } from "./UsagePreference";
 import { WebsiteIconPreference } from "./WebsiteIconPreference";
 import "./setup-refinements.css";
+import "./connections.css";
 import type { Provider } from "../server/contracts";
 export type ChatGPTProfiles = { active: string | null; welcome?: boolean; profiles: { id: string; email: string; label?: string; sharing: boolean }[] };
 type Run = (f: () => Promise<unknown>) => Promise<void>;
@@ -130,6 +131,6 @@ function CredentialForm({ provider, connected, run, disabled, feedback }: { prov
   const [busy, setBusy] = useState(false);
   return <form onSubmit={(event) => { event.preventDefault(); const form = event.currentTarget, data = new FormData(form); setBusy(true); void run(async () => { await api("/providers", { provider, ...(provider === "dataforseo" ? { login: data.get("login"), password: data.get("password") } : { key: data.get("key") }) }, "PUT"); form.reset(); }).finally(() => setBusy(false)); }}>
     {provider === "dataforseo" ? <div className="form-grid"><label>API login<input name="login" {...feedback.field("login")} autoComplete="off" required /></label><label>API password<input name="password" {...feedback.field("password")} type="password" autoComplete="new-password" required /></label></div> : <label>{provider === "openrouter" ? "Or use an existing API key" : "API key"}<input name="key" {...feedback.field("key")} type="password" autoComplete="new-password" required /></label>}
-    <div className="button-row"><button className="secondary" disabled={busy || disabled}>{busy ? "Verifying connection..." : "Verify & connect"}</button>{connected && <button disabled={busy || disabled} type="button" onClick={() => void run(() => api("/providers/" + provider, undefined, "DELETE"))}>Disconnect</button>}</div>
+    <div className="button-row"><button className="secondary" disabled={busy || disabled}>{busy ? "Verifying connection..." : "Verify & connect"}</button>{connected && <button className="text-button danger" disabled={busy || disabled} type="button" onClick={() => void run(() => api("/providers/" + provider, undefined, "DELETE"))}>Disconnect</button>}</div>
   </form>;
 }
