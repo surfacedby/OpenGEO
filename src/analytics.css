@@ -97,6 +97,7 @@
 .source-name a:hover { color: var(--primary-text); }
 .source-name a > svg:last-child { color: var(--faint); }
 .source-name a span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.own-site { display: inline-block; margin: 3px 0 0 32px; font-size: 11px; font-weight: 500; color: var(--teal); background: var(--teal-50); padding: 0 7px; border-radius: 999px; }
 .source-name small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; padding-left: 32px; }
 .rate-cell { display: flex; align-items: center; gap: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 13px; color: var(--ink); font-weight: 500; }
 .rate-track { display: block; width: 64px; height: 6px; background: var(--surface-3); border-radius: 999px; overflow: hidden; }

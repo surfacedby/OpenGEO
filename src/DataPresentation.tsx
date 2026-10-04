@@ -368,6 +368,7 @@ export function SourcesTable({
   compact = false,
   openSources,
   projectId,
+  ownDomain,
 }: {
   presentation: Presentation;
   collected: number;
@@ -375,6 +376,7 @@ export function SourcesTable({
   compact?: boolean;
   openSources?: () => void;
   projectId: string;
+  ownDomain: string;
 }) {
   const [mode, setMode] = useState<"domains" | "pages">("domains"),
     [search, setSearch] = useState("");
@@ -449,6 +451,7 @@ export function SourcesTable({
                   compact={compact}
                   evidence={evidence}
                   projectId={projectId}
+                  own={isOwnHost(new URL(row.url).hostname, ownDomain)}
                 />
               ))}
             </tbody>
@@ -474,6 +477,12 @@ export function SourcesTable({
   );
 }
 
+/** Subdomains of the tracked website are the user's own pages too. */
+function isOwnHost(host: string, ownDomain: string) {
+  const own = ownDomain.replace(/^www\./, "").toLowerCase(), value = host.replace(/^www\./, "").toLowerCase();
+  return value === own || value.endsWith("." + own);
+}
+
 function SourceTableRow({
   row,
   collected,
@@ -481,6 +490,7 @@ function SourceTableRow({
   compact,
   evidence,
   projectId,
+  own,
 }: {
   row: SourceRow;
   collected: number;
@@ -488,6 +498,7 @@ function SourceTableRow({
   compact: boolean;
   evidence: Evidence;
   projectId: string;
+  own: boolean;
 }) {
   return (
     <tr>
@@ -497,6 +508,7 @@ function SourceTableRow({
           <span>{row.label}</span>
           <ExternalLink size={12} />
         </a>
+        {own && <span className="own-site">Your site</span>}
         {mode === "pages" && <small>{row.url}</small>}
       </td>
       <td>

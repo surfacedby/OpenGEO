@@ -54,6 +54,7 @@ import { AuditSummary } from "./AuditSummary";
 import { Findings } from "./Findings";
 import { findingGroups, opportunityFindings, auditFindings, targetDomain, targetLabel } from "./finding-groups";
 import { ContentWorkspace } from "./ContentWorkspace";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { Competitors } from "./Competitors";
 import { completedMeasurement, portableJobResult } from "../server/portable-results";
 import type { Presentation } from "../server/presentation";
@@ -362,6 +363,7 @@ export function App() {
             </div>
           )}
           {refreshError && <div role="alert" className="alert"><span>Could not refresh your workspace. {w ? "Showing the last loaded results." : refreshError}</span><button className="secondary" disabled={refreshing} onClick={() => void refresh()}>Try again</button></div>}
+          <ErrorBoundary resetKey={page + ":" + selected}>
           {page === "Settings" ? (
             <ConnectionSettings connected={connected} profiles={profiles} run={run} connectionsRequest={connectionsRequest} />
           ) : !w ? (
@@ -402,7 +404,7 @@ export function App() {
                     />
                   </div> : <section className="next-step-card"><ScanSearch size={25} /><div><h2>{activeAudit?.status === "queued" ? "Your site audit is queued" : activeAudit ? "Your site audit is running" : audited ? "Your first audit is ready" : "Start with a site audit"}</h2><p>{activeAudit?.status === "queued" ? "It will start automatically. You can explore your workspace." : activeAudit ? "You can explore your workspace while we inspect your public pages." : audited ? `${w.pages.length} ${w.pages.length === 1 ? "page inspected" : "pages inspected"}. ${canMeasure ? "Next, check how AI answers your customers' questions." : "Connect a provider when you are ready to check AI answers."}` : "Inspect your public pages to find improvements you can act on."}</p></div>{activeAudit && <button className="secondary" onClick={() => changePage('Site Audit')}>View progress<ArrowRight size={15} /></button>}</section>}
                   {measured && !activeMeasurement && !analyzed && <section className="insight-banner"><Lightbulb size={22} /><div><h2>{activeAnalysis ? 'Finding your next opportunity' : pausedAnalysis ? 'Your analysis is paused' : w.metrics.mentionRate === 0 ? 'Your brand was missing from this check' : 'Turn your visibility into your next improvement'}</h2><p>{activeAnalysis ? activeAnalysis.progress : pausedAnalysis ? 'Saved progress is kept. Review the interrupted run in Opportunities before continuing.' : `${w.metrics.completed} answers collected. Analyze them alongside your pages to find where useful content can make a difference.`}</p></div>{!canAnalyze && <button className="secondary" onClick={openConnections}>Connect for analysis <ArrowRight size={15} /></button>}</section>}
-                  {measured && <><div className="analytics-grid"><VisibilityChart presentation={w.presentation} openVisibility={() => changePage("Visibility")} /><SourcesTable presentation={w.presentation} collected={w.metrics.completed} compact evidence={openEvidence} openSources={() => changePage("Sources")} projectId={p!.id} /></div><div className="analytics-grid"><AnswerDistribution presentation={w.presentation} collected={w.metrics.completed} requested={w.metrics.requested} missing={w.metrics.missing} collecting={!!activeMeasurement} evidence={openEvidence} /><CitationComparison projectId={p!.id} ownDomain={p!.domain} rows={[ownWebsite!,...w.competitors]} evidence={openEvidence} openCompetitors={() => changePage("Competitors")} /></div></>}
+                  {measured && <><div className="analytics-grid"><VisibilityChart presentation={w.presentation} openVisibility={() => changePage("Visibility")} /><SourcesTable presentation={w.presentation} collected={w.metrics.completed} compact evidence={openEvidence} openSources={() => changePage("Sources")} projectId={p!.id} ownDomain={p!.domain} /></div><div className="analytics-grid"><AnswerDistribution presentation={w.presentation} collected={w.metrics.completed} requested={w.metrics.requested} missing={w.metrics.missing} collecting={!!activeMeasurement} evidence={openEvidence} /><CitationComparison projectId={p!.id} ownDomain={p!.domain} rows={[ownWebsite!,...w.competitors]} evidence={openEvidence} openCompetitors={() => changePage("Competitors")} /></div></>}
                   {measured && <details className="panel activity-panel" open={w.jobs.some((job) => ["running", "queued", "paused"].includes(job.status))}><summary><h2>Recent activity</h2><span>{w.jobs.length} runs</span><ChevronDown size={16} /></summary><Jobs jobs={w.jobs} run={run} /></details>}
                   {!measured && audited && <AuditSummary audit={w.presentation.audit} domain={p!.domain} findings={w.findings} openAudit={() => changePage("Site Audit")} />}
                   {!measured && <div className="overview-grid">
@@ -633,7 +635,7 @@ export function App() {
                 </section>
               )}
               {page === "Sources" && (
-                <SourcesTable presentation={w.presentation} collected={w.metrics.completed} evidence={openEvidence} projectId={p!.id} />
+                <SourcesTable presentation={w.presentation} collected={w.metrics.completed} evidence={openEvidence} projectId={p!.id} ownDomain={p!.domain} />
               )}
               {page === "Opportunities" && <>
                 {(analysisMeasurement || omittedSuggestions > 0) && <div className="opportunity-context">
@@ -729,6 +731,7 @@ export function App() {
               )}
             </>
           )}
+          </ErrorBoundary>
         </main>
       </div>
       {pendingNavigation && <Modal title="Save your changes?" close={() => setPendingNavigation(null)}><p>You have unsaved changes to this draft.</p>{navigationError && <p className="inline-error" role="alert">{navigationError}</p>}<div className="button-row">

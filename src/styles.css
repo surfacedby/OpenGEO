@@ -285,14 +285,14 @@ main { overflow: auto; padding: 24px 28px 48px; flex: 1; }
 .document-preview > :first-child { margin-top: 0; }
 .document-preview p { margin: 0 0 14px; }
 .document-preview ul, .document-preview ol { padding-left: 24px; margin: 10px 0 18px; }
+.document-preview ul, .inline-error ul { list-style: disc; }
+.document-preview ol, .suggestion-preview ol { list-style: decimal; }
 .document-preview li { margin: 5px 0; }
 .document-preview li > p { margin: 0; }
 .document-preview pre { padding: 14px 16px; border-radius: var(--radius-md); background: var(--surface-3); overflow: auto; }
 .document-preview code { font-size: 13px; background: var(--surface-3); padding: 1px 5px; border-radius: 4px; }
 .document-preview pre code { background: none; padding: 0; }
 .document-preview blockquote { margin: 16px 0; padding: 4px 0 4px 16px; border-left: 3px solid var(--primary-200); color: var(--muted); }
-.document-preview table { margin: 16px 0; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px; display: block; overflow: auto; }
-.document-preview th, .document-preview td { padding: 8px 12px; border-top: 1px solid var(--divider); }
 .document-preview hr { border: 0; border-top: 1px solid var(--border); margin: 24px 0; }
 .document-preview a { text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--primary-200); }
 
@@ -327,3 +327,11 @@ main { overflow: auto; padding: 24px 28px 48px; flex: 1; }
   .settings-tabs { overflow-x: auto; gap: 16px; scrollbar-width: none; }
   th, td { padding-left: 14px; padding-right: 14px; }
 }
+
+/* Rendering failures */
+.view-error { display: grid; justify-items: center; text-align: center; gap: 8px; padding: 48px 24px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+.view-error > svg { box-sizing: content-box; padding: 10px; border-radius: 12px; color: var(--warning); background: var(--warning-50); }
+.view-error h2 { font-size: 16px; }
+.view-error p { color: var(--muted); font-size: 13px; max-width: 420px; }
+.view-error .secondary { margin-top: 8px; }
+.view-error.full-screen { min-height: 100dvh; align-content: center; border: 0; border-radius: 0; box-shadow: none; background: var(--canvas); }

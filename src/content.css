@@ -29,7 +29,7 @@
 .draft-history .choice { width: 190px; }
 .draft-document { min-width: 0; padding: 28px 32px 0; max-width: 900px; margin-inline: auto; }
 .panel.content-workspace { overflow: visible; }
-.draft-document > .button-row:last-child { position: sticky; bottom: 0; z-index: 2; margin: 16px -32px 0; padding: 12px 32px; background: rgb(255 255 255 / 0.94); backdrop-filter: blur(6px); border-top: 1px solid var(--divider); }
+.draft-document > .button-row:last-child { position: sticky; bottom: 0; z-index: 2; margin: 16px -32px 0; padding: 12px 32px; background: var(--surface); border-top: 1px solid var(--divider); box-shadow: 0 -6px 16px -12px rgb(16 24 40 / 0.25); }
 .draft-document-heading h3 { font-size: 24px; line-height: 1.3; letter-spacing: -0.02em; margin: 10px 0 4px; overflow-wrap: anywhere; }
 .draft-document-heading p { color: var(--muted); font-size: 12px; }
 .draft-target { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; font-size: 13px; color: var(--muted); }
@@ -67,8 +67,6 @@
 .draft-context .needs-review summary { color: var(--warning); background: var(--warning-50); }
 .draft-context details > section, .draft-context details > .document-preview, .draft-context details > p { padding: 16px; border-top: 1px solid var(--border); margin: 0; }
 .draft-document .document-preview { max-width: none; }
-.document-preview ul { list-style: disc; }
-.document-preview ol { list-style: decimal; }
 .document-preview li::marker { color: var(--muted); }
 .document-preview .markdown-table { max-width: 100%; overflow: auto; margin: 24px 0; border: 1px solid var(--border); border-radius: 8px; }
 .document-preview .markdown-table:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
