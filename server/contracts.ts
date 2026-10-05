@@ -110,6 +110,8 @@ export type Finding = {
   confidence: "known" | "inferred";
   status: "open" | "doing" | "done";
   kind: string;
+  /** SurfacedBy's identifier for an opportunity it produced. */
+  remoteId?: string;
   opportunity?: z.infer<typeof opportunityDetails>;
 };
 export const contentTask = z.object({

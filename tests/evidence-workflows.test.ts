@@ -282,7 +282,6 @@ test('a draft cannot use another project opportunity or silently discard its req
     f.store.put('finding', f.project.id, f.measurement.id, finding);
     const other = f.store.createProject(projectInput.parse({ domain: 'other.example', brand: 'Other' }));
     assert.throws(() => f.store.enqueue(jobInput.parse({ projectId: other.id, kind: 'content', provider: 'chatgpt', findingId: finding.id }), 'foreign-opportunity'), /this website/);
-    assert.throws(() => f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'content', provider: 'console', findingId: finding.id }), 'unsupported-page-copy'), /Choose ChatGPT or OpenRouter/);
     assert.throws(() => jobInput.parse({ projectId: f.project.id, kind: 'content', contentMode: 'page_update' }));
     assert.throws(() => contentSources(f.pages, 'customer questions', 100, [finding.targetUrl]), /more room/);
     assert.throws(() => contentSources(f.pages, 'customer questions', 65000, ['https://example.com/missing']), /not available/);

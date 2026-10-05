@@ -117,8 +117,6 @@ export class Store {
         throw new ProviderError('capability', 'This improvement requires website changes rather than a content draft.');
       if (finding?.opportunity?.type === 'new_content' && input.contentMode === 'page_update')
         throw new ProviderError('capability', 'This opportunity is for a new resource. Choose a new article draft.');
-      if (input.findingId && input.provider === 'console')
-        throw new ProviderError('capability', 'Choose ChatGPT or OpenRouter to draft a saved page improvement.');
       if (input.findingId && this.jobs(input.projectId).some(job => job.kind === 'content' && job.findingId === input.findingId && ['queued', 'running', 'paused'].includes(job.status)))
         throw new ProviderError('in_progress', 'A draft for this opportunity is already saved. Follow its progress or resume it in Content.');
       const now = new Date().toISOString();

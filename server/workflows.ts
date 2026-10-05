@@ -564,15 +564,7 @@ export class Runner {
         "capability",
         "Connect ChatGPT or OpenRouter for content.",
       );
-    let original: any;
-    if (job.kind === 'revise') {
-      const snapshot = this.store.step(job.id, 'revision-source');
-      original = snapshot?.body ? JSON.parse(snapshot.body) : this.store.artifacts<any>(project.id, 'content').find((doc) => doc.id === job.contentId);
-      if (!original) throw new Error('Content not found');
-      if (!snapshot) this.store.setStep(job.id, 'revision-source', 'done', original);
-    }
-    const taskSnapshot = this.store.step(job.id, 'content-task');
-    const task = contentTask.parse(original?.task ?? (taskSnapshot?.body ? JSON.parse(taskSnapshot.body) : { mode: 'article' }));
+    const { original, task } = this.contentRequest(job, project);
     const model = await this.contentModel(job);
     const latest = this.store
       .jobs(project.id)
@@ -668,6 +660,19 @@ export class Runner {
       this.store.setStep(job.id, 'content-result', 'done', doc);
     })();
     return doc;
+  }
+  /** A revision keeps its original draft and purpose; a new draft keeps the task frozen when it was queued. Every provider reads both from here. */
+  contentRequest(job: Job, project: Project) {
+    let original: any;
+    if (job.kind === 'revise') {
+      const snapshot = this.store.step(job.id, 'revision-source');
+      original = snapshot?.body ? JSON.parse(snapshot.body) : this.store.artifacts<any>(project.id, 'content').find((doc) => doc.id === job.contentId);
+      if (!original) throw new Error('Content not found');
+      if (!snapshot) this.store.setStep(job.id, 'revision-source', 'done', original);
+    }
+    const taskSnapshot = this.store.step(job.id, 'content-task');
+    const task = contentTask.parse(original?.task ?? (taskSnapshot?.body ? JSON.parse(taskSnapshot.body) : { mode: 'article' }));
+    return { original, task };
   }
   async contentModel(job: Job) {
     const models = await this.providers.models(job.provider!);

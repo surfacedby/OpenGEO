@@ -130,3 +130,64 @@ test("managed drafts preserve approved quotes, survive interrupted collection, s
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("managed page improvements send their task and target, and revisions send the original draft with the requested change", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "opengeo-managed-task-")), store = new Store(directory);
+  const vault = new Vault(directory, { encrypt: text => Buffer.from(text), decrypt: bytes => bytes.toString() });
+  vault.set("console", { key: "synthetic-console-credential" });
+  const connections = new Connections(store, vault), runner = new Runner(store, new Providers(vault, connections));
+  const project = store.createProject(projectInput.parse({ domain: "example.com", brand: "Example" }));
+  const audit = store.enqueue(jobInput.parse({ projectId: project.id, kind: "audit" }), "site-audit");
+  for (const [path, title] of [["", "Home"], ["reports", "Shared reports"], ["pricing", "Pricing"]])
+    store.put("page", project.id, audit.id, parsePage("https://example.com/" + path, 200, "<title>" + title + "</title><main><p>" + title + " for small teams.</p></main>"));
+  store.updateJob(audit.id, { status: "completed" });
+  const finding = { id: randomUUID(), projectId: project.id, jobId: audit.id, title: "Explain report sharing", description: "Answers ask how reports are shared.",
+    priority: "medium" as const, targetUrl: "https://example.com/reports", evidenceIds: [], steps: ["Add a sharing section."], confidence: "inferred" as const,
+    status: "open" as const, kind: "console", remoteId: randomUUID(), opportunity: { type: "page_update" as const, pageLabel: "Reports", pageTitle: "Shared reports", benefit: "Answer the sharing question." } };
+  store.put("finding", project.id, audit.id, finding);
+  const domainId = randomUUID(), estimates: any[] = [];
+  let quote = 0, remoteId = "";
+  const server = createServer(async (request, response) => {
+    let body = ""; for await (const chunk of request) body += chunk;
+    const path = request.url!; let data: unknown;
+    if (path === "/capabilities") data = { platforms: [], operations: ["content"], content_available: true, models: [{ id: "managed-model", operations: ["content"] }] };
+    else if (path === "/domains") data = [{ id: domainId, domain: project.domain }];
+    else if (path.includes("/estimates/")) { estimates.push(JSON.parse(body)); data = { id: randomUUID(), domain_id: domainId, operation: "content", estimated_credits: 3, expires_at: new Date(Date.now() + 3600000).toISOString() }; quote++; }
+    else if (path === "/content/jobs") { remoteId = randomUUID(); data = { id: remoteId, status: "completed", estimated_credits: 3, approved_credits: 5, cancel_requested: false, receipt: { status: "completed", charged_credits: 3, refunded_credits: 2 } }; }
+    else if (path === "/content/jobs/" + remoteId) data = { id: remoteId, status: "completed", estimated_credits: 3, approved_credits: 5, cancel_requested: false, receipt: { status: "completed", charged_credits: 3, refunded_credits: 2 } };
+    else if (path.endsWith("/results")) data = { job: { id: remoteId, status: "completed", estimated_credits: 3, approved_credits: 5, cancel_requested: false, receipt: { status: "completed", charged_credits: 3, refunded_credits: 2 } },
+      brief: "Sharing", draft: { title: "Reports", markdown: "# Sharing reports\n\nVersion " + quote + "." }, review: { requires_human_review: true, claim_scope: "numeric_and_absolute_statements", coverage_complete: true, issues: [] },
+      sources: [{ url: "https://example.com/reports", title: "Shared reports" }] };
+    else { response.writeHead(404); response.end(); return; }
+    response.setHeader("Content-Type", "application/json"); response.end(JSON.stringify({ data }));
+  });
+  server.listen(0, "127.0.0.1"); await once(server, "listening");
+  const original = globalThis.fetch;
+  globalThis.fetch = ((url, init) => original(`http://127.0.0.1:${(server.address() as any).port}` + new URL(String(url)).pathname.replace("/api/v1/console", ""), init)) as typeof fetch;
+  try {
+    const job = store.enqueue(jobInput.parse({ projectId: project.id, kind: "content", provider: "console", findingId: finding.id, contentMode: "page_update", topic: "How do I share reports?", maxCostUsd: 0.5 }), "managed-page-update");
+    await runner.tick(); runner.resume(job.id, true); await runner.tick();
+    assert.equal(store.job(job.id).status, "completed", store.job(job.id).progress);
+    assert.deepEqual(estimates[0].task, { action: "improve_page", title: finding.title, description: finding.description, steps: finding.steps });
+    assert.equal(estimates[0].target_url, finding.targetUrl);
+    assert.equal(estimates[0].source_urls[0], finding.targetUrl, "the page to improve is always a source");
+    assert.equal(estimates[0].opportunity_id, finding.remoteId);
+    assert.equal(estimates[0].original_draft, undefined);
+    const draft = store.artifacts<any>(project.id, "content")[0];
+    assert.equal(draft.task.targetUrl, finding.targetUrl);
+    const revision = store.enqueue(jobInput.parse({ projectId: project.id, kind: "revise", provider: "console", contentId: draft.id, revisionInstructions: "Add a short example.", maxCostUsd: 0.5 }), "managed-revision");
+    await runner.tick(); runner.resume(revision.id, true); await runner.tick();
+    assert.equal(store.job(revision.id).status, "completed", store.job(revision.id).progress);
+    assert.equal(estimates[1].original_draft, draft.markdown);
+    assert.equal(estimates[1].user_note, "Add a short example.");
+    assert.equal(estimates[1].target_url, finding.targetUrl, "a revision keeps the original purpose");
+    assert.deepEqual(estimates[1].source_urls, ["https://example.com/reports"], "a revision keeps the original sources");
+    const revised = store.artifacts<any>(project.id, "content").find(doc => doc.derivedFrom === draft.id);
+    assert.equal(revised?.revisionInstructions, "Add a short example.");
+    assert.equal(store.job(revision.id).spentUsd, 0.3);
+  } finally {
+    globalThis.fetch = original; connections.close(); await runner.stop(); store.close();
+    server.closeAllConnections(); server.close(); await once(server, "close");
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

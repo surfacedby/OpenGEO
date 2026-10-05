@@ -978,10 +978,8 @@ function JobDialog({
   const choices: Provider[] =
     ["diagnose", "competitors"].includes(kind)
       ? ["chatgpt", "openrouter"]
-      : kind === "revise"
-        ? ["chatgpt", "openrouter"]
-      : kind === "content"
-        ? finding ? ["chatgpt", "openrouter"] : ["chatgpt", "console", "openrouter"]
+      : kind === "content" || kind === "revise"
+        ? ["chatgpt", "console", "openrouter"]
         : ["chatgpt", "console", "dataforseo", "openrouter"];
   const baseline = kind === 'recheck' ? previousMeasurement : null;
   const [provider, setProvider] = useState<Provider>(
