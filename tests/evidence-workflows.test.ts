@@ -181,7 +181,8 @@ test('a homepage summary is valid target evidence and receives its full excerpt 
   globalThis.fetch = (async (url, init) => {
     if (String(url).endsWith('/models')) return json({ models: [{ slug: 'fixture', display_name: 'Fixture', visibility: 'list', context_window: 50000 }] });
     const request = JSON.parse(init!.body as string), input = JSON.parse(request.input[0].content);
-    if (request.instructions === prompts.contentGaps) return stream(JSON.stringify({ recommendations: [], uncertainties: [] }));
+    if (request.instructions === prompts.consolidate) return stream(JSON.stringify({ groups: input.candidates.map((candidate: any) => ({ primaryIndex: candidate.index, indices: [candidate.index] })) }));
+    if (request.instructions === prompts.contentGaps) return stream(JSON.stringify({ recommendations: [{ title: 'Guide teams through organizing questions', description: 'Answers ask how teams organize questions; a guide can anchor on the homepage offer.', priority: 'medium', targetPageId: home.id, evidenceIds: [home.id, input.observations[0].id], steps: ['Outline the workflow the homepage describes.'], opportunity: { type: 'new_content', pageLabel: 'Homepage', pageTitle: 'Welcome', benefit: 'Answer the saved question in depth.', topic: 'How small teams organize customer questions' } }], uncertainties: [] }));
     if (request.instructions === prompts.opportunityReview) {
       assert.ok(input.pages.some((page:any) => page.id === home.id && page.text.length > input.siteOverview.text.length));
       reviewed = true;
@@ -202,7 +203,8 @@ test('a homepage summary is valid target evidence and receives its full excerpt 
     assert.equal(f.store.job(job.id).status, 'completed', f.store.job(job.id).progress);
     assert.equal(proposed, true);
     assert.equal(reviewed, true);
-    assert.equal(f.store.findings(f.project.id)[0].targetUrl, home.url);
+    assert.ok(f.store.findings(f.project.id).every(finding => finding.targetUrl === home.url));
+    assert.ok(f.store.findings(f.project.id).some(finding => finding.opportunity?.type === 'new_content'), 'a new topic can anchor on the homepage overview');
   } finally { globalThis.fetch = original; await f.close(); }
 });
 

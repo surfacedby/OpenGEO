@@ -400,13 +400,13 @@ export class Runner {
           const shared = { brand: project.brand, aliases: project.aliases, locale: project.locale, businessNotes: project.knowledge.slice(0, 4000),
             siteOverview: home ? { id: home.id, url: home.url, title: home.title, headings: home.h1, text: home.text.slice(0, 3500) } : null,
             observations: this.store.observations(project.id, latest.id).map(answer => ({ ...answer, answer: answer.answer.slice(0, 6000) })) };
-          // Website context takes at most a third of the room left beside the answers and the page catalog that new-topic review
+          // Website context holds about one page excerpt per question, and at most a third of the room left beside the answers and the page catalog that new-topic review
           // also carries, so page batches and that review keep the rest.
           const catalog = pages.map(page => ({ id: page.id, url: page.url, title: page.title.slice(0, 500) }));
           const instructions = Math.max(Buffer.byteLength(prompts.diagnose, "utf8"), Buffer.byteLength(prompts.contentGaps, "utf8"));
           const available = model.contextLength - 7000 - instructions - Buffer.byteLength(JSON.stringify([shared, catalog]), "utf8");
           // The homepage already travels as the site overview, so the website context spends its room on other pages.
-          const website = contentSources(pages.filter(page => new URL(page.url).pathname !== "/"), project.prompts, Math.min(12000, Math.max(0, Math.floor(available / 3))), [], 2000);
+          const website = contentSources(pages.filter(page => new URL(page.url).pathname !== "/"), project.prompts, Math.min(Math.max(12000, 2100 * project.prompts.length), Math.max(0, Math.floor(available / 3))), [], 2000);
           evidence = {
             version: 2,
             context: { ...shared, website },
@@ -466,7 +466,8 @@ export class Runner {
             ...gapContext, pages: website.sources, coverage: website.coverage, catalog,
             existingImprovements: result.recommendations.map(item => ({ title: item.title, targetPageId: item.targetPageId })),
           }, signal, 'content-gaps', 'Finding new topics from your saved answers');
-          const supplied = new Set(website.sources.map(page => page.id));
+          // The homepage travels as the site overview, so it is supplied context alongside the website pages.
+          const supplied = new Set([...website.sources.map(page => page.id), ...(evidence.context.siteOverview?.id ? [evidence.context.siteOverview.id] : [])]);
           for (const gap of gaps.recommendations) {
             if (!supplied.has(gap.targetPageId) || gap.opportunity?.type !== 'new_content' || !gap.opportunity.topic ||
               !gap.evidenceIds.some(id => supplied.has(id)) || !gap.evidenceIds.some(id => context.observations.some(answer => answer.id === id)))
