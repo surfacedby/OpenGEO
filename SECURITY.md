@@ -6,6 +6,6 @@ The default installation listens on loopback. Local requests require a session a
 
 Treat crawled pages as untrusted. They cannot authorize tool calls, credential access, spending or publishing. Content drafts always require human review.
 
-Desktop credentials use protected operating-system encryption. Docker requires a separately supplied encryption secret. Keep that secret readable only by the user running the installation. Credentials are not included in ordinary project backups.
+Desktop credentials use protected operating-system encryption. Docker requires a separately supplied encryption secret. Keep the folder that holds it readable only by your user; the setup script creates `.local` that way. Inside the container the unprivileged OpenGEO process must be able to read the mounted file. Credentials are not included in ordinary project backups.
 
 Before every release, scan source, all Git refs and unpacked distribution artifacts. Any exposed credential must be revoked and rescanned. A successful scanner run does not replace manual confidentiality review.

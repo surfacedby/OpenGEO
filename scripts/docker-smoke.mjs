@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, readFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, relative, isAbsolute } from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -9,7 +9,9 @@ const name = "opengeo-test-" + randomUUID();
 const image = process.argv[2] ?? "opengeo:preview";
 const docker = (args) => execFileSync("docker", args, { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 });
 try {
-  writeFileSync(join(directory, "opengeo_secret"), randomBytes(48));
+  // docker cp keeps Unix modes on Linux hosts; the container runs as the unprivileged node user, like a mounted Docker secret it must be readable there.
+  writeFileSync(join(directory, "opengeo_secret"), randomBytes(48), { mode: 0o644 });
+  chmodSync(directory, 0o755);
   docker(["create", "--name", name, image, "node", "/tmp/workflow.cjs"]);
   docker(["cp", directory, name + ":/run/secrets"]);
   docker(["cp", "scripts/docker-workflow.cjs", name + ":/tmp/workflow.cjs"]);
@@ -17,6 +19,7 @@ try {
     docker(["start", name]);
     const code = docker(["wait", name]).trim();
     if (code !== "0") {
+      process.stderr.write(docker(["logs", name]).slice(-4000));
       docker(["cp", name + ":/tmp/failure.json", join(directory, "failure.json")]);
       throw new Error(JSON.parse(readFileSync(join(directory, "failure.json"), "utf8")).error);
     }

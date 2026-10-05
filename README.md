@@ -33,7 +33,7 @@ node scripts/setup.mjs
 docker compose up --build -d
 ```
 
-Open <http://localhost:4318>. Keep the encryption secret private and preserve the Docker volume. If Node is unavailable, generate at least 32 random bytes into `.local/encryption-secret` using your operating system's secure random generator.
+Open <http://localhost:4318>. Keep the `.local` folder private and preserve the Docker volume. If Node is unavailable, generate at least 32 random bytes into `.local/encryption-secret` using your operating system's secure random generator, make the file readable (mode 644) and keep the `.local` folder owner-only (mode 700).
 
 ### Development
 
