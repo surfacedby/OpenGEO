@@ -142,7 +142,7 @@ test('batch analysis can review a supplied context page but rejects a page absen
 
 test('content uses bounded relevant evidence and revisions preserve every original source', async () => {
   const f=fixture(), original=globalThis.fetch;
-  let sourceIds:string[]=[], draft='';
+  let sourceIds:string[]=[], draft='', editInstructions:unknown[]=[];
   globalThis.fetch=(async (url,init) => {
     if(String(url).endsWith('/models')) return json({models:[{slug:'fixture',display_name:'Fixture',visibility:'list',context_window:200000}]});
     const request=JSON.parse(init!.body as string), input=JSON.parse(request.input[0].content);
@@ -155,6 +155,7 @@ test('content uses bounded relevant evidence and revisions preserve every origin
       return stream(JSON.stringify({facts:[{claim:'A shared workspace keeps questions organized.',evidenceIds:[input.sources[0].id]}],unknowns:[]}));
     }
     if(request.instructions===prompts.verify || request.instructions===prompts.verifyFinal)return stream(JSON.stringify({issues:[],requiresHumanReview:true}));
+    if(request.instructions===prompts.edit)editInstructions.push(input.revisionInstructions);
     return stream(request.instructions===prompts.brief ? '# Brief\n\nExplain the supported workflow.' : draft);
   }) as typeof fetch;
   try {
@@ -164,6 +165,7 @@ test('content uses bounded relevant evidence and revisions preserve every origin
     assert.equal(doc.sourceCoverage.pagesAvailable,100);assert.equal(doc.sourceCoverage.pagesUsed,sourceIds.length);
     const revision=f.store.enqueue(jobInput.parse({projectId:f.project.id,kind:'revise',provider:'chatgpt',contentId:doc.id,revisionInstructions:'Make the opening clearer.'}),'revision');
     await f.runner.tick();assert.equal(f.store.job(revision.id).status,'completed');
+    assert.deepEqual(editInstructions,[undefined,'Make the opening clearer.'],'the final edit keeps the changes a revision asked for');
     assert.deepEqual(new Set(f.store.artifacts<any>(f.project.id,'content')[0].sourceEvidence.map((source:any)=>source.id)),new Set(sourceIds));
     const tiny=contentSources(f.pages,'customer questions',10000);
     assert.ok(Buffer.byteLength(JSON.stringify(tiny.sources),'utf8')<=10000);

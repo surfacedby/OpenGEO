@@ -624,7 +624,7 @@ export class Runner {
       )
     )
       this.rejectResponse(job, ["verify"], "Verification referenced unknown evidence.");
-    const markdown = await call("edit", { locale: context.locale, task, draft, review, research, sources });
+    const markdown = await call("edit", { locale: context.locale, task, draft, review, research, sources, ...(original ? { revisionInstructions: job.revisionInstructions } : {}) });
     const finalReview = await this.structuredPass(reviewSchema, job, model, 'verifyFinal', { locale: context.locale, task, draft: markdown, research, sources }, signal);
     if (finalReview.issues.some((issue) => issue.evidenceIds.some((id) => !allowed.has(id))))
       this.rejectResponse(job, ['verifyFinal'], 'The final review referenced unknown evidence.');
