@@ -89,6 +89,29 @@ test("question discovery rejects unsupported inventory and exposes only independ
   } finally { globalThis.fetch = original; await f.close(); }
 });
 
+test("a response that breaks its contract pauses the run, and resuming requests it again instead of re-reading it", async () => {
+  const f = fixture(), original = globalThis.fetch; let offeringCalls = 0;
+  globalThis.fetch = (async (url, init) => {
+    if (String(url).endsWith("/models")) return json({ models: [{ slug: "fixture-model", display_name: "Fixture model", visibility: "list", context_window: 32768 }] });
+    const input = JSON.parse(JSON.parse(init!.body as string).input[0].content);
+    if (input.pages && !input.candidates) {
+      offeringCalls++;
+      if (offeringCalls === 1) return stream(JSON.stringify({ siteType: "business", offerings: "not a list" }));
+      return stream(JSON.stringify({ siteType: "business", audience: "Small support teams", offerings: [{ id: "support", label: "Support workspace", customerNeed: "Keep customer questions organized", evidence: [{ pageId: f.page.id, quote: "Our customer support workspace helps small teams organize questions" }] }], incidentalTopics: [] }));
+    }
+    if (input.inventory && !input.candidates) return stream(JSON.stringify({ questions: [{ text: "Which tools help small teams keep customer questions organized?", offeringId: "support", intent: "discover" }] }));
+    return stream(JSON.stringify({ questions: [{ index: 0, text: "Which tools help small teams keep customer questions organized?" }] }));
+  }) as typeof fetch;
+  try {
+    const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: "discover", provider: "chatgpt", auditJobId: f.audit.id }), "broken-contract");
+    await f.runner.tick();
+    assert.equal(f.store.job(job.id).status, "paused");
+    assert.equal(f.store.job(job.id).error, "format");
+    await f.runner.execute(f.store.job(job.id), f.project, new AbortController().signal);
+    assert.equal(offeringCalls, 2, "the rejected response is requested again");
+  } finally { globalThis.fetch = original; await f.close(); }
+});
+
 test("question suggestions read the audit they were queued behind and explain an unfinished one", async () => {
   const f = fixture(), original = globalThis.fetch; let calls = 0;
   globalThis.fetch = (async (url) => {
@@ -196,8 +219,9 @@ test("competitor refresh owns its saved evidence, preserves measurements and nev
     if (request.tools) { answerCalls++; return stream("Alternative can organize customer questions.", [{ type: "url_citation", url: "https://alternative.example/" }]); }
     reviews++;
     const input = JSON.parse(request.input[0].content);
-    assert.equal(input.website.sources[0].url, f.page.url);
-    assert.ok(input.website.sources[0].text.includes("customer support workspace"));
+    assert.equal(input.siteOverview.url, f.page.url, "the homepage travels once, as the site overview");
+    assert.ok(input.siteOverview.text.includes("customer support workspace"));
+    assert.ok(!input.website.sources.some((page: any) => page.url === f.page.url));
     assert.equal(input.businessNotes, "");
     if (quota) return new Response("{}", { status: 429 });
     return stream(JSON.stringify({ competitors: [{ name: "Alternative", domain: "alternative.example", observationIds: input.answers.map((answer: any) => answer.id) }] }));

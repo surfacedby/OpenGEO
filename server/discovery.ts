@@ -2,7 +2,6 @@ import { z } from "zod";
 import type { Job, Model, Project, DiscoveredWebsite, Observation } from "./contracts.js";
 import { ProviderError } from "./contracts.js";
 import type { Runner } from "./workflows.js";
-import { parseJson } from "./workflows.js";
 import { publicUrl } from "./network.js";
 import { prompts } from "./prompts.js";
 import { contentSources } from "./evidence-context.js";
@@ -58,7 +57,7 @@ export async function discoverQuestions(runner: Runner, job: Job, project: Proje
   }
   const { pages } = inputs;
   const context = { brand: project.brand, aliases: project.aliases, locale: project.locale, businessNotes: project.knowledge.slice(0, 4000) };
-  const inventory = offeringInventory.parse(parseJson(await runner.llmPass(job, model, "offerings", { ...context, pages }, signal)));
+  const inventory = await runner.structuredPass(offeringInventory, job, model, "offerings", { ...context, pages }, signal);
   const spaces = (value: string) => value.replace(/\s+/g, " ").trim();
   const offeringIds = new Set<string>();
   for (const offering of inventory.offerings) {
@@ -72,11 +71,11 @@ export async function discoverQuestions(runner: Runner, job: Job, project: Proje
   }
   const result = { pagesRead: pages.length, auditJobId: inputs.auditJobId, model: model.id, version: questionDiscoveryVersion };
   if (!inventory.offerings.length) return { ...result, questions: [] };
-  const data = suggestedQuestions.parse(parseJson(await runner.llmPass(job, model, "questions", { ...context, inventory }, signal)));
+  const data = await runner.structuredPass(suggestedQuestions, job, model, "questions", { ...context, inventory }, signal);
   if (data.questions.some(question => !offeringIds.has(question.offeringId)))
     throw new ProviderError("evidence", "Questions referenced an unconfirmed offering. The output is saved for review.", true);
   if (!data.questions.length) return { ...result, questions: [] };
-  const review = reviewedQuestions.parse(parseJson(await runner.llmPass(job, model, "questionReview", { ...context, proposedInventory: inventory, pages, candidates: data.questions.map((question, index) => ({ ...question, index })) }, signal)));
+  const review = await runner.structuredPass(reviewedQuestions, job, model, "questionReview", { ...context, proposedInventory: inventory, pages, candidates: data.questions.map((question, index) => ({ ...question, index })) }, signal);
   const seen = new Set<string>(), reviewedIndices = new Set<number>();
   const normalized = (value: string) => value.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
   const brands = [project.brand, ...project.aliases].map(normalized).filter(value => value.length >= 3);
@@ -103,7 +102,9 @@ export async function discoverCompetitors(runner: Runner, job: Job, project: Pro
     const observations = runner.store.observations(project.id, measurementJobId);
     const audit = runner.store.jobs(project.id).find(item => item.kind === "audit" && item.status === "completed" && JSON.parse(runner.store.step(item.id, "project")?.body ?? "null")?.domain === project.domain);
     const pages = audit ? runner.store.pages(project.id, audit.id) : [];
-    const website = pages.length ? contentSources(pages, observations.map(answer => answer.prompt).join(" "), Math.min(12000, Math.max(0, model.contextLength - 14000))) : { sources: [], coverage: { pagesAvailable: 0, pagesUsed: 0, excerpts: true } };
+    const others = pages.filter(page => new URL(page.url).pathname !== "/");
+    // The homepage already travels as the site overview, so the website context spends its room on other pages.
+    const website = others.length ? contentSources(others, observations.map(answer => answer.prompt), Math.min(12000, Math.max(0, model.contextLength - 14000)), [], 2000) : { sources: [], coverage: { pagesAvailable: 0, pagesUsed: 0, excerpts: true } };
     const home = pages.find(page => page.status >= 200 && page.status < 300 && new URL(page.url).pathname === '/');
     inputs = { observations, context: { brand: project.brand, domain: project.domain, locale: project.locale, businessNotes: project.knowledge.slice(0, 4000), website,
       siteOverview: home ? { id: home.id, url: home.url, title: home.title, headings: home.h1, text: home.text.slice(0, 3500) } : null } };
@@ -132,7 +133,7 @@ export async function discoverCompetitors(runner: Runner, job: Job, project: Pro
   const candidates: z.infer<typeof suggestedCompetitors>["competitors"] = [];
   for (const [index, answers] of batches.entries()) {
     signal.throwIfAborted();
-    const data = suggestedCompetitors.parse(parseJson(await runner.llmPass(job, model, "competitors", { ...context, answers }, signal, legacy ? "competitors" : "competitors:" + index)));
+    const data = await runner.structuredPass(suggestedCompetitors, job, model, "competitors", { ...context, answers }, signal, legacy ? "competitors" : "competitors:" + index);
     candidates.push(...data.competitors);
   }
   return confirmedWebsites(project, observations, candidates);

@@ -27,3 +27,13 @@ test('content retrieval uses whole words and applies corpus weighting outside En
   const exact = page('rack', 'Rack maintenance', 'Check the rack. '.repeat(100));
   assert.equal(contentSources([substring, exact], 'rack', 3000).sources[0].id, exact.id);
 });
+
+test('several questions each bring their best page before a broad page that mentions every subject', () => {
+  const broad = page('partners', 'Partner program', 'Deposits, analytics, product builders and checkout security for partners. '.repeat(60));
+  const deposits = page('deposits', 'Deposits and payment plans', 'Take a deposit and charge the remaining balance to the saved card later. '.repeat(60));
+  const analytics = page('analytics', 'Purchase analytics', 'Send paid orders to analytics from the server when the thank-you page is skipped. '.repeat(60));
+  const questions = ['How do I take a deposit and charge the balance later?', 'How can analytics count paid orders when the thank-you page is skipped?'];
+  const selected = contentSources([broad, deposits, analytics], questions, 2600, [], 1000);
+  assert.deepEqual(selected.sources.map(source => source.id), [deposits.id, analytics.id], 'each question keeps its own page; excerpts are sized at what is sent');
+  assert.ok(selected.sources.every(source => source.text.length <= 1000));
+});

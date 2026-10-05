@@ -16,23 +16,33 @@ export function evidenceBatches<T>(items: T[], maximumBytes: number): T[][] {
   return batches;
 }
 
-/** Source selection favors the requested subject while retaining the site's primary context. */
-export function contentSources(pages: PageEvidence[], topic: string, maximumBytes: number, requiredUrls: string[] = []) {
+/**
+ * Source selection favors the requested subject while retaining the site's primary context.
+ * Several subjects (a project's questions) each contribute their best-matching page first, so one
+ * broad page matching many words cannot crowd out the page that answers a specific question.
+ * Pages are sized at the excerpt length actually sent, so the budget holds as many pages as it can.
+ */
+export function contentSources(pages: PageEvidence[], subjects: string | string[], maximumBytes: number, requiredUrls: string[] = [], excerptChars = 8000) {
   const readable = pages.filter(page => page.status >= 200 && page.status < 300 && !page.noindex && page.text.trim());
   const segmenter = new Intl.Segmenter(undefined, { granularity: "word" });
   const words = (text: string) => new Set([...segmenter.segment(text.normalize("NFKC").toLowerCase())]
     .filter(part => part.isWordLike).map(part => part.segment));
-  const terms = [...words(topic)];
   const documents = readable.map(page => ({ page, heading: words(page.title + " " + page.h1.join(" ")), text: words(page.text) }));
-  // Corpus frequency discounts repeated navigation and common query words without a niche or language blacklist.
-  const weights = new Map(terms.map(term => {
-    const frequency = documents.filter(doc => doc.heading.has(term) || doc.text.has(term)).length;
-    return [term, Math.log(1 + (documents.length - frequency + 0.5) / (frequency + 0.5))];
-  }));
-  const ranked = documents.map(doc => ({ page: doc.page, score: terms.reduce((total, term) =>
-    total + weights.get(term)! * ((doc.heading.has(term) ? 4 : 0) + (doc.text.has(term) ? 1 : 0)), 0)
-    + (new URL(doc.page.url).pathname === "/" ? 0.5 : 0) }))
-    .sort((a, b) => b.score - a.score || a.page.url.localeCompare(b.page.url)).map(doc => doc.page);
+  const rank = (topic: string) => {
+    const terms = [...words(topic)];
+    // Corpus frequency discounts repeated navigation and common query words without a niche or language blacklist.
+    const weights = new Map(terms.map(term => {
+      const frequency = documents.filter(doc => doc.heading.has(term) || doc.text.has(term)).length;
+      return [term, Math.log(1 + (documents.length - frequency + 0.5) / (frequency + 0.5))];
+    }));
+    return documents.map(doc => {
+      const match = terms.reduce((total, term) => total + weights.get(term)! * ((doc.heading.has(term) ? 4 : 0) + (doc.text.has(term) ? 1 : 0)), 0);
+      return { page: doc.page, match, score: match + (new URL(doc.page.url).pathname === "/" ? 0.5 : 0) };
+    }).sort((a, b) => b.score - a.score || a.page.url.localeCompare(b.page.url));
+  };
+  const topics = typeof subjects === "string" ? [subjects] : subjects;
+  const leaders = topics.length > 1 ? topics.map(topic => rank(topic)[0]).filter(best => best && best.match > 0).map(best => best.page) : [];
+  const ranked = [...leaders, ...rank(topics.join(" ")).map(doc => doc.page)];
   const required = [...new Set(requiredUrls)].map(url => {
     const page = readable.filter(page => page.url === url).sort((a, b) => b.fetchedAt.localeCompare(a.fetchedAt))[0];
     if (!page) throw new ProviderError('evidence', 'The page to improve is not available in your audited sources. Audit it before creating a draft.');
@@ -43,7 +53,7 @@ export function contentSources(pages: PageEvidence[], topic: string, maximumByte
   const used = new Set<string>();
   for (const page of [...required, ...ranked]) {
     if (used.has(page.url)) continue;
-    const source = { id: page.id, url: page.url, title: page.title.slice(0, 500), text: page.text.slice(0, 8000) };
+    const source = { id: page.id, url: page.url, title: page.title.slice(0, 500), text: page.text.slice(0, excerptChars) };
     const bytes = Buffer.byteLength(JSON.stringify(source), "utf8") + 1;
     if (bytes > remaining) {
       if (required.includes(page)) throw new ProviderError('context', 'Choose a model with more room for the page you want to improve. No request was sent.');

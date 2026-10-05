@@ -79,7 +79,7 @@ test('large audits are fully analyzed in durable batches across quota and later 
       assert.ok(input.pages.length>0);
       return stream(JSON.stringify({recommendations:[],uncertainties:[]}));
     }
-    if(request.instructions===prompts.opportunityReview) return stream(JSON.stringify({accepted:input.candidates.map((item:any)=>({index:item.index,title:item.title,description:item.description,steps:item.steps,opportunity:{type:'page_update',pageLabel:'Resource',pageTitle:'Support workspace',benefit:'Explain the workflow relevant to the saved customer question.'}}))}));
+    if(request.instructions===prompts.opportunityReview) return stream(JSON.stringify({accepted:input.candidates.map((item:any)=>({index:item.index,targetPageId:item.targetPageId,evidenceIds:item.evidenceIds,title:item.title,description:item.description,steps:item.steps,opportunity:{type:'page_update',pageLabel:'Resource',pageTitle:'Support workspace',benefit:'Explain the workflow relevant to the saved customer question.'}}))}));
     if(request.instructions===prompts.consolidate) {
       assert.equal(input.candidates.length,100);
       return stream(JSON.stringify({groups:[{primaryIndex:0,indices:input.candidates.map((item:any)=>item.index)}]}));

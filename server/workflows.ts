@@ -396,14 +396,20 @@ export class Runner {
           const audit = this.store.jobs(project.id).find(item => item.kind === "audit" && item.status === "completed");
           const pages = audit ? this.store.pages(project.id, audit.id) : [];
           if (!pages.length) throw new ProviderError("evidence", "Complete a local audit to link recommendations to existing pages.");
-          const website = contentSources(pages, project.prompts.join(' '), Math.min(12000, model.contextLength - 10000));
           const home = pages.find(page => page.status >= 200 && page.status < 300 && new URL(page.url).pathname === '/');
+          const shared = { brand: project.brand, aliases: project.aliases, locale: project.locale, businessNotes: project.knowledge.slice(0, 4000),
+            siteOverview: home ? { id: home.id, url: home.url, title: home.title, headings: home.h1, text: home.text.slice(0, 3500) } : null,
+            observations: this.store.observations(project.id, latest.id).map(answer => ({ ...answer, answer: answer.answer.slice(0, 6000) })) };
+          // Website context takes at most a third of the room left beside the answers and the page catalog that new-topic review
+          // also carries, so page batches and that review keep the rest.
+          const catalog = pages.map(page => ({ id: page.id, url: page.url, title: page.title.slice(0, 500) }));
+          const instructions = Math.max(Buffer.byteLength(prompts.diagnose, "utf8"), Buffer.byteLength(prompts.contentGaps, "utf8"));
+          const available = model.contextLength - 7000 - instructions - Buffer.byteLength(JSON.stringify([shared, catalog]), "utf8");
+          // The homepage already travels as the site overview, so the website context spends its room on other pages.
+          const website = contentSources(pages.filter(page => new URL(page.url).pathname !== "/"), project.prompts, Math.min(12000, Math.max(0, Math.floor(available / 3))), [], 2000);
           evidence = {
             version: 2,
-            context: { brand: project.brand, aliases: project.aliases, locale: project.locale, businessNotes: project.knowledge.slice(0, 4000),
-              siteOverview: home ? { id: home.id, url: home.url, title: home.title, headings: home.h1, text: home.text.slice(0, 3500) } : null,
-              website: { ...website, sources: website.sources.map(page => ({ ...page, text: page.text.slice(0, 2000) })) },
-              observations: this.store.observations(project.id, latest.id).map(answer => ({ ...answer, answer: answer.answer.slice(0, 6000) })) },
+            context: { ...shared, website },
             sources: pages.map(page => ({ id: page.id, url: page.url, title: page.title.slice(0, 500), h1: page.h1.slice(0, 5).map(heading => heading.slice(0, 500)), text: page.text.slice(0, 8000) })),
             measurementJobId: latest.id,
           };
@@ -419,30 +425,34 @@ export class Runner {
         if (!savedPlan) this.store.setStep(job.id, "diagnosis-batches", "done", batches);
         const result: z.infer<typeof diagnosisSchema> = { recommendations: [], uncertainties: [] };
         for (const [index, batch] of batches.entries()) {
-          const reviewed = diagnosisSchema.parse(parseJson(await this.llmPass(job, model, "diagnose", {
+          const reviewed = await this.structuredPass(diagnosisSchema, job, model, "diagnose", {
             ...context, pages: batch, coverage: { pagesAvailable: sources.length, pagesInThisBatch: batch.length, excerpts: true },
           }, signal, legacy ? "diagnose" : "diagnose:" + index,
-          "Preparing recommendations (" + (index + 1) + " of " + batches.length + ")")));
+          "Preparing recommendations (" + (index + 1) + " of " + batches.length + ")");
           const contextPages = evidence.version === 2 ? (evidence.context.website as ReturnType<typeof contentSources>).sources : [];
           const pageIds = new Set([...batch, ...contextPages].map(page => page.id));
           if (evidence.version === 2 && evidence.context.siteOverview?.id) pageIds.add(evidence.context.siteOverview.id);
           if (reviewed.recommendations.some(recommendation => !pageIds.has(recommendation.targetPageId)))
             throw new ProviderError("evidence", "Analysis referenced a page outside its reviewed evidence. The output is saved for review.");
           if (evidence.version === 2 && reviewed.recommendations.length) {
-            const review = z.object({ accepted: z.array(z.object({
+            const review = await this.structuredPass(z.object({ accepted: z.array(z.object({
               index: z.number().int().nonnegative(), title: z.string().min(1).max(200),
               description: z.string().min(1).max(3000), steps: z.array(z.string().min(1).max(2000)).min(1),
               opportunity: opportunityDetails,
-            }).strict()) }).strict().parse(parseJson(await this.llmPass(job, model, 'opportunityReview', {
+              // Reviewers often repeat the candidate's target and evidence; they are read from the candidate, never from the review.
+              targetPageId: z.string().optional(), evidenceIds: z.array(z.string()).optional(),
+            }).strict()) }).strict(), job, model, 'opportunityReview', {
               ...context, pages: [...new Map([...batch, ...sources.filter(page => reviewed.recommendations.some(candidate => candidate.targetPageId === page.id))].map(page => [page.id, page])).values()], candidates: reviewed.recommendations.map((candidate, index) => ({ ...candidate, index })),
-            }, signal, 'opportunity-review:' + index, 'Checking which improvements are useful')));
+            }, signal, 'opportunity-review:' + index, 'Checking which improvements are useful');
             const seen = new Set<number>();
             for (const accepted of review.accepted) {
               const candidate = reviewed.recommendations[accepted.index];
-              if (!candidate || seen.has(accepted.index) || accepted.opportunity.type === 'new_content')
-                throw new ProviderError('evidence', 'The review referenced an unknown or repeated improvement. The output is saved for review.', true);
+              if (!candidate || seen.has(accepted.index) || accepted.opportunity.type === 'new_content' ||
+                (accepted.targetPageId !== undefined && accepted.targetPageId !== candidate.targetPageId) ||
+                (accepted.evidenceIds !== undefined && JSON.stringify([...accepted.evidenceIds].sort()) !== JSON.stringify([...candidate.evidenceIds].sort())))
+                throw new ProviderError('evidence', 'The review referenced an unknown, repeated or changed improvement. The output is saved for review.', true);
               seen.add(accepted.index);
-              const { index: candidateIndex, ...wording } = accepted;
+              const { index: candidateIndex, targetPageId, evidenceIds, ...wording } = accepted;
               result.recommendations.push({ ...candidate, ...wording });
             }
           } else result.recommendations.push(...reviewed.recommendations);
@@ -452,10 +462,10 @@ export class Runner {
           const { website: suppliedWebsite, ...gapContext } = evidence.context;
           const website = suppliedWebsite as ReturnType<typeof contentSources>;
           const catalog = sources.map(page => ({ id: page.id, url: page.url, title: page.title }));
-          const gaps = diagnosisSchema.parse(parseJson(await this.llmPass(job, model, 'contentGaps', {
+          const gaps = await this.structuredPass(diagnosisSchema, job, model, 'contentGaps', {
             ...gapContext, pages: website.sources, coverage: website.coverage, catalog,
             existingImprovements: result.recommendations.map(item => ({ title: item.title, targetPageId: item.targetPageId })),
-          }, signal, 'content-gaps', 'Finding new topics from your saved answers')));
+          }, signal, 'content-gaps', 'Finding new topics from your saved answers');
           const supplied = new Set(website.sources.map(page => page.id));
           for (const gap of gaps.recommendations) {
             if (!supplied.has(gap.targetPageId) || gap.opportunity?.type !== 'new_content' || !gap.opportunity.topic ||
@@ -488,9 +498,9 @@ export class Runner {
             index, title: item.title, summary: item.description.slice(0, 200), type: item.opportunity?.type,
             target: sources.find(page => page.id === item.targetPageId)!.url,
           }));
-          const plan = z.object({ groups: z.array(z.object({
+          const plan = await this.structuredPass(z.object({ groups: z.array(z.object({
             primaryIndex: z.number().int().nonnegative(), indices: z.array(z.number().int().nonnegative()).min(1),
-          }).strict()) }).strict().parse(parseJson(await this.llmPass(job, model, 'consolidate', { candidates }, signal)));
+          }).strict()) }).strict(), job, model, 'consolidate', { candidates }, signal);
           const seen = new Set<number>();
           for (const group of plan.groups) {
             if (!group.indices.includes(group.primaryIndex))
@@ -601,9 +611,7 @@ export class Runner {
     const call = async (name: keyof typeof prompts, input: unknown) => {
       return this.llmPass(job, model, name, input, signal);
     };
-    const research = factsSchema.parse(
-      parseJson(await call("research", context)),
-    );
+    const research = await this.structuredPass(factsSchema, job, model, "research", context, signal);
     for (const fact of research.facts)
       if (fact.evidenceIds.some((id) => !allowed.has(id)))
         throw new ProviderError(
@@ -621,9 +629,7 @@ export class Runner {
       knowledge: context.knowledge,
       ...(original ? { previousDraft: original.markdown, revisionInstructions: job.revisionInstructions } : {}),
     });
-    const review = reviewSchema.parse(
-      parseJson(await call("verify", { locale: context.locale, task, draft, research, sources })),
-    );
+    const review = await this.structuredPass(reviewSchema, job, model, "verify", { locale: context.locale, task, draft, research, sources }, signal);
     if (
       review.issues.some((issue) =>
         issue.evidenceIds.some((id) => !allowed.has(id)),
@@ -635,9 +641,7 @@ export class Runner {
         true,
       );
     const markdown = await call("edit", { locale: context.locale, task, draft, review, research, sources });
-    const finalReview = reviewSchema.parse(
-      parseJson(await call('verifyFinal', { locale: context.locale, task, draft: markdown, research, sources })),
-    );
+    const finalReview = await this.structuredPass(reviewSchema, job, model, 'verifyFinal', { locale: context.locale, task, draft: markdown, research, sources }, signal);
     if (finalReview.issues.some((issue) => issue.evidenceIds.some((id) => !allowed.has(id))))
       throw new ProviderError('evidence', 'The final review referenced unknown evidence. Review the saved output before continuing.', true);
     for (const id of allowed)
@@ -748,6 +752,17 @@ export class Runner {
     return result;
   }
   /** Each paid pass checkpoints its output and spend together before downstream validation. */
+  /** Structured output becomes evidence only once it matches its contract. A response that does not is set aside, so resuming requests it again instead of re-reading it. */
+  async structuredPass<S extends z.ZodTypeAny>(schema: S, ...pass: Parameters<Runner["llmPass"]>): Promise<z.infer<S>> {
+    const [job, , name, , , receiptKey = name] = pass;
+    const text = await this.llmPass(...pass);
+    let value: unknown;
+    try { value = parseJson(text); } catch { /* Text that is not JSON fails the contract below. */ }
+    const parsed = schema.safeParse(value);
+    if (parsed.success) return parsed.data as z.infer<S>;
+    this.store.setStep(job.id, receiptKey, "rejected");
+    throw new ProviderError("format", "The AI response did not match the expected format. Resume to request it again.");
+  }
   async llmPass(
     job: Job,
     model: Model,
