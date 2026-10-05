@@ -133,14 +133,14 @@ export class Runner {
           this.store.updateJob(id, {
             error: null,
             spentUsd: Math.max(0, this.store.job(id).spentUsd - refund * 0.1),
-            progress: refund > 0 ? 'Cancelled on Console. Unused credits were returned.' : 'Cancelled on Console. Work already started remains billable.',
+            progress: refund > 0 ? 'Cancelled on SurfacedBy. Unused credits were returned.' : 'Cancelled on SurfacedBy. Work already started remains billable.',
             result: { cancellation: { refundedCredits: refund, priorStatus: result.data.prior_status } },
           });
         } catch {
-          this.store.updateJob(id, { error: 'cancel_remote', progress: 'Stopped locally. Remote cancellation was not confirmed. Check Console before starting another check.' });
+          this.store.updateJob(id, { error: 'cancel_remote', progress: 'Stopped locally. Cancellation was not confirmed. Check SurfacedBy Console before starting another check.' });
         }
       } else if (saved?.state === 'started') {
-        this.store.updateJob(id, { error: 'cancel_remote', progress: 'Stopped locally. Submission had uncertain completion. Review Console for a running check and any charge.' });
+        this.store.updateJob(id, { error: 'cancel_remote', progress: 'Stopped locally. Submission was not confirmed. Review SurfacedBy Console for a running check and any charge.' });
       }
     }
     return this.store.job(id);
@@ -296,7 +296,7 @@ export class Runner {
       if (job.provider !== "dataforseo")
         throw new ProviderError(
           "capability",
-          "Select DataForSEO or Console to collect visibility evidence.",
+          "Select DataForSEO or SurfacedBy to collect visibility evidence.",
         );
       const models = await this.providers.models("dataforseo", job.platform);
       const model = job.model ?? models[0]?.id;
@@ -847,7 +847,7 @@ export class Runner {
     if (this.store.step(job.id, 'console-scan')?.state !== 'done') {
       const capability = await this.providers.console('/capabilities', undefined, undefined, signal);
       if (!capability.data?.platforms?.some((p: any) => p.key === platform && p.enabled === true))
-        throw new ProviderError('capability', 'This Console platform is unavailable. Select an enabled platform.');
+        throw new ProviderError('capability', 'This AI platform is not available on your SurfacedBy connection. Select an enabled platform.');
     }
     const domain = await this.once(job, "console-domain", async () => {
       const list = await this.consolePages("/domains", signal);
@@ -904,14 +904,14 @@ export class Runner {
       if (!Number.isSafeInteger(credits) || credits < 0)
         throw new ProviderError(
           "estimate",
-          "Console did not return a usable estimate.",
+          "SurfacedBy did not return a usable estimate.",
         );
       if (!Number.isSafeInteger(preview.data?.query_count) || preview.data.query_count < 1)
         throw new ProviderError("estimate", "The API did not return the number of answers in this check. No check was submitted.");
       if (credits * 0.1 > job.maxCostUsd)
         throw new ProviderError(
           "budget",
-          "The approved budget is insufficient for this Console check.",
+          "The approved budget is insufficient for this SurfacedBy check.",
         );
       this.store.updateJob(job.id, { requestedAnswers: preview.data.query_count });
     }
@@ -925,11 +925,11 @@ export class Runner {
     if (!scanId)
       throw new ProviderError(
         "invalid_response",
-        "Console did not return a check identifier.",
+        "SurfacedBy did not confirm this check. Review SurfacedBy Console before continuing.",
         true,
       );
     if (typeof scan.credits_charged !== 'number' || !Number.isFinite(scan.credits_charged) || scan.credits_charged < 0)
-      throw new ProviderError('cost_unknown', 'Console omitted a usable charge receipt. Review the submitted check before continuing.', true);
+      throw new ProviderError('cost_unknown', 'SurfacedBy did not confirm the charge for this check. Review it in SurfacedBy Console before continuing.', true);
     this.store.updateJob(job.id, { spentUsd: scan.credits_charged * 0.1 });
     let state;
     for (let n = 0; n < 180; n++) {
@@ -957,25 +957,25 @@ export class Runner {
         if (analysis.analysis_status === "unavailable")
           throw new ProviderError(
             "analysis",
-            "Console analysis is unavailable for this check. The collected answers remain on the provider.",
+            "SurfacedBy analysis is unavailable for this check. The collected answers remain in SurfacedBy.",
           );
         state = { ...state, status: "processing-analysis" };
         this.store.updateJob(job.id, {
           progress:
-            "Answers collected. Waiting for Console diagnosis and recommendations.",
+            "Answers collected. Waiting for SurfacedBy recommendations.",
         });
       }
       if (["failed", "cancelled"].includes(state.status))
         throw new ProviderError(
           "provider",
-          "Console did not complete this check.",
+          "SurfacedBy did not complete this check.",
         );
       await new Promise((r) => setTimeout(r, 5000));
     }
     if (state?.status !== "completed")
       throw new ProviderError(
         "waiting",
-        "Console is still processing. Resume later to collect results.",
+        "SurfacedBy is still processing. Resume later to collect results.",
       );
     await this.once(job, "console-evidence", async () => {
       const evidence = await this.consolePages(
@@ -1087,7 +1087,7 @@ export class Runner {
       if (cursor && seen.has(cursor))
         throw new ProviderError(
           "pagination",
-          "Console repeated its pagination cursor.",
+          "SurfacedBy returned an incomplete list. Try again shortly.",
         );
       if (cursor) seen.add(cursor);
     } while (cursor);

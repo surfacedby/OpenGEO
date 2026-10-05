@@ -384,17 +384,17 @@ test('a website with both roles retains the explanation of its competing offerin
 test("a business cited on several of its own hosts is offered once under its parent domain", () => {
   const answer = (id: string, text: string, urls: string[]) => ({ id, prompt: "Which tools track AI visibility?", answer: text, citations: urls.map(url => ({ url })) }) as unknown as Observation;
   const observations = [
-    answer("a1", "Peec AI tracks brand visibility across AI engines.", ["https://peec.ai/"]),
-    answer("a2", "Peec AI offers an API for programmatic monitoring.", ["https://docs.peec.ai/api"]),
-    answer("a3", "The Peec AI documentation explains share of voice.", ["https://help.docs.peec.ai/metrics"]),
+    answer("a1", "Alternative Analytics tracks brand visibility across AI engines.", ["https://alternative.example/"]),
+    answer("a2", "Alternative Analytics offers an API for programmatic monitoring.", ["https://docs.alternative.example/api"]),
+    answer("a3", "The Alternative Analytics documentation explains share of voice.", ["https://help.docs.alternative.example/metrics"]),
   ];
   const sites = confirmedWebsites({ domain: "example.com" }, observations, [
-    { name: "Peec AI", domain: "docs.peec.ai", role: "competitor", reason: "Offers API monitoring.", observationIds: ["a2"] },
-    { name: "Peec AI", domain: "help.docs.peec.ai", role: "reference", reason: "Explains a metric.", observationIds: ["a3"] },
-    { name: "Peec AI", domain: "peec.ai", role: "reference", reason: "Describes its product.", observationIds: ["a1"] },
+    { name: "Alternative Analytics", domain: "docs.alternative.example", role: "competitor", reason: "Offers API monitoring.", observationIds: ["a2"] },
+    { name: "Alternative Analytics", domain: "help.docs.alternative.example", role: "reference", reason: "Explains a metric.", observationIds: ["a3"] },
+    { name: "Alternative Analytics", domain: "alternative.example", role: "reference", reason: "Describes its product.", observationIds: ["a1"] },
   ] as any);
   assert.equal(sites.length, 1);
-  assert.equal(sites[0].domain, "peec.ai");
+  assert.equal(sites[0].domain, "alternative.example");
   assert.equal(sites[0].role, "both");
   assert.equal(sites[0].reason, "Offers API monitoring.", "a reference cannot erase the competing explanation");
   assert.deepEqual(new Set(sites[0].observationIds), new Set(["a1", "a2", "a3"]));
