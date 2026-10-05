@@ -1,6 +1,6 @@
 import Fastify from "fastify";
 import staticFiles from "@fastify/static";
-import { randomBytes, timingSafeEqual, createHash } from "node:crypto";
+import { randomBytes, randomUUID, timingSafeEqual, createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";
@@ -85,7 +85,11 @@ export async function createApp(
       )
         return res.code(403).send({ error: "Cross-origin request refused" });
     }
-    if (req.headers["sec-fetch-site"] === "cross-site")
+    // Opening the app from a link elsewhere is a top-level GET of the static shell, which has no
+    // side effects; frames, subresources and every API request from another site stay refused.
+    const topLevelPage = req.method === "GET" && !req.url.startsWith("/api/") &&
+      req.headers["sec-fetch-mode"] === "navigate" && req.headers["sec-fetch-dest"] === "document";
+    if (req.headers["sec-fetch-site"] === "cross-site" && !topLevelPage)
       return res.code(403).send({ error: "Cross-site request refused" });
     res.header(
       "Content-Security-Policy",
@@ -203,10 +207,10 @@ export async function createApp(
     const project = store.project(input.projectId);
     if (!vault.status()[input.provider]) throw new ProviderError("auth", "Connect your chosen AI provider first.");
     return store.db.transaction(() => {
-      setupAudit(project);
+      const audit = setupAudit(project);
       const key = createHash("sha256").update(JSON.stringify([questionDiscoveryVersion, project.domain, project.brand, project.aliases, project.locale, project.knowledge.slice(0, 4000), input.provider, input.maxCostUsd])).digest("hex");
       const active = store.jobs(project.id).find(job => job.kind === "discover" && ["queued", "running", "paused"].includes(job.status) && JSON.parse(store.step(job.id, "suggestionsContext")?.body ?? "null") === key);
-      const job = active ?? store.enqueue(jobInput.parse({ ...input, kind: "discover" }), "setup-questions:" + project.id + ":" + key + (requestId ? ":" + requestId : ""));
+      const job = active ?? store.enqueue(jobInput.parse({ ...input, kind: "discover", auditJobId: audit.id }), "setup-questions:" + project.id + ":" + key + (requestId ? ":" + requestId : ""));
       if (!store.step(job.id, "suggestionsContext")) store.setStep(job.id, "suggestionsContext", "done", key);
       if (!store.step(job.id, "project")) store.setStep(job.id, "project", "done", project);
       const draft = store.setting<any>("setupDraft", null);
@@ -228,9 +232,13 @@ export async function createApp(
       return job;
     })();
   });
+  /** Setup reuses an active or finished audit of this domain, so retried requests never queue a second one; an audit that did not finish is replaced rather than awaited. */
   function setupAudit(project: import("./contracts.js").Project) {
-    const job = store.enqueue(jobInput.parse({ projectId: project.id, kind: "audit", maxCostUsd: 0, maxPages: 100 }), "setup-audit:" + project.id + ":" + project.domain);
-    if (!store.step(job.id, "project")) store.setStep(job.id, "project", "done", project);
+    const usable = store.jobs(project.id).find(job => job.kind === "audit" && ["queued", "running", "paused", "completed"].includes(job.status) &&
+      JSON.parse(store.step(job.id, "project")?.body ?? "null")?.domain === project.domain);
+    if (usable) return usable;
+    const job = store.enqueue(jobInput.parse({ projectId: project.id, kind: "audit", maxCostUsd: 0, maxPages: 100 }), "setup-audit:" + project.id + ":" + randomUUID());
+    store.setStep(job.id, "project", "done", project);
     return job;
   }
   function validateSetupJobs(draft: z.infer<typeof setupDraft> | null) {

@@ -28,7 +28,7 @@ function fixture() {
   store.setStep(audit.id, "project", "done", project);
   const page = parsePage("https://example.com/", 200, '<html><title>Customer support workspace</title><body><h1>Support for small teams</h1><p>Our customer support workspace helps small teams organize questions, write replies and share support knowledge. Manage the support process in one place.</p></body></html>');
   store.put("page", project.id, audit.id, page); store.updateJob(audit.id, { status: "completed" });
-  return { directory, store, vault, runner, project, page, async close() { connections.close(); await runner.stop(); store.close(); rmSync(directory, { recursive: true, force: true }); } };
+  return { directory, store, vault, runner, project, page, audit, async close() { connections.close(); await runner.stop(); store.close(); rmSync(directory, { recursive: true, force: true }); } };
 }
 const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
 function stream(text: string, citations: unknown[] = []) {
@@ -55,7 +55,7 @@ test("website suggestions use readable evidence, exclude brand-biased duplicates
     ] }));
   }) as typeof fetch;
   try {
-    const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: "discover", provider: "chatgpt" }), "suggestions-test");
+    const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: "discover", provider: "chatgpt", auditJobId: f.audit.id }), "suggestions-test");
     await f.runner.tick();
     assert.equal(f.store.job(job.id).status, "completed");
     const result = f.store.job(job.id).result as any;
@@ -79,13 +79,31 @@ test("question discovery rejects unsupported inventory and exposes only independ
     return stream(JSON.stringify({ questions: [{ index: 0, text: "Our team keeps losing track of customer questions. What can help?" }] }));
   }) as typeof fetch;
   try {
-    const invalid = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: "discover", provider: "chatgpt" }), "unsupported-inventory");
+    const invalid = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: "discover", provider: "chatgpt", auditJobId: f.audit.id }), "unsupported-inventory");
     await f.runner.tick(); assert.equal(f.store.job(invalid.id).error, "evidence"); assert.equal(calls, 1);
     unsupported = false;
-    const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: "discover", provider: "chatgpt" }), "reviewed-inventory");
+    const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: "discover", provider: "chatgpt", auditJobId: f.audit.id }), "reviewed-inventory");
     await f.runner.tick(); assert.equal(f.store.job(job.id).status, "completed");
     assert.equal((f.store.job(job.id).result as any).questions[0].text, "Our team keeps losing track of customer questions. What can help?");
     assert.equal((f.store.job(job.id).result as any).questions[0].sources[0].url, f.page.url);
+  } finally { globalThis.fetch = original; await f.close(); }
+});
+
+test("question suggestions read the audit they were queued behind and explain an unfinished one", async () => {
+  const f = fixture(), original = globalThis.fetch; let calls = 0;
+  globalThis.fetch = (async (url) => {
+    if (String(url).endsWith("/models")) return json({ models: [{ slug: "fixture-model", display_name: "Fixture model", visibility: "list", context_window: 32768 }] });
+    calls++; return new Response("", { status: 500 });
+  }) as typeof fetch;
+  try {
+    assert.throws(() => jobInput.parse({ projectId: f.project.id, kind: "discover", provider: "chatgpt" }), "a suggestion run names its audit");
+    f.store.updateJob(f.audit.id, { status: "failed" });
+    const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: "discover", provider: "chatgpt", auditJobId: f.audit.id }), "failed-audit");
+    await f.runner.tick();
+    assert.equal(f.store.job(job.id).status, "paused");
+    assert.equal(f.store.job(job.id).error, "evidence");
+    assert.match(String(f.store.job(job.id).progress), /did not finish/);
+    assert.equal(calls, 0, "no model request runs without the audit evidence");
   } finally { globalThis.fetch = original; await f.close(); }
 });
 
@@ -221,6 +239,7 @@ test("setup records preserve row selections, deduplicate requests, snapshot inpu
     const request = { method: "POST" as const, url: "/api/onboarding/questions", headers, payload: { projectId: f.project.id, provider: "chatgpt" } };
     const first = (await app.inject(request)).json(), again = (await app.inject(request)).json();
     assert.equal(first.id, again.id);
+    assert.equal(first.auditJobId, f.audit.id, "Suggestions read the finished audit of this website");
     const refreshedRequest = { ...request, payload: { ...request.payload, requestId: randomUUID() } };
     assert.equal((await app.inject(refreshedRequest)).json().id, first.id, "Refresh coalesces an outstanding analysis instead of duplicating provider requests");
     assert.deepEqual(f.store.setting<any>("setupDraft", null).questionRows, [row]);
@@ -230,6 +249,10 @@ test("setup records preserve row selections, deduplicate requests, snapshot inpu
     const renewed = (await app.inject(refreshedRequest)).json();
     assert.notEqual(renewed.id, first.id);
     assert.equal((await app.inject(refreshedRequest)).json().id, renewed.id, "An interrupted refresh response can retry its request identity safely");
+    f.store.updateJob(renewed.id, { status: "completed", result: { questions: [] } }); f.store.updateJob(f.audit.id, { status: "failed" });
+    const afterFailure = (await app.inject({ ...request, payload: { ...request.payload, requestId: randomUUID() } })).json();
+    assert.notEqual(afterFailure.auditJobId, f.audit.id, "An audit that did not finish is replaced, not awaited");
+    assert.equal(f.store.job(afterFailure.auditJobId).status, "queued");
     const other = f.store.createProject(projectInput.parse({ domain: "other.example", brand: "Other" }));
     assert.equal((await app.inject({ method: "PUT", url: "/api/onboarding/draft", headers, payload: { ...draft, projectId: other.id, discoveryJobId: first.id } })).statusCode, 409);
     const check = (await app.inject({ method: "POST", url: "/api/onboarding/check", headers, payload: { projectId: f.project.id } })).json();

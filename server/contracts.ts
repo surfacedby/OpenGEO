@@ -143,11 +143,13 @@ export const jobInput = z
     webSearch: z.boolean().default(true),
     discoverCompetitors: z.boolean().optional(),
     measurementJobId: z.string().uuid().optional(),
+    auditJobId: z.string().uuid().optional(),
     maxPages: z.number().int().positive().max(100000).default(100),
   })
   .strict()
   .refine((input) => input.kind !== 'revise' || (!!input.contentId && !!input.revisionInstructions), 'Choose a draft and describe the revision')
   .refine((input) => input.kind !== 'competitors' || !!input.measurementJobId, 'Choose a saved visibility check')
+  .refine((input) => (input.kind === 'discover') === !!input.auditJobId, 'Question suggestions read one website audit')
   .refine(input => (!input.findingId && !input.contentMode) || input.kind === 'content', 'Content options apply only to a new draft')
   .refine(input => input.contentMode !== 'page_update' || !!input.findingId, 'Choose a page improvement before drafting its changes');
 export type JobInput = z.infer<typeof jobInput>;

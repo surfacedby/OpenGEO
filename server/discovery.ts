@@ -33,9 +33,13 @@ export async function discoverQuestions(runner: Runner, job: Job, project: Proje
   let inputs: { auditJobId: string; pages: { id: string; url: string; title: string; headings: string[]; schemaTypes: string[]; text: string; externalLinks: string[] }[] };
   if (saved?.body) inputs = JSON.parse(saved.body);
   else {
-    const audit = runner.store.jobs(project.id).find(item => item.kind === "audit" && item.status === "completed" &&
-      JSON.parse(runner.store.step(item.id, "project")?.body ?? "null")?.domain === project.domain);
-    if (!audit) throw new ProviderError("evidence", "Wait for the website audit to finish before suggesting questions.");
+    const audit = runner.store.job(job.auditJobId!);
+    if (audit.projectId !== project.id || audit.kind !== "audit" || JSON.parse(runner.store.step(audit.id, "project")?.body ?? "null")?.domain !== project.domain)
+      throw new ProviderError("evidence", "Run a website audit for this website before suggesting questions.");
+    if (audit.status !== "completed")
+      throw new ProviderError("evidence", ["failed", "cancelled"].includes(audit.status)
+        ? "The website audit did not finish. Run it again, then suggest questions."
+        : "Wait for the website audit to finish before suggesting questions.");
     const readable = runner.store.pages(project.id, audit.id).filter(page => page.status >= 200 && page.status < 300 && !page.noindex && page.text.trim().length >= 80);
     if (!readable.length) throw new ProviderError("evidence", "We couldn't read enough website content. Try a rendered audit or add your own questions.");
     // Shorter paths prioritize the home page within the bounded evidence context.

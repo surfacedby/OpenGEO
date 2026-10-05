@@ -27,7 +27,7 @@ export function Onboarding({ connected, profiles, refresh, finish, cancel, initi
     [localOnly, setLocalOnly] = useState(draft?.localOnly ?? false), [busy, setBusy] = useState(false),
     [domain, setDomain] = useState(savedProject?.domain ?? ""), [brand, setBrand] = useState(savedProject?.brand ?? ""), [locale, setLocale] = useState(savedProject?.locale ?? "en-US"),
     [rows, setRows] = useState<QuestionRow[]>(draft?.questionRows ?? (savedProject?.prompts ?? []).map(text => ({ id: crypto.randomUUID(), text, selected: true }))), [project, setProject] = useState<Project | null>(savedProject ?? null),
-    [discoveryId, setDiscoveryId] = useState(draft?.discoveryJobId ?? ""), [discovery, setDiscovery] = useState<Job | null>(null),
+    [discoveryId, setDiscoveryId] = useState(draft?.discoveryJobId ?? ""), [discovery, setDiscovery] = useState<Job | null>(null), [readingAudit, setReadingAudit] = useState<Job | null>(null),
     [checkId, setCheckId] = useState(draft?.checkJobId ?? ""), [check, setCheck] = useState<Job | null>(null),
     [budget, setBudget] = useState(""), [selectedCompetitors, setSelectedCompetitors] = useState<string[]>(savedProject?.competitors ?? []), [previewSuggestions, setPreviewSuggestions] = useState(false);
   const appliedDiscovery = useRef("");
@@ -45,8 +45,11 @@ export function Onboarding({ connected, profiles, refresh, finish, cancel, initi
       try {
         if (discoveryId) {
           const job = await api<Job>("/jobs/" + discoveryId);
+          // Suggestions wait behind the website audit they read; its progress is what is happening meanwhile.
+          const audit = job.status === "queued" && job.auditJobId ? await api<Job>("/jobs/" + job.auditJobId) : null;
           if (!stopped) {
             setDiscovery(job);
+            setReadingAudit(audit && ["queued", "running"].includes(audit.status) ? audit : null);
             if (job.status === "completed" && appliedDiscovery.current !== job.id) {
               appliedDiscovery.current = job.id;
               const questions = (job.result as { questions: { text: string }[] }).questions;
@@ -73,7 +76,7 @@ export function Onboarding({ connected, profiles, refresh, finish, cancel, initi
       void draftSave.current.catch(setError);
     }, 350);
     return () => { clearTimeout(timer); rowRevision.current++; };
-  }, [rows, step, project?.id]);
+  }, [rows, step, project?.id, discoveryId, checkId, provider, localOnly]);
   function makeDraft(next: number): SetupDraft {
     return { step: next, provider, localOnly, ...(project ? { projectId: project.id } : {}), ...(discoveryId ? { discoveryJobId: discoveryId } : {}), ...(checkId ? { checkJobId: checkId } : {}), questionRows: rows };
   }
@@ -98,7 +101,7 @@ export function Onboarding({ connected, profiles, refresh, finish, cancel, initi
     if (changed) {
       for (const job of [discovery, check]) if (job && ["queued", "running"].includes(job.status)) await api("/jobs/" + job.id + "/cancel", {});
       rowRevision.current++; await draftSave.current.catch(() => {});
-      setRows([]); setDiscoveryId(""); setDiscovery(null); setCheckId(""); setCheck(null); appliedDiscovery.current = "";
+      setRows([]); setDiscoveryId(""); setDiscovery(null); setReadingAudit(null); setCheckId(""); setCheck(null); appliedDiscovery.current = "";
     }
     const body = { domain: domain.trim(), brand: brand.trim(), locale, prompts: changed ? [] : project?.prompts ?? [], aliases: project?.aliases ?? [], competitors: changed ? [] : project?.competitors ?? [], knowledge: changed ? "" : project?.knowledge ?? "" };
     const result = await api<{ project: Project }>("/onboarding/website", { project: body, draft: { step: localOnly ? 3 : 2, provider, localOnly, ...(project ? { projectId: project.id } : {}) } });
@@ -169,7 +172,7 @@ export function Onboarding({ connected, profiles, refresh, finish, cancel, initi
           <div className="setup-actions"><button type="button" className="secondary" onClick={() => go(0)} disabled={busy}><ArrowLeft size={15} />Back</button><button className="primary" disabled={busy}>{busy ? "Reading website..." : !localOnly && provider === "chatgpt" ? "Find my questions" : "Continue"}<ArrowRight size={16} /></button></div>
         </form>}
         {step === 2 && <form onSubmit={(event) => { event.preventDefault(); void run(saveQuestions); }}>
-          {discovery && <div className="question-discovery" role="status">{["queued", "running"].includes(discovery.status) ? <LoaderCircle className="loading-spin" size={21} /> : <Sparkles size={21} />}<div><strong>{discovery.status === "completed" ? "Questions based on your website" : discovery.progress}</strong><p>{discovery.status === "completed" ? `${(discovery.result as { pagesRead: number }).pagesRead} ${(discovery.result as { pagesRead: number }).pagesRead === 1 ? "page" : "pages"} reviewed. Choose what matters to your business.` : ["queued", "running"].includes(discovery.status) ? "Reading your pages, then finding relevant customer questions." : "Your progress is saved. You can add questions yourself or resume from the dashboard."}</p></div>{["queued", "running"].includes(discovery.status) && <button type="button" className="secondary" disabled={busy} onClick={() => void run(() => api("/jobs/" + discovery.id + "/cancel", {}))}>Stop</button>}</div>}
+          {discovery && <div className="question-discovery" role="status">{["queued", "running"].includes(discovery.status) ? <LoaderCircle className="loading-spin" size={21} /> : <Sparkles size={21} />}<div><strong>{discovery.status === "completed" ? "Questions based on your website" : readingAudit ? "Reading your website before suggesting questions" : discovery.progress}</strong><p>{discovery.status === "completed" ? `${(discovery.result as { pagesRead: number }).pagesRead} ${(discovery.result as { pagesRead: number }).pagesRead === 1 ? "page" : "pages"} reviewed. Choose what matters to your business.` : readingAudit ? (readingAudit.status === "running" ? readingAudit.progress : "Starting with your home page and sitemap") : ["queued", "running"].includes(discovery.status) ? "Finding relevant customer questions from your pages." : "Your progress is saved. You can add questions yourself or resume from the dashboard."}</p></div>{["queued", "running"].includes(discovery.status) && <button type="button" className="secondary" disabled={busy} onClick={() => void run(() => api("/jobs/" + discovery.id + "/cancel", {}))}>Stop</button>}</div>}
           {!["queued", "running"].includes(discovery?.status ?? "") && <div className="question-tools">{provider !== "console" && <>{provider === "dataforseo" && <label>Maximum for suggestions (USD)<input type="number" min="0.01" step="0.01" value={budget} onChange={event => setBudget(event.target.value)} /></label>}<button type="button" className="secondary" disabled={busy || provider === "dataforseo" && !(Number(budget) > 0)} onClick={() => void run(suggestQuestions)}><Sparkles size={15} />{discovery ? "Refresh suggestions" : "Suggest from my website"}</button>{discovery?.status === "completed" && (discovery.result as { questions: { text: string }[] }).questions.length > 0 && JSON.stringify(rows.map(row => row.text)) !== JSON.stringify((discovery.result as { questions: { text: string }[] }).questions.map(item => item.text)) && <button type="button" className="secondary" disabled={busy} onClick={() => setPreviewSuggestions(current => !current)} aria-expanded={previewSuggestions}>Review suggestions</button>}</>}{provider === "console" && <p className="small">Add the questions you want to track. SurfacedBy will analyze the answers in your visibility check.</p>}</div>}
           {previewSuggestions && discovery?.status === "completed" && <section className="suggestion-preview" aria-label="Suggested questions"><header><Sparkles size={17} /><h2>Suggested questions</h2></header><ol>{(discovery.result as { questions: { text: string }[] }).questions.map((question, index) => <li key={index}>{question.text}</li>)}</ol><footer><p>Using these replaces your current list.</p><div><button type="button" className="secondary" onClick={() => setPreviewSuggestions(false)}>Keep my questions</button><button type="button" className="primary" onClick={useSuggestions}>Use these questions<Check size={15} /></button></div></footer></section>}
           <QuestionRows rows={rows} onChange={setRows} disabled={busy} feedback={feedback} />
