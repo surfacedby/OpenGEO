@@ -30,8 +30,8 @@ test("managed drafts preserve approved quotes, survive interrupted collection, s
   const requests: { path: string; body: any; identity?: string }[] = [];
   let finished = false, cancelling = false, available = true, expired = false;
   const remote = () => ({ id: remoteId, status: finished ? cancelling ? "cancelled" : "completed" : "waiting_reconciliation",
-    estimated_credits: 4, cancel_requested: cancelling,
-    receipt: finished ? { status: cancelling ? "cancelled" : "completed", charged_credits: 2, refunded_credits: 2 } : null });
+    estimated_credits: 4, approved_credits: 6, cancel_requested: cancelling,
+    receipt: finished ? { status: cancelling ? "cancelled" : "completed", charged_credits: 2, refunded_credits: 4 } : null });
   const server = createServer(async (request, response) => {
     let body = "";
     for await (const chunk of request) body += chunk;
@@ -74,7 +74,7 @@ test("managed drafts preserve approved quotes, survive interrupted collection, s
     assert.equal(requests.filter(request => request.path === "/content/jobs").length, 0);
     runner.resume(job.id, true); await runner.tick();
     assert.equal(store.job(job.id).error, "waiting");
-    assert.equal(store.job(job.id).spentUsd, 0.4);
+    assert.equal(store.job(job.id).spentUsd, 0.6, "the full approved reservation is held until settlement");
     assert.equal(store.job(job.id).costBasis, "includes_estimates");
     const submission = requests.find(request => request.path === "/content/jobs")!;
     assert.equal(submission.identity, job.id);
@@ -105,7 +105,7 @@ test("managed drafts preserve approved quotes, survive interrupted collection, s
     const cancelled = store.enqueue(jobInput.parse({ projectId: project.id, kind: "content", provider: "console", topic: "How can I share reports?", maxCostUsd: 0.6 }), "cancelled-managed-draft");
     finished = false; await runner.tick(); runner.resume(cancelled.id, true); await runner.tick(); await runner.cancel(cancelled.id);
     assert.equal(store.job(cancelled.id).error, "cancel_remote");
-    assert.equal(store.job(cancelled.id).spentUsd, 0.4);
+    assert.equal(store.job(cancelled.id).spentUsd, 0.6);
     finished = true; await runner.cancel(cancelled.id);
     assert.equal(store.job(cancelled.id).error, null);
     assert.equal(store.job(cancelled.id).spentUsd, 0.2);
