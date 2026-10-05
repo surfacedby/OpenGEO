@@ -14,7 +14,8 @@ try {
   if (!existsSync(executable)) throw new Error("Build the desktop verification package before running its checks");
   application = await electron.launch({
     executablePath: executable,
-    env: { ...process.env, OPENGEO_DESKTOP_DATA_DIR: directory },
+    // Editors that host Electron export ELECTRON_RUN_AS_NODE; the packaged app must start as an application.
+    env: { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => name !== "ELECTRON_RUN_AS_NODE")), OPENGEO_DESKTOP_DATA_DIR: directory },
     timeout: 30000,
   });
   const page = await application.firstWindow();
