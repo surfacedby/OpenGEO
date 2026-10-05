@@ -82,6 +82,8 @@ test("question discovery rejects unsupported inventory and exposes only independ
     const invalid = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: "discover", provider: "chatgpt", auditJobId: f.audit.id }), "unsupported-inventory");
     await f.runner.tick(); assert.equal(f.store.job(invalid.id).error, "evidence"); assert.equal(calls, 1);
     unsupported = false;
+    const resumed = await f.runner.execute(f.store.job(invalid.id), f.project, new AbortController().signal) as any;
+    assert.equal(resumed.questions.length, 1, "resuming requests the rejected website analysis again instead of re-reading it");
     const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: "discover", provider: "chatgpt", auditJobId: f.audit.id }), "reviewed-inventory");
     await f.runner.tick(); assert.equal(f.store.job(job.id).status, "completed");
     assert.equal((f.store.job(job.id).result as any).questions[0].text, "Our team keeps losing track of customer questions. What can help?");

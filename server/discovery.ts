@@ -61,19 +61,19 @@ export async function discoverQuestions(runner: Runner, job: Job, project: Proje
   const spaces = (value: string) => value.replace(/\s+/g, " ").trim();
   const offeringIds = new Set<string>();
   for (const offering of inventory.offerings) {
-    if (offeringIds.has(offering.id)) throw new ProviderError("evidence", "Website analysis repeated an offering identifier. The output is saved for review.", true);
+    if (offeringIds.has(offering.id)) runner.rejectResponse(job, ["offerings"], "Website analysis repeated an offering identifier.");
     offeringIds.add(offering.id);
     for (const proof of offering.evidence) {
       const page = pages.find(page => page.id === proof.pageId);
       if (!page || !spaces(page.text).includes(spaces(proof.quote)))
-        throw new ProviderError("evidence", "Website analysis referenced an unsupported passage. The output is saved for review.", true);
+        runner.rejectResponse(job, ["offerings"], "Website analysis referenced an unsupported passage.");
     }
   }
   const result = { pagesRead: pages.length, auditJobId: inputs.auditJobId, model: model.id, version: questionDiscoveryVersion };
   if (!inventory.offerings.length) return { ...result, questions: [] };
   const data = await runner.structuredPass(suggestedQuestions, job, model, "questions", { ...context, inventory }, signal);
   if (data.questions.some(question => !offeringIds.has(question.offeringId)))
-    throw new ProviderError("evidence", "Questions referenced an unconfirmed offering. The output is saved for review.", true);
+    runner.rejectResponse(job, ["questions"], "Questions referenced an unconfirmed offering.");
   if (!data.questions.length) return { ...result, questions: [] };
   const review = await runner.structuredPass(reviewedQuestions, job, model, "questionReview", { ...context, proposedInventory: inventory, pages, candidates: data.questions.map((question, index) => ({ ...question, index })) }, signal);
   const seen = new Set<string>(), reviewedIndices = new Set<number>();
@@ -81,7 +81,7 @@ export async function discoverQuestions(runner: Runner, job: Job, project: Proje
   const brands = [project.brand, ...project.aliases].map(normalized).filter(value => value.length >= 3);
   const questions = review.questions.flatMap(question => {
     const candidate = data.questions[question.index];
-    if (!candidate || reviewedIndices.has(question.index)) throw new ProviderError("evidence", "Question review referenced an unknown or repeated candidate. The output is saved for review.", true);
+    if (!candidate || reviewedIndices.has(question.index)) runner.rejectResponse(job, ["questionReview"], "Question review referenced an unknown or repeated candidate.");
     reviewedIndices.add(question.index);
     const key = normalized(question.text);
     if (seen.has(key) || brands.some(brand => (" " + key + " ").includes(" " + brand + " "))) return [];

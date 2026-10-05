@@ -433,7 +433,7 @@ export class Runner {
           const pageIds = new Set([...batch, ...contextPages].map(page => page.id));
           if (evidence.version === 2 && evidence.context.siteOverview?.id) pageIds.add(evidence.context.siteOverview.id);
           if (reviewed.recommendations.some(recommendation => !pageIds.has(recommendation.targetPageId)))
-            throw new ProviderError("evidence", "Analysis referenced a page outside its reviewed evidence. The output is saved for review.");
+            this.rejectResponse(job, [legacy ? "diagnose" : "diagnose:" + index], "Analysis referenced a page outside its reviewed evidence.");
           if (evidence.version === 2 && reviewed.recommendations.length) {
             const review = await this.structuredPass(z.object({ accepted: z.array(z.object({
               index: z.number().int().nonnegative(), title: z.string().min(1).max(200),
@@ -450,7 +450,7 @@ export class Runner {
               if (!candidate || seen.has(accepted.index) || accepted.opportunity.type === 'new_content' ||
                 (accepted.targetPageId !== undefined && accepted.targetPageId !== candidate.targetPageId) ||
                 (accepted.evidenceIds !== undefined && JSON.stringify([...accepted.evidenceIds].sort()) !== JSON.stringify([...candidate.evidenceIds].sort())))
-                throw new ProviderError('evidence', 'The review referenced an unknown, repeated or changed improvement. The output is saved for review.', true);
+                this.rejectResponse(job, ['opportunity-review:' + index], 'The review referenced an unknown, repeated or changed improvement.');
               seen.add(accepted.index);
               const { index: candidateIndex, targetPageId, evidenceIds, ...wording } = accepted;
               result.recommendations.push({ ...candidate, ...wording });
@@ -470,7 +470,7 @@ export class Runner {
           for (const gap of gaps.recommendations) {
             if (!supplied.has(gap.targetPageId) || gap.opportunity?.type !== 'new_content' || !gap.opportunity.topic ||
               !gap.evidenceIds.some(id => supplied.has(id)) || !gap.evidenceIds.some(id => context.observations.some(answer => answer.id === id)))
-              throw new ProviderError('evidence', 'A new topic needs website context and a supporting saved answer. The output is saved for review.', true);
+              this.rejectResponse(job, ['content-gaps'], 'A new topic needs website context and a supporting saved answer.');
           }
           result.recommendations.push(...gaps.recommendations);
           result.uncertainties.push(...gaps.uncertainties);
@@ -504,17 +504,17 @@ export class Runner {
           const seen = new Set<number>();
           for (const group of plan.groups) {
             if (!group.indices.includes(group.primaryIndex))
-              throw new ProviderError('evidence', 'The action plan referenced an unrelated primary task. The output is saved for review.');
+              this.rejectResponse(job, ['consolidate'], 'The action plan referenced an unrelated primary task.');
             if (new Set(group.indices.map(index => result.recommendations[index]?.opportunity?.type)).size > 1)
-              throw new ProviderError('evidence', 'The action plan combined different kinds of work. The output is saved for review.');
+              this.rejectResponse(job, ['consolidate'], 'The action plan combined different kinds of work.');
             for (const index of group.indices) {
               if (!result.recommendations[index] || seen.has(index))
-                throw new ProviderError('evidence', 'The action plan repeated or referenced an unknown task. The output is saved for review.');
+                this.rejectResponse(job, ['consolidate'], 'The action plan repeated or referenced an unknown task.');
               seen.add(index);
             }
           }
           if (seen.size !== result.recommendations.length)
-            throw new ProviderError('evidence', 'The action plan omitted a supported task. The output is saved for review.');
+            this.rejectResponse(job, ['consolidate'], 'The action plan omitted a supported task.');
           // Related tasks share a heading while preserving each page's instructions and evidence.
           result.recommendations = plan.groups.flatMap(group => {
             const primary = result.recommendations[group.primaryIndex];
@@ -614,11 +614,7 @@ export class Runner {
     const research = await this.structuredPass(factsSchema, job, model, "research", context, signal);
     for (const fact of research.facts)
       if (fact.evidenceIds.some((id) => !allowed.has(id)))
-        throw new ProviderError(
-          "evidence",
-          "The research pass cited unknown evidence. Review the result before retrying.",
-          true,
-        );
+        this.rejectResponse(job, ["research"], "The research pass cited unknown evidence.");
     const brief = await call("brief", { topic: context.topic, task, locale: context.locale, research, sourceReferences: sources.map(({ id, url, title }) => ({ id, url, title })) });
     const draft = await call("draft", {
       locale: context.locale,
@@ -635,15 +631,11 @@ export class Runner {
         issue.evidenceIds.some((id) => !allowed.has(id)),
       )
     )
-      throw new ProviderError(
-        "evidence",
-        "Verification referenced unknown evidence. Review the saved verification before continuing.",
-        true,
-      );
+      this.rejectResponse(job, ["verify"], "Verification referenced unknown evidence.");
     const markdown = await call("edit", { locale: context.locale, task, draft, review, research, sources });
     const finalReview = await this.structuredPass(reviewSchema, job, model, 'verifyFinal', { locale: context.locale, task, draft: markdown, research, sources }, signal);
     if (finalReview.issues.some((issue) => issue.evidenceIds.some((id) => !allowed.has(id))))
-      throw new ProviderError('evidence', 'The final review referenced unknown evidence. Review the saved output before continuing.', true);
+      this.rejectResponse(job, ['verifyFinal'], 'The final review referenced unknown evidence.');
     for (const id of allowed)
       if (markdown.includes(id))
         finalReview.issues.push({ claim: 'Internal reference in the article', reason: 'An internal evidence ID appears in the article. Remove it before publishing.', evidenceIds: [id] });
@@ -652,11 +644,8 @@ export class Runner {
       .map((m) => m[1])
       .filter((url) => !sourceUrls.has(url));
     if (unknownLinks.length)
-      throw new ProviderError(
-        "evidence",
-        "The draft contains links that are not in its source evidence. Review the saved draft before continuing.",
-        true,
-      );
+      // The final review read this edit, so both are requested again together.
+      this.rejectResponse(job, ["edit", "verifyFinal"], "The draft contains links that are not in its source evidence.");
     const doc = {
       id: randomUUID(),
       topic: context.topic,
@@ -752,6 +741,11 @@ export class Runner {
     return result;
   }
   /** Each paid pass checkpoints its output and spend together before downstream validation. */
+  /** A saved response that breaks an evidence rule is set aside with the steps built on it, so resuming requests it again instead of re-reading it. Every pass artifact stays saved for review. */
+  rejectResponse(job: Job, receiptKeys: string[], reason: string): never {
+    this.store.db.transaction(() => { for (const key of receiptKeys) this.store.setStep(job.id, key, "rejected"); })();
+    throw new ProviderError("evidence", reason + " Resume to request it again.");
+  }
   /** Structured output becomes evidence only once it matches its contract. A response that does not is set aside, so resuming requests it again instead of re-reading it. */
   async structuredPass<S extends z.ZodTypeAny>(schema: S, ...pass: Parameters<Runner["llmPass"]>): Promise<z.infer<S>> {
     const [job, , name, , , receiptKey = name] = pass;
