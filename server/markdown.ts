@@ -32,12 +32,17 @@ function tableCells(line: string) {
   cells.push(cell.trim());
   return cells;
 }
+/** Quotes nest at most this deep; deeper markers stay as text, which also bounds recursion. */
+const maxQuoteDepth = 4;
 export function markdownHtml(markdown: string) {
+  return renderMarkdown(markdown, 0);
+}
+function renderMarkdown(markdown: string, quoteDepth: number): string {
   const output: string[] = [], paragraph: string[] = [], code: string[] = [];
   const quote: string[] = [];
   let fenced = false, list: "ul" | "ol" | null = null;
   function flushParagraph() { if (paragraph.length) { output.push("<p>" + inline(paragraph.join("\n")) + "</p>"); paragraph.length = 0; } }
-  function flushQuote() { if (quote.length) { output.push("<blockquote>" + markdownHtml(quote.join("\n")) + "</blockquote>"); quote.length = 0; } }
+  function flushQuote() { if (quote.length) { output.push("<blockquote>" + renderMarkdown(quote.join("\n"), quoteDepth + 1) + "</blockquote>"); quote.length = 0; } }
   function flush() { flushParagraph(); flushQuote(); }
   function closeList() { if (list) { output.push("</" + list + ">"); list = null; } }
   const lines = markdown.replaceAll("\r\n", "\n").split("\n");
@@ -50,7 +55,7 @@ export function markdownHtml(markdown: string) {
     }
     if (fenced) { code.push(line); continue; }
     if (!line.trim()) { flush(); closeList(); continue; }
-    const quoted = line.match(/^\s*>\s?(.*)$/);
+    const quoted = quoteDepth < maxQuoteDepth ? line.match(/^\s*>\s?(.*)$/) : null;
     if (quoted) { flushParagraph(); closeList(); quote.push(quoted[1]); continue; }
     flushQuote();
     if (/^\s*(?:(?:-\s*){3,}|(?:\*\s*){3,})$/.test(line)) { flush(); closeList(); output.push("<hr>"); continue; }
@@ -82,12 +87,30 @@ export function markdownHtml(markdown: string) {
  * structure rather than content, so a preview built from them reads as an empty label.
  */
 export function markdownSummary(markdown: string) {
-  const blocks = markdown.replaceAll("\r\n", "\n").split(/\n\s*\n/).map((block) => block.trim()).filter(Boolean);
-  const structural = (block: string) => /^(#{1,6}\s|```|\||(?:-\s*){3,}$|(?:\*\s*){3,}$)/.test(block);
-  return (blocks.find((block) => !structural(block)) ?? blocks[0] ?? "").replace(/^\s*>\s?/gm, "");
+  // Group lines into blocks the same way the renderer reads them: a fence holds its blank lines.
+  const blocks: { lines: string[]; code: boolean }[] = [];
+  let current: { lines: string[]; code: boolean } | null = null, fenced = false;
+  for (const line of markdown.replaceAll("\r\n", "\n").split("\n")) {
+    if (/^\s*```/.test(line)) {
+      if (!fenced) { current = { lines: [], code: true }; blocks.push(current); }
+      else current = null;
+      fenced = !fenced;
+      continue;
+    }
+    if (fenced) { current!.lines.push(line); continue; }
+    if (!line.trim()) { current = null; continue; }
+    if (!current || current.code) { current = { lines: [], code: false }; blocks.push(current); }
+    current.lines.push(line);
+  }
+  const tableSeparator = /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?$/;
+  const structural = (block: { lines: string[]; code: boolean }) => block.code
+    || /^(#{1,6}\s|\||(?:-\s*){3,}$|(?:\*\s*){3,}$)/.test(block.lines[0].trim())
+    || tableSeparator.test((block.lines[1] ?? "").trim());
+  const prose = blocks.find((block) => !structural(block)) ?? blocks.find((block) => !block.code);
+  return (prose?.lines.join("\n") ?? "").replace(/^\s*>\s?/gm, "");
 }
 export function htmlDocument(title: string, markdown: string, locale = "en") {
   let language = "en", direction = "ltr";
   try { const value = new Intl.Locale(locale); language = value.toString(); direction = ["ar", "fa", "he", "ur"].includes(value.language) ? "rtl" : "ltr"; } catch {}
-  return '<!doctype html><html lang="' + escapeHtml(language) + '" dir="' + direction + '"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; style-src &#39;unsafe-inline&#39;; base-uri &#39;none&#39;"><title>' + escapeHtml(title) + '</title><style>body{font:16px/1.7 system-ui;color:#0f172a;max-width:860px;margin:48px auto;padding:24px}h1,h2,h3{line-height:1.25;margin:1.4em 0 .6em}a{color:#0d6cf2;overflow-wrap:anywhere}p{white-space:pre-wrap}pre{white-space:pre-wrap;background:#f1f5f9;padding:18px;border-radius:8px;overflow-wrap:anywhere}code{font-size:.9em}li{margin:.5em 0}.markdown-table{overflow:auto;margin:24px 0}table{border-collapse:collapse;width:100%}th,td{padding:12px;border:1px solid #e2e8f0;text-align:start;vertical-align:top}th{background:#f8fafc}@media print{body{margin:0;max-width:none;padding:0}a{color:inherit}.markdown-table{overflow:visible}}</style></head><body><article>' + markdownHtml(markdown) + '</article></body></html>';
+  return '<!doctype html><html lang="' + escapeHtml(language) + '" dir="' + direction + '"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; style-src &#39;unsafe-inline&#39;; base-uri &#39;none&#39;"><title>' + escapeHtml(title) + '</title><style>body{font:16px/1.7 system-ui;color:#0f172a;max-width:860px;margin:48px auto;padding:24px}h1,h2,h3{line-height:1.25;margin:1.4em 0 .6em}a{color:#0d6cf2;overflow-wrap:anywhere}p{white-space:pre-wrap}pre{white-space:pre-wrap;background:#f1f5f9;padding:18px;border-radius:8px;overflow-wrap:anywhere}code{font-size:.9em}li{margin:.5em 0}blockquote{margin:24px 0;padding:4px 0 4px 16px;border-left:3px solid #cbd5e1;color:#475569}hr{border:0;border-top:1px solid #e2e8f0;margin:32px 0}.markdown-table{overflow:auto;margin:24px 0}table{border-collapse:collapse;width:100%}th,td{padding:12px;border:1px solid #e2e8f0;text-align:start;vertical-align:top}th{background:#f8fafc}@media print{body{margin:0;max-width:none;padding:0}a{color:inherit}.markdown-table{overflow:visible}}</style></head><body><article>' + markdownHtml(markdown) + '</article></body></html>';
 }

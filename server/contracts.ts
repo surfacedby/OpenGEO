@@ -164,6 +164,8 @@ export type Job = JobInput & {
   spentUsd: number;
   costBasis?: "reported" | "includes_estimates";
   requestedAnswers?: number;
+  /** Set when the user acknowledges a run that did not finish, so it stops asking for attention. */
+  dismissedAt?: string;
 };
 export type Model = {
   id: string;

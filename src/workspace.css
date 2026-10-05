@@ -13,6 +13,11 @@
 .metric-change.down { color: var(--danger); background: var(--danger-50); }
 .metric-change.flat { color: var(--muted); background: var(--surface-3); }
 
+/* Loading placeholder: the shape of the page, without invented values. */
+.skeleton { min-height: 112px; background: linear-gradient(90deg, var(--surface) 0%, var(--surface-2) 50%, var(--surface) 100%); background-size: 200% 100%; animation: skeleton-sweep 1.4s ease-in-out infinite; }
+.skeleton.tall { min-height: 320px; }
+@keyframes skeleton-sweep { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+
 /* Overview guidance */
 .next-step-card { display: flex; align-items: center; gap: 16px; padding: 18px 20px; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow); border-radius: var(--radius); margin-bottom: 16px; }
 .next-step-card > svg { box-sizing: content-box; padding: 11px; color: var(--primary-text); background: var(--primary-50); border: 1px solid var(--primary-100); border-radius: 10px; }

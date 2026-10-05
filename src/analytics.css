@@ -2,7 +2,6 @@
 .measurement-scope { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: -4px 0 16px; color: var(--muted); font-size: 12px; }
 .measurement-scope > span { display: inline-flex; gap: 6px; align-items: center; min-height: 26px; padding: 2px 10px; border: 1px solid var(--border); background: var(--surface); border-radius: 999px; color: var(--text); font-weight: 500; }
 .measurement-scope > span.badge { font-weight: 500; }
-.measurement-scope .scope-model { display: block; max-width: 180px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .measurement-scope details { margin-left: auto; position: relative; }
 .measurement-scope summary, .chart-data summary, .answer-detail summary { display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--primary-text); font-weight: 500; list-style: none; min-height: 32px; width: fit-content; }
 .measurement-scope summary::-webkit-details-marker, .chart-data summary::-webkit-details-marker, .answer-detail summary::-webkit-details-marker { display: none; }
@@ -24,7 +23,6 @@
 .site-icon { display: inline-grid; place-items: center; position: relative; flex: none; border-radius: 6px; background: var(--surface); border: 1px solid var(--border); overflow: hidden; vertical-align: middle; }
 .choice-trigger > .site-icon, .choice-options button > .site-icon { flex: none; }
 .site-icon > img { position: absolute; object-fit: contain; }
-.website-label { display: flex; align-items: center; gap: 9px; }
 
 /* Answer outcomes donut */
 .outcome-layout { display: flex; align-items: center; gap: 24px; padding: 20px; flex: 1; }
@@ -50,7 +48,8 @@
 .citation-comparison { display: grid; gap: 16px; padding: 20px; flex: 1; align-content: start; }
 .citation-comparison-row { display: flex; align-items: center; gap: 12px; }
 .citation-comparison-row > div { flex: 1; min-width: 0; }
-.citation-comparison-row.own .comparison-track > span { background: var(--teal); }
+.citation-comparison .comparison-track > span { background: var(--faint); }
+.citation-comparison-row.own .comparison-track > span { background: var(--citation); }
 .citation-comparison-label { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; font-size: 13px; }
 .citation-comparison-label strong { font-weight: 500; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .citation-comparison-label > span:last-child { margin-left: auto; color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -101,8 +100,10 @@
 .source-name small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; padding-left: 32px; }
 .rate-cell { display: flex; align-items: center; gap: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 13px; color: var(--ink); font-weight: 500; }
 .rate-track { display: block; width: 64px; height: 6px; background: var(--surface-3); border-radius: 999px; overflow: hidden; }
-.rate-track > span { display: block; height: 100%; border-radius: 999px; background: var(--primary); }
-.rate-cell.teal .rate-track > span { background: var(--teal); }
+.rate-track > span { display: block; height: 100%; border-radius: 999px; }
+.rate-cell.mention .rate-track > span { background: var(--mention); }
+.rate-cell.citation .rate-track > span { background: var(--citation); }
+.rate-cell.source .rate-track > span { background: var(--muted); }
 .evidence-button { white-space: nowrap; min-height: 30px; font-size: 13px; }
 .compact-sources { table-layout: fixed; }
 .compact-sources th:first-child { width: 52%; }
@@ -118,7 +119,7 @@
 .prompt-table td:first-child { min-width: 240px; max-width: 460px; line-height: 1.5; color: var(--ink); }
 
 .check-date { display: inline-flex; align-items: center; gap: 7px; font-weight: 500; color: var(--ink); white-space: nowrap; }
-.check-history tr.current td { background: var(--primary-50); }
+.check-history tr.current, .check-history tr.current:hover { background: var(--primary-50); }
 .check-history td small { padding-left: 21px; }
 
 /* Answer cards */
@@ -128,8 +129,8 @@
 .answer-heading h3 { flex: 1; min-width: min(260px, 100%); font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
 .answer-outcomes { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .outcome { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; padding: 1px 8px; border-radius: 999px; white-space: nowrap; line-height: 20px; }
-.outcome.cited { color: var(--primary-text); background: var(--primary-50); }
-.outcome.named { color: var(--teal); background: var(--teal-50); }
+.outcome.cited { color: var(--citation); background: var(--teal-50); }
+.outcome.named { color: var(--primary-text); background: var(--primary-50); }
 .outcome.absent { color: var(--muted); background: var(--surface-3); }
 .answer-preview { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--text); line-height: 1.6; font-size: 13px; margin: 0 0 10px; overflow-wrap: anywhere; max-width: 920px; }
 .answer-preview p, .answer-preview h1, .answer-preview h2, .answer-preview h3, .answer-preview h4, .answer-preview li, .answer-preview blockquote { font: inherit; margin: 0; padding: 0; border: 0; color: inherit; }

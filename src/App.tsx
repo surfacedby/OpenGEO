@@ -363,7 +363,10 @@ export function App() {
           {page === "Settings" ? (
             <ConnectionSettings connected={connected} profiles={profiles} run={run} connectionsRequest={connectionsRequest} />
           ) : !w ? (
-            <p aria-live="polite">Loading your workspace...</p>
+            <div className="workspace-loading" role="status" aria-live="polite"><span className="visually-hidden">Loading your workspace</span>
+              <div className="metrics" aria-hidden="true">{[0, 1, 2, 3].map((index) => <div className="metric skeleton" key={index} />)}</div>
+              <div className="panel skeleton tall" aria-hidden="true" />
+            </div>
           ) : (
             <>
               {w.measurement && ["Overview", "Visibility", "Responses", "Sources"].includes(page) && <MeasurementScope measurement={w.measurement} observations={w.observations} missing={w.metrics.missing} />}
@@ -401,7 +404,7 @@ export function App() {
                   </div> : activeAudit && <section className="next-step-card"><ScanSearch size={25} /><div><h2>{activeAudit.status === "queued" ? "Your site audit is queued" : "Your site audit is running"}</h2><p>{activeAudit.progress}</p></div></section>}
                   <RunsPanel jobs={runsNeedingAttention(w.jobs).filter((job) => measured || job.id !== activeAudit?.id)} run={run} />
                   {measured && !activeMeasurement && !analyzed && !activeAnalysis && !pausedAnalysis && <section className="insight-banner"><Lightbulb size={22} /><div><h2>{w.metrics.mentionRate === 0 ? 'Your brand was missing from this check' : 'Turn your visibility into your next improvement'}</h2><p>{`${w.metrics.completed} answers collected. Analyze them alongside your pages to find where useful content can make a difference.`}</p></div>{!canAnalyze && <button className="secondary" onClick={openConnections}>Connect for analysis <ArrowRight size={15} /></button>}</section>}
-                  {measured && <><div className="analytics-grid"><VisibilityChart presentation={w.presentation} openVisibility={() => changePage("Visibility")} /><SourcesTable presentation={w.presentation} collected={w.metrics.completed} compact evidence={openEvidence} openSources={() => changePage("Sources")} projectId={p!.id} ownDomain={p!.domain} /></div><div className="analytics-grid"><AnswerDistribution presentation={w.presentation} collected={w.metrics.completed} requested={w.metrics.requested} missing={w.metrics.missing} collecting={!!activeMeasurement} evidence={openEvidence} /><CitationComparison projectId={p!.id} ownDomain={p!.domain} rows={[ownWebsite!,...w.competitors]} evidence={openEvidence} openCompetitors={() => changePage("Competitors")} /></div></>}
+                  {measured && <><div className="analytics-grid"><VisibilityChart presentation={w.presentation} openVisibility={() => changePage("Visibility")} /><SourcesTable presentation={w.presentation} collected={w.metrics.completed} compact evidence={openEvidence} openSources={() => changePage("Sources")} projectId={p!.id} ownDomain={p!.domain} /></div><div className="analytics-grid"><AnswerDistribution presentation={w.presentation} collected={w.metrics.completed} requested={w.metrics.requested} missing={w.metrics.missing} collecting={activeMeasurement?.id === w.measurement?.id} evidence={openEvidence} /><CitationComparison projectId={p!.id} ownDomain={p!.domain} rows={[ownWebsite!,...w.competitors]} evidence={openEvidence} openCompetitors={() => changePage("Competitors")} /></div></>}
                   {!measured && audited && <AuditSummary audit={w.presentation.audit} domain={p!.domain} findings={w.findings} openAudit={() => changePage("Site Audit")} />}
                   {!measured && <section className="panel next-steps">
                       <div className="panel-heading">
@@ -562,8 +565,8 @@ export function App() {
                     />
                     <Metric
                       title={activeMeasurement ? "Answers remaining" : "Answers collected"}
-                      value={activeMeasurement && activeMeasurement.id !== w.measurement?.id ? "Starting" : activeMeasurement ? String(w.metrics.missing) : String(w.metrics.completed)}
-                      detail={activeMeasurement && activeMeasurement.id !== w.measurement?.id ? "Previous results shown until answers arrive" : activeMeasurement ? "Saved as they arrive" : w.metrics.missing ? `${w.metrics.completed} of ${w.metrics.requested} requested. Missing answers are not counted as absent mentions.` : `All ${w.metrics.requested} requested answers`}
+                      value={activeMeasurement && activeMeasurement.id !== w.measurement?.id ? activeMeasurement.status === "paused" ? "Paused" : "Starting" : activeMeasurement ? String(w.metrics.missing) : String(w.metrics.completed)}
+                      detail={activeMeasurement && activeMeasurement.id !== w.measurement?.id ? activeMeasurement.status === "paused" ? "Previous results shown. Resume the new check below." : "Previous results shown until answers arrive" : activeMeasurement ? "Saved as they arrive" : w.metrics.missing ? `${w.metrics.completed} of ${w.metrics.requested} requested. Missing answers are not counted as absent mentions.` : `All ${w.metrics.requested} requested answers`}
                     />
                   </div>}
                   {w.measurement && <><VisibilityChart presentation={w.presentation} /><PromptTable rows={w.presentation.prompts} collecting={activeMeasurement?.id === w.measurement.id} evidence={openEvidence} /></>}
@@ -740,7 +743,7 @@ function Metric({
   points?: number | null;
   since?: string;
 }) {
-  const Icon = ({ "Brand mentions": MessagesSquare, "Website citations": Link, "Answers collected": Check, "Opportunities": Lightbulb, "Missing answers": MessagesSquare, "Answers remaining": MessagesSquare, "Source links": Globe } as Record<string, typeof MessagesSquare>)[title] ?? ChartColumn;
+  const Icon = ({ "Brand mentions": MessagesSquare, "Website citations": Link, "Answers collected": Check, "Opportunities": Lightbulb, "Answers remaining": MessagesSquare } as Record<string, typeof MessagesSquare>)[title] ?? ChartColumn;
   const change = points === undefined ? null : pointChange(points);
   const ChangeIcon = change?.direction === "up" ? TrendingUp : change?.direction === "down" ? TrendingDown : Minus;
   return (
@@ -782,7 +785,7 @@ function WorkflowRow({
 }
 const jobLabels: Record<Job["kind"], string> = { audit: "Site audit", discover: "Question suggestions", competitors: "Competitor review", measure: "Visibility check", recheck: "Visibility recheck", diagnose: "Recommendations", content: "Content draft", revise: "Draft revision" };
 const jobIcons: Record<Job["kind"], typeof ScanSearch> = { audit: ScanSearch, discover: Sparkles, competitors: Users, measure: ChartNoAxesCombined, recheck: RefreshCw, diagnose: Lightbulb, content: FileText, revise: FilePenLine };
-/** A run's live status; queued checks with every answer saved are only finishing follow-up work. */
+/** A run's live status. A check with every answer saved is only finishing follow-up work. */
 function jobSummary(job: Job) {
   return completedMeasurement(job) ? "All answers saved. Competitor suggestions: " + job.progress : job.progress;
 }
@@ -834,6 +837,7 @@ function Jobs({
               <X size={14} />
             </button>
           )}
+          {j.status === "failed" && <button className="text-button" onClick={() => void run(() => api("/jobs/" + j.id + "/dismiss", {}))}>Dismiss</button>}
           {j.status === 'cancelled' && j.error === 'cancel_remote' && <button className="secondary" onClick={() => void run(() => api('/jobs/' + j.id + '/cancel', {}))}>Check cancellation</button>}
           {review?.id === j.id && <form className="resume-review" onSubmit={(event) => {
             event.preventDefault(); const data = new FormData(event.currentTarget); setResuming(true); setReviewError("");

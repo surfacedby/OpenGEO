@@ -56,7 +56,7 @@ else {
         minWidth: 760,
         minHeight: 600,
         title: identity.name,
-        backgroundColor: "#fcfcfd",
+        backgroundColor: "#f5f7fa",
         webPreferences: {
           nodeIntegration: false,
           contextIsolation: true,

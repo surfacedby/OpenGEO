@@ -85,4 +85,14 @@
 @media (max-width: 1050px) { .draft-list-heading, .draft-card { grid-template-columns: minmax(0, 1fr) 82px 100px 18px; gap: 12px; } .draft-list-heading > span:nth-child(4), .draft-card time { display: none; } }
 @media (max-width: 780px) { .draft-list-heading { display: none; } .draft-card { grid-template-columns: minmax(0, 1fr) auto; padding: 18px 16px; gap: 10px; } .draft-list-title { grid-column: 1 / -1; } .draft-card > svg { grid-column: 2; grid-row: 2 / span 2; } .draft-state, .draft-type { grid-column: 1; margin-left: 55px; } .draft-document { padding: 20px 16px 0; } .draft-document > .button-row:last-child { margin: 16px -16px 0; padding: 10px 16px; } .draft-document-toolbar { padding: 14px 18px; } .draft-document-heading h3 { font-size: 22px; } .content-process { gap: 16px; flex-wrap: wrap; justify-content: center; } }
 @media (max-width: 700px) { .draft-document > .button-row:last-child { position: static; box-shadow: none; } }
-.save-state { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 6px; font-size: 13px; font-weight: 500; color: var(--success); }
+.draft { width: 100%; min-height: 420px; margin: 16px 0; font: 13px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; }
+.draft-recovery { margin: 16px 0; padding: 16px 18px; border: 1px solid var(--primary-100); border-radius: 10px; background: var(--primary-50); display: grid; gap: 8px; }
+.draft-recovery > p { font-size: 13px; color: var(--text); }
+.draft-recovery details summary { color: var(--primary-text); font-weight: 500; cursor: pointer; }
+.draft-recovery .document-preview { padding: 12px 0 0; }
+.draft-recovery .button-row { margin-top: 6px; }
+.draft-review section { display: grid; gap: 8px; font-size: 13px; }
+.draft-review section ul { list-style: none; padding: 0; margin: 4px 0 0; display: grid; gap: 10px; }
+.draft-review section li { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+.draft-review section li strong { display: block; color: var(--ink); font-weight: 600; }
+.draft-review section li p { margin-top: 4px; color: var(--text); }

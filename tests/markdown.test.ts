@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { markdownHtml, htmlDocument } from "../server/markdown.js";
+import { markdownHtml, htmlDocument, markdownSummary } from "../server/markdown.js";
 
 test("reading and HTML exports preserve headings, lists, source links and code without executing source markup", () => {
   const html = markdownHtml('# Example\n\nUseful **facts** and [Source](https://example.com/).\n\n- First\n- Second\n\n```html\n<script>alert(1)</script>\n```');
@@ -29,8 +29,7 @@ test('content tables render cells, escaped pipes and code without executing mode
   assert.ok(!markdownHtml('| A | B |\n| --- |').includes('<table>'));
 });
 
-test("quotes and rules render as structure, and previews skip headings to the first prose block", async () => {
-  const { markdownSummary } = await import("../server/markdown.js");
+test("quotes and rules render as structure, and previews skip headings to the first prose block", () => {
   const html = markdownHtml("Before\n> Tip: **grind coarser**\n> for less bitterness\n\n---\n\nAfter");
   assert.match(html, /<p>Before<\/p>\n<blockquote><p>Tip: <strong>grind coarser<\/strong>\nfor less bitterness<\/p><\/blockquote>/);
   assert.match(html, /<hr>\n<p>After<\/p>/);
@@ -39,4 +38,13 @@ test("quotes and rules render as structure, and previews skip headings to the fi
   assert.equal(markdownSummary("## Short answer\n\nUse **fresh** beans.\n\n- Grind"), "Use **fresh** beans.");
   assert.equal(markdownSummary("| A | B |\n| --- | --- |\n\n> Quoted advice"), "Quoted advice");
   assert.equal(markdownSummary("# Only a heading"), "# Only a heading");
+});
+
+test("quote nesting is bounded and previews skip code and tables that contain blank lines", () => {
+  const deep = markdownHtml(">".repeat(20000) + " deepest");
+  assert.equal(deep.match(/<blockquote>/g)?.length, 4, "Nesting stops at the supported depth");
+  assert.match(deep, /&gt;/, "Deeper markers stay as escaped text");
+  assert.equal(markdownSummary("```js\nconst a = 1;\n\nconst b = 2;\n```\n\nThe actual answer."), "The actual answer.");
+  assert.equal(markdownSummary("Cause | Check\n--- | ---\nGrind | Coarse\n\nUse a coarse grind."), "Use a coarse grind.");
+  assert.equal(markdownSummary("```\nonly code\n```"), "");
 });

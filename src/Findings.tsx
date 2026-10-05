@@ -7,6 +7,7 @@ import { Select } from './Select';
 import { findingGroups, targetLabel, targetDomain } from './finding-groups';
 import { SiteIcon } from './SiteIcon';
 import './findings.css';
+import { shortDate } from './format';
 
 export function Findings({ findings, projectId, run, compact = false, mode = 'opportunities', openAll, openFinding, createContent, drafts = [], openContent, focusedFinding, onFocused, jobs = [], measurementId, emptyMessage, emptyTitle = 'No recommendations yet' }: {
   findings: Finding[];
@@ -61,7 +62,7 @@ export function Findings({ findings, projectId, run, compact = false, mode = 'op
   return <div className="improvement-list" ref={root}>
     {!compact && findings.length > 0 && <div className="improvement-toolbar">
       <div className="segmented-control" role="group" aria-label="Filter improvements">
-        {([['active', 'To do'], ['doing', 'In progress'], ['done', 'Done'], ['all', 'All']] as const).map(([value, label]) => <button key={value} aria-pressed={status === value} onClick={() => setStatus(value)}>{value === 'done' && <Check size={14} />}{label}<span>{statusCounts[value]}</span></button>)}
+        {([['active', 'Unfinished'], ['doing', 'In progress'], ['done', 'Done'], ['all', 'All']] as const).map(([value, label]) => <button key={value} aria-pressed={status === value} onClick={() => setStatus(value)}>{value === 'done' && <Check size={14} />}{label} <span>{statusCounts[value]}</span></button>)}
       </div>
       {detailedFilters && mode !== 'audit' && findings.some(item => item.opportunity) && <Select label="Kind of opportunity" compact searchable={false} value={type} onChange={setType} options={[{ value: 'all', label: 'All opportunities' }, { value: 'page_update', label: 'Improve a page' }, { value: 'new_content', label: 'Create new content' }, { value: 'site_change', label: 'Website changes' }]} />}
       {detailedFilters && <label className="search"><Search size={15} /><input aria-label="Search improvements" placeholder="Find an improvement or page" value={query} onChange={event => setQuery(event.target.value)} /></label>}
@@ -78,7 +79,7 @@ export function Findings({ findings, projectId, run, compact = false, mode = 'op
         {jobs.find(job => job.id === finding.jobId) && <small className="finding-period">{(() => {
           const job = jobs.find(job => job.id === finding.jobId)!;
           const period = (job.result as { measurementJobId?: string } | null)?.measurementJobId;
-          return (period && period !== measurementId ? 'Started from an earlier check / ' : 'Analyzed ') + new Date(job.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+          return (period && period !== measurementId ? 'From an earlier check, analyzed ' : 'Analyzed ') + shortDate(job.createdAt);
         })()}</small>}
         <div className="finding-next-step"><span>Start here</span><p>{finding.steps[0] ?? finding.description}</p></div>
         <div className="improvement-detail"><h3>{finding.opportunity?.type === 'new_content' ? 'Build the resource' : 'Complete the improvement'}</h3>{finding.steps.length > 1 && <ol start={2}>{finding.steps.slice(1).map((step, index) => <li key={index}>{step}</li>)}</ol>}

@@ -43,6 +43,8 @@
 .improvement-detail > details summary { color: var(--primary-text); cursor: pointer; font-weight: 500; }
 .improvement-detail > details[open] summary { margin-bottom: 8px; }
 .improvement-detail > details article { margin-top: 10px; }
+.improvement-detail > details article h3 { font-size: 13px; }
+.answer-text { white-space: pre-wrap; font-size: 13px; line-height: 1.6; margin: 6px 0 12px; max-height: 320px; overflow: auto; color: var(--text); }
 .finding-reason p { font-size: 13px; line-height: 1.65; max-width: 880px; margin: 0 0 6px; color: var(--text); }
 .opportunity-preview > button { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 20px; text-align: left; border-bottom: 1px solid var(--divider); }
 .opportunity-preview > button:last-child { border-bottom: 0; }

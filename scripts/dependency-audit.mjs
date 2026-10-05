@@ -36,7 +36,9 @@ function unmet(finding) {
   const [, entry] = installs[0];
   if (entry.version !== review.version || entry.integrity !== review.integrity) return `locked ${entry.version} no longer matches the reviewed ${review.version}`;
   if (entry.dev !== true) return 'the package is no longer limited to build tooling';
-  const dependents = Object.entries(lock).filter(([, item]) => item.dependencies?.[review.package]).map(([name]) => name).sort();
+  // Every way a locked package can require another, including the project itself (the "" entry).
+  const requires = (item) => ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'].some((map) => item[map]?.[review.package]);
+  const dependents = Object.entries(lock).filter(([, item]) => requires(item)).map(([name]) => name).sort();
   if (JSON.stringify(dependents) !== JSON.stringify([...review.dependents].sort())) return `dependents changed to ${dependents.join(', ') || 'none'}`;
   if (review.requiresUnsetDownloadCache) {
     const download = manifest.build?.electronDownload;
@@ -46,7 +48,7 @@ function unmet(finding) {
 }
 
 const runtime = advisories(audit(['--omit=dev']));
-const all = advisories(audit([]));
+const all = advisories(audit(['--include=dev']));
 const failures = [
   ...runtime.map((finding) => ({ ...finding, problem: 'runtime dependency advisory' })),
   ...all.map((finding) => ({ ...finding, problem: unmet(finding) })).filter((finding) => finding.problem),

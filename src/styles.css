@@ -21,7 +21,7 @@
   --primary-50: #eff5ff;
   --primary-100: #dce9fe;
   --primary-200: #b6d2fc;
-  --teal: #0e9384;
+  --teal: #107569;
   --teal-50: #effcf9;
   --success: #067647;
   --success-50: #ecfdf3;
@@ -34,6 +34,10 @@
   --danger-200: #fecdd6;
   --violet: #6941c6;
   --violet-50: #f4f3ff;
+  /* One color per measured fact, read by every chart, bar and chip. */
+  --mention: var(--primary);
+  --citation: var(--teal);
+  --undetected: #d99522;
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius: 12px;
@@ -66,7 +70,6 @@ h2 { font-size: 14px; line-height: 1.4; font-weight: 600; color: var(--ink); }
 h3 { font-size: 14px; line-height: 1.45; font-weight: 600; color: var(--ink); }
 p { line-height: 1.6; }
 small, .small { font-size: 12px; color: var(--muted); line-height: 1.55; }
-.muted { color: var(--muted); }
 svg { flex-shrink: 0; }
 .visually-hidden { position: absolute !important; left: 0; top: 0; width: 1px !important; height: 1px !important; padding: 0 !important; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .skip-link { position: fixed; left: 16px; top: -80px; z-index: 200; background: var(--surface); border: 2px solid var(--primary); padding: 12px 16px; border-radius: var(--radius-md); }
@@ -99,7 +102,7 @@ input, textarea, select {
 }
 input:focus-visible, textarea:focus-visible, select:focus-visible { outline: none; border-color: var(--primary); box-shadow: var(--focus); }
 textarea { resize: vertical; line-height: 1.6; }
-input::placeholder, textarea::placeholder { color: var(--faint); }
+input::placeholder, textarea::placeholder { color: var(--muted); }
 input[type=checkbox] { accent-color: var(--primary); width: 16px; height: 16px; padding: 0; min-height: 0; flex: none; box-shadow: none; }
 form .primary, form .secondary { justify-self: start; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -217,7 +220,7 @@ tbody tr:hover { background: var(--surface-2); }
 .project-switch > button:hover { background: var(--surface-2); color: var(--ink); }
 nav { display: grid; gap: 14px; }
 .nav-group { display: grid; gap: 1px; }
-.nav-group > p { padding: 0 10px 5px; font-size: 11px; font-weight: 500; letter-spacing: 0.01em; color: var(--faint); }
+.nav-group > p { padding: 0 10px 5px; font-size: 11px; font-weight: 500; letter-spacing: 0.01em; color: var(--muted); }
 nav button { display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 6px 10px; border-radius: var(--radius-md); text-align: left; font-size: 13px; font-weight: 500; color: var(--text); }
 nav button > svg { color: var(--muted); }
 nav button:hover { background: var(--surface-3); color: var(--ink); }
@@ -274,7 +277,7 @@ main { overflow: auto; padding: 24px 28px 48px; flex: 1; }
 .segmented-control button { display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 4px 10px; color: var(--muted); border-radius: var(--radius-sm); font-size: 13px; font-weight: 500; white-space: nowrap; }
 .segmented-control button:hover { color: var(--ink); }
 .segmented-control button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
-.segmented-control button span { color: var(--faint); font-variant-numeric: tabular-nums; }
+.segmented-control button span { color: var(--muted); font-variant-numeric: tabular-nums; }
 
 /* Rendered Markdown */
 .document-preview { padding: 14px 0 24px; font-size: 15px; line-height: 1.75; color: var(--text); overflow-wrap: anywhere; }
@@ -283,7 +286,7 @@ main { overflow: auto; padding: 24px 28px 48px; flex: 1; }
 .document-preview h3 { font-size: 16px; }
 .document-preview h1, .document-preview h2, .document-preview h3, .document-preview h4 { margin: 1.4em 0 0.5em; line-height: 1.35; }
 .document-preview > :first-child { margin-top: 0; }
-.document-preview p { margin: 0 0 14px; }
+.document-preview p { margin: 0 0 14px; white-space: pre-wrap; }
 .document-preview ul, .document-preview ol { padding-left: 24px; margin: 10px 0 18px; }
 .document-preview ul, .inline-error ul { list-style: disc; }
 .document-preview ol, .suggestion-preview ol { list-style: decimal; }

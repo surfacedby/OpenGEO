@@ -160,6 +160,11 @@ export class Store {
     }
     return j;
   }
+  dismissJob(id: string) {
+    const job = this.job(id);
+    if (job.status !== "failed") throw new ProviderError("state", "Only a run that did not finish can be dismissed.");
+    return job.dismissedAt ? job : this.updateJob(id, { dismissedAt: new Date().toISOString() });
+  }
   put(kind: string, projectId: string, jobId: string, value: any) {
     this.db
       .prepare("INSERT INTO artifacts VALUES(?,?,?,?,?)")

@@ -163,7 +163,7 @@ export function ContentEditor({
   const [markdown, setMarkdown] = useState<string>(content.markdown),
     [saved, setSaved] = useState<string>(content.markdown), [editing, setEditing] = useState(false), [error, setError] = useState(""),
     [recovery, setRecovery] = useState<{ baseMarkdown: string; markdown: string; updatedAt: string } | null>(null),
-    [protection, setProtection] = useState("Opening draft...");
+    [protection, setProtection] = useState("Opening draft..."), [justSaved, setJustSaved] = useState(false);
   const session = useRef(""), sequence = useRef(0), mounted = useRef(true);
   const path = "/projects/" + projectId + "/content/" + content.id;
   async function openRecovery() {
@@ -194,6 +194,7 @@ export function ContentEditor({
     return () => { unsubscribe?.(); window.opengeoDesktop?.setDraftProtectionPending(false); };
   }, []);
   function changeDraft(value: string) {
+    setJustSaved(false);
     window.opengeoDesktop?.setDraftProtectionPending(value !== saved);
     setMarkdown(value); onDraftChange(value === saved ? null : { markdown: value, baseMarkdown: saved, recoverySession: session.current });
     const currentSession = session.current, currentSequence = ++sequence.current;
@@ -216,24 +217,27 @@ export function ContentEditor({
       />}
       {error && <p className="inline-error" role="alert">{error}</p>}
       {!session.current && error && <button className="secondary" onClick={() => { setError(""); void openRecovery().catch((failure) => setError(failure.message)); }}>Reopen draft</button>}
-      {protection && <p className="small" role="status">{protection}</p>}
+      <p className="small draft-status" role="status">{protection || (justSaved ? "Draft saved." : "")}</p>
       {content.markdown !== saved && <p className="inline-error" role="alert">The saved draft changed elsewhere. Export your edits, then reopen the draft to review both versions.</p>}
       <div className="button-row">
-        {markdown === saved ? <span className="save-state" role="status"><Check size={15} />Saved</span> : <button
-          className="primary"
-          onClick={() =>
+        {/* The button stays mounted when there is nothing to save so keyboard focus is not lost. */}
+        <button
+          className={markdown === saved ? "secondary" : "primary"}
+          aria-disabled={markdown === saved}
+          onClick={() => {
+            if (markdown === saved) return;
             void run(async () => {
               setError(""); try { await api(
                 "/projects/" + projectId + "/content/" + content.id,
                 { markdown, baseMarkdown: saved, recoverySession: session.current },
                 "PATCH",
               );
-              setSaved(markdown); onDraftChange(null); session.current = ""; await openRecovery(); } catch (failure) { setError((failure as Error).message); }
-            })
-          }
+              setSaved(markdown); onDraftChange(null); setJustSaved(true); session.current = ""; await openRecovery(); } catch (failure) { setError((failure as Error).message); }
+            });
+          }}
         >
-          Save draft
-        </button>}
+          {markdown === saved ? <><Check size={15} />Saved</> : "Save draft"}
+        </button>
         <button
           className="secondary"
           onClick={() => download("opengeo-content.md", markdown)}

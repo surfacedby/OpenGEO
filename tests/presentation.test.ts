@@ -6,6 +6,7 @@ import {
   sourceCoverage,
   workspacePresentation,
 } from "../server/presentation.js";
+import { displayedMeasurement } from "../server/portable-results.js";
 import type { Job, Observation, PageEvidence } from "../server/contracts.js";
 
 const answer = (
@@ -223,8 +224,7 @@ test("history uses only actual comparable completed checks and leaves incomplete
   assert.equal(comparableHistory([current], current).history.length, 1);
 });
 
-test("a failed or unstarted recheck never hides the last completed check", async () => {
-  const { displayedMeasurement } = await import("../server/portable-results.js");
+test("a failed or unstarted recheck never hides the last completed check", () => {
   const job = (id: string, status: Job["status"], createdAt: string) => ({ id, kind: "recheck", status, createdAt }) as Job;
   const done = job("done", "completed", "2026-10-01T10:00:00Z");
   const saved: Record<string, number> = { done: 6, failedEmpty: 0, failedPartial: 3, running: 2, queued: 0 };

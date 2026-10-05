@@ -111,13 +111,13 @@ export function MeasurementScope({
 
 export function RateBar({
   value,
-  color = "blue",
+  measure,
 }: {
   value: number | null;
-  color?: "blue" | "teal";
+  measure: "mention" | "citation" | "source";
 }) {
   return (
-    <span className={"rate-cell " + color}>
+    <span className={"rate-cell " + measure}>
       <span className="rate-track" aria-hidden="true">
         <span style={{ width: Math.min(100, Math.max(0, value ?? 0)) + "%" }} />
       </span>
@@ -162,8 +162,8 @@ export function VisibilityChart({
         ((Date.parse(history[index].at) - start) / span) * (right - left);
   const y = (value: number) => bottom - (value / 100) * (bottom - top);
   const series = [
-    { key: "mentionRate", label: "Brand mentions", color: "#0d6cf2" },
-    { key: "citationRate", label: "Website citations", color: "#087f76" },
+    { key: "mentionRate", label: "Brand mentions", color: "var(--mention)" },
+    { key: "citationRate", label: "Website citations", color: "var(--citation)" },
   ] as const;
   function segments(key: "mentionRate" | "citationRate") {
     const paths: { line: string; area: string }[] = [];
@@ -208,7 +208,7 @@ export function VisibilityChart({
               Mention and citation rates in comparable checks. Percentages range
               from zero to one hundred. Missing checks are gaps.
             </title>
-            <defs>{series.map(s => <linearGradient key={s.key} id={id + s.key} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={s.color} stopOpacity=".14" /><stop offset="100%" stopColor={s.color} stopOpacity=".015" /></linearGradient>)}</defs>
+            <defs>{series.map(s => <linearGradient key={s.key} id={id + s.key} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" style={{ stopColor: s.color }} stopOpacity=".14" /><stop offset="100%" style={{ stopColor: s.color }} stopOpacity=".015" /></linearGradient>)}</defs>
             {[0, 25, 50, 75, 100].map((tick) => (
               <g key={tick}>
                 <line
@@ -229,7 +229,7 @@ export function VisibilityChart({
                   <g key={index}><path d={path.area} fill={`url(#${id + s.key})`} /><path
                     d={path.line}
                     fill="none"
-                    stroke={s.color}
+                    style={{ stroke: s.color }}
                     strokeWidth="2.5"
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -242,7 +242,7 @@ export function VisibilityChart({
                         cx={x(index)}
                         cy={y(point[s.key]!)}
                         r={active?.jobId === point.jobId ? 5 : 4}
-                        fill={s.color}
+                        style={{ fill: s.color }}
                         stroke="white"
                         strokeWidth="1.5"
                         aria-hidden="true"
@@ -409,7 +409,7 @@ export function SourcesTable({
                 onClick={() => setMode(value)}
               >
                 {value === "domains" ? <Globe size={14} /> : <Link size={14} />}
-                {value === "domains" ? "Domains" : "Pages"}
+                {value === "domains" ? "Domains" : "Pages"}{" "}
                 <span>{presentation[value].length}</span>
               </button>
             ))}
@@ -513,7 +513,7 @@ function SourceTableRow({
         {mode === "pages" && <small>{row.url}</small>}
       </td>
       <td>
-        <RateBar value={row.answerRate} />
+        <RateBar value={row.answerRate} measure="source" />
         <small>
           {row.answers} / {collected} answers
         </small>
@@ -586,10 +586,10 @@ export function PromptTable({
                 <tr key={row.prompt}>
                   <td>{row.prompt}</td>
                   <td data-label="Mentions">
-                    <RateBar value={row.mentionRate} />
+                    <RateBar value={row.mentionRate} measure="mention" />
                   </td>
                   <td data-label="Citations">
-                    <RateBar value={row.citationRate} color="teal" />
+                    <RateBar value={row.citationRate} measure="citation" />
                   </td>
                   <td data-label="Collected">
                     {row.collected}
@@ -662,8 +662,8 @@ export function CheckHistory({ jobs, currentId, recheck, note }: {
                     <span className="check-date"><ProviderIcon provider={job.platform ?? "chat_gpt"} size={14} />{dateTime(measurementTime(job))}</span>
                     {job.id === currentId ? <small>Shown above</small> : current && result.comparisonKey !== current ? <small>Different questions or settings</small> : null}
                   </td>
-                  <td data-label="Brand mentions"><RateBar value={result.metrics.mentionRate} /></td>
-                  <td data-label="Website citations"><RateBar value={result.metrics.citationRate} color="teal" /></td>
+                  <td data-label="Brand mentions"><RateBar value={result.metrics.mentionRate} measure="mention" /></td>
+                  <td data-label="Website citations"><RateBar value={result.metrics.citationRate} measure="citation" /></td>
                   <td data-label="Answers">{result.metrics.completed} / {result.metrics.requested}{result.metrics.missing > 0 && <small className="scope-missing">{result.metrics.missing} missing</small>}</td>
                 </tr>
               ))}
@@ -736,7 +736,7 @@ export function AnswerDistribution({
   evidence: Evidence;
   collecting?: boolean;
 }) {
-  const colors = { cited: "#0d6cf2", mentioned: "#087f76", absent: "#d99522" },
+  const colors = { cited: "var(--citation)", mentioned: "var(--mention)", absent: "var(--undetected)" },
     circumference = 2 * Math.PI * 66;
   let offset = 0;
   return (
@@ -775,7 +775,7 @@ export function AnswerDistribution({
                 cy="88"
                 r="66"
                 fill="none"
-                stroke={colors[group.kind]}
+                style={{ stroke: colors[group.kind] }}
                 strokeWidth="16"
                 strokeDasharray={`${length} ${circumference - length}`}
                 strokeDashoffset={-start}
