@@ -17,6 +17,8 @@ import { connectionPage } from "../server/connection-page.js";
 import { consoleCapabilities } from "../server/console-capabilities.js";
 import { completedMeasurement } from "../server/portable-results.js";
 import { comparableHistory } from "../server/presentation.js";
+import { confirmedWebsites } from "../server/discovery.js";
+import type { Observation } from "../server/contracts.js";
 
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "opengeo-discovery-")), store = new Store(directory);
@@ -377,4 +379,23 @@ test('a website with both roles retains the explanation of its competing offerin
     assert.deepEqual(result.references, result.competitors);
     assert.deepEqual(result.competitors[0].observationIds, f.store.observations(f.project.id, job.id).map(answer => answer.id));
   } finally { globalThis.fetch = original; await f.close(); }
+});
+
+test("a business cited on several of its own hosts is offered once under its parent domain", () => {
+  const answer = (id: string, text: string, urls: string[]) => ({ id, prompt: "Which tools track AI visibility?", answer: text, citations: urls.map(url => ({ url })) }) as unknown as Observation;
+  const observations = [
+    answer("a1", "Peec AI tracks brand visibility across AI engines.", ["https://peec.ai/"]),
+    answer("a2", "Peec AI offers an API for programmatic monitoring.", ["https://docs.peec.ai/api"]),
+    answer("a3", "The Peec AI documentation explains share of voice.", ["https://help.docs.peec.ai/metrics"]),
+  ];
+  const sites = confirmedWebsites({ domain: "example.com" }, observations, [
+    { name: "Peec AI", domain: "docs.peec.ai", role: "competitor", reason: "Offers API monitoring.", observationIds: ["a2"] },
+    { name: "Peec AI", domain: "help.docs.peec.ai", role: "reference", reason: "Explains a metric.", observationIds: ["a3"] },
+    { name: "Peec AI", domain: "peec.ai", role: "reference", reason: "Describes its product.", observationIds: ["a1"] },
+  ] as any);
+  assert.equal(sites.length, 1);
+  assert.equal(sites[0].domain, "peec.ai");
+  assert.equal(sites[0].role, "both");
+  assert.equal(sites[0].reason, "Offers API monitoring.", "a reference cannot erase the competing explanation");
+  assert.deepEqual(new Set(sites[0].observationIds), new Set(["a1", "a2", "a3"]));
 });

@@ -162,5 +162,17 @@ export function confirmedWebsites(project: Pick<Project, 'domain'>, observations
       ...(role ? { role } : {}), ...(reason ? { reason } : {}),
       observationIds: [...new Set([...(prior?.observationIds ?? []), ...evidence.map(answer => answer.id)])] });
   }
+  // Tracking a domain already covers its subdomains, so a business cited on several of its own hosts is offered once, under its parent domain.
+  const sites = [...confirmed.values()];
+  for (const site of sites) {
+    const owner = sites.filter(other => site.domain.endsWith("." + other.domain)).sort((a, b) => a.domain.length - b.domain.length)[0];
+    if (!owner) continue;
+    const merged = confirmed.get(owner.domain)!;
+    const role = merged.role && site.role && merged.role !== site.role ? 'both' : merged.role ?? site.role;
+    const reason = merged.role === 'reference' && site.role && site.role !== 'reference' ? site.reason ?? merged.reason : merged.reason ?? site.reason;
+    confirmed.set(owner.domain, { ...merged, ...(role ? { role } : {}), ...(reason ? { reason } : {}),
+      observationIds: [...new Set([...merged.observationIds, ...site.observationIds])] });
+    confirmed.delete(site.domain);
+  }
   return [...confirmed.values()];
 }
