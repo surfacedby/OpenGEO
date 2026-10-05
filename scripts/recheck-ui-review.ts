@@ -35,7 +35,7 @@ try {
   const dialog = page.getByRole('dialog', { name: 'Recheck AI visibility', exact: true });
   await dialog.getByRole('button', { name: 'Model', exact: true }).getByText('previous-model', { exact: true }).waitFor();
   assert.equal(await dialog.getByRole('checkbox', { name: /Search the web for this check/ }).isChecked(), false);
-  await dialog.getByRole('button', { name: 'Start visibility check', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Recheck visibility', exact: true }).click();
   await dialog.waitFor({ state: 'hidden' });
   const accepted = runtime.store.jobs(project.id).find(job => job.kind === 'recheck')!;
   assert.equal(accepted.provider, baseline.provider);
@@ -51,11 +51,11 @@ try {
   await page.reload(); await navigate(page, 'Visibility');
   await page.getByRole('button', { name: 'Recheck', exact: true }).click();
   await dialog.getByRole('button', { name: 'Model', exact: true }).getByText('Choose a model', { exact: true }).waitFor();
-  assert.equal(await dialog.getByRole('button', { name: 'Start visibility check', exact: true }).isDisabled(), true);
+  assert.equal(await dialog.getByRole('button', { name: 'Recheck visibility', exact: true }).isDisabled(), true);
   assert.equal(runtime.store.jobs(project.id).filter(job => job.kind === 'recheck').length, 1);
   await dialog.getByRole('button', { name: 'Model', exact: true }).click();
   await page.getByRole('option', { name: /new-default/ }).click();
-  assert.equal(await dialog.getByRole('button', { name: 'Start visibility check', exact: true }).isEnabled(), true);
+  assert.equal(await dialog.getByRole('button', { name: 'Recheck visibility', exact: true }).isEnabled(), true);
   await dialog.getByText('Different answer settings start a separate comparison.', { exact: true }).waitFor();
   await dialog.getByRole('button', { name: 'Close dialog', exact: true }).click();
   runtime.runner.providers.vault.remove('chatgpt');
@@ -64,7 +64,7 @@ try {
   await page.getByRole('button', { name: 'Recheck', exact: true }).click();
   await dialog.getByText('The previous connection is unavailable. Reconnect it in Settings or choose another connection.', { exact: true }).waitFor();
   await dialog.getByRole('button', { name: 'Connection', exact: true }).getByText('Choose a connected provider', { exact: true }).waitFor();
-  assert.equal(await dialog.getByRole('button', { name: 'Start visibility check', exact: true }).isDisabled(), true);
+  assert.equal(await dialog.getByRole('button', { name: 'Recheck visibility', exact: true }).isDisabled(), true);
   assert.equal(runtime.store.jobs(project.id).filter(job => job.kind === 'recheck').length, 1);
   assert.deepEqual(errors, []);
   console.log('Browser verified: previous model and retrieval settings retained, unavailable models require explicit choice, no silent provider fallback, queued checks do not relabel previous results. No inference or paid provider requests.');

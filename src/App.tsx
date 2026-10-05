@@ -1228,7 +1228,7 @@ function JobDialog({
             ? "Starting..."
             : kind === "audit"
               ? "Start local audit"
-              : kind === 'content' ? contentMode === 'page_update' ? 'Draft page copy' : 'Create draft' : kind === 'revise' ? 'Revise draft' : kind === 'diagnose' ? 'Find opportunities' : kind === 'competitors' ? 'Review competitors' : 'Start visibility check'}
+              : kind === 'content' ? contentMode === 'page_update' ? 'Draft page copy' : 'Create draft' : kind === 'revise' ? 'Revise draft' : kind === 'diagnose' ? 'Find opportunities' : kind === 'competitors' ? 'Review competitors' : kind === 'recheck' ? 'Recheck visibility' : 'Start visibility check'}
         </button>
       </form>
     </Modal>
