@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "An open-source workspace for AI visibility and evidence-based improvements.",
+  "description": "Open-source generative engine optimization (GEO) workspace: track AI visibility, mentions and citations, audit your site and create evidence-based content.",
   "license": "MIT",
   "engines": {
     "node": ">=22"

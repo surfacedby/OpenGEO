@@ -1,12 +1,20 @@
 # OpenGEO
 
-## Your GEO workspace. Powered by your ChatGPT plan.
+## Open-source generative engine optimization (GEO) for your website
 
-Check AI answers, audit your sites and turn evidence into useful content. Run your AI visibility workflow locally with the ChatGPT plan you already have, or connect your own providers.
+OpenGEO is a free AI visibility tool that runs on your computer. Ask the questions your customers ask, see whether AI answers mention your brand or cite your pages, audit your site, and turn that evidence into content worth citing. Use the ChatGPT plan you already have, or connect your own providers.
 
-For site owners and agency operators: keep multiple websites, their evidence and improvement work in one open-source workspace on your computer.
+For site owners and agencies: keep several websites, their evidence and improvement work in one local workspace.
 
 **Audit -> Measure -> Diagnose -> Act -> Create -> Recheck.**
+
+- **AI visibility tracking.** Mention rate and citation rate for the questions you choose, with every answer and cited source kept for review.
+- **Site audit.** Page retrieval, titles, summaries, headings, indexing instructions, canonical URLs, thin pages and structured data, read from your sitemap while respecting robots.txt.
+- **Opportunities.** Pages to improve, new resources to create and site changes, each tied to the answers and sources behind it.
+- **Content.** Briefs and drafts grounded in your audited pages and cited sources, with factual claims flagged for review.
+- **Rechecks.** The same questions, model and locale, so changes compare like with like.
+
+Generative engine optimization (GEO), also called answer engine optimization (AEO) or AI search optimization, is the work of making your pages easy for AI answers to find, understand and cite.
 
 ![OpenGEO dashboard showing a real audit of the public example.com site](assets/dashboard-preview.png)
 
