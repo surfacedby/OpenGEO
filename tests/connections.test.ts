@@ -9,7 +9,7 @@ import { Connections } from "../server/oauth.js";
 import { connectionPage } from "../server/connection-page.js";
 import { Providers } from "../server/providers.js";
 import { Runner } from "../server/workflows.js";
-import { jobInput, projectInput, ProviderError } from "../server/contracts.js";
+import { jobInput, projectInput } from "../server/contracts.js";
 import { comparisonKey } from "../server/analysis.js";
 import { exportProject } from "../server/export.js";
 import { importProject } from "../server/import.js";

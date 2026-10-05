@@ -1,5 +1,6 @@
 /* Metric tiles */
 .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+.metrics.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .metric { border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius); padding: 16px 18px; box-shadow: var(--shadow); display: grid; gap: 6px; align-content: start; min-width: 0; }
 .metric .metric-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; font-weight: 500; color: var(--muted); }
 .metric-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-md); background: var(--primary-50); color: var(--primary-text); flex: none; }
@@ -11,12 +12,6 @@
 .metric-change.up { color: var(--success); background: var(--success-50); }
 .metric-change.down { color: var(--danger); background: var(--danger-50); }
 .metric-change.flat { color: var(--muted); background: var(--surface-3); }
-.comparison-strip { display: flex; align-items: center; gap: 12px 28px; flex-wrap: wrap; padding: 14px 20px; border-bottom: 1px solid var(--divider); background: var(--surface-2); }
-.comparison-strip > p { flex: 1; min-width: min(280px, 100%); display: grid; gap: 2px; font-size: 13px; color: var(--ink); }
-.comparison-strip > p strong { font-weight: 600; }
-.comparison-strip > span { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
-.comparison-strip > span .metric-change { justify-self: start; font-size: 13px; }
-p.comparison-strip { display: block; }
 
 /* Overview guidance */
 .next-step-card { display: flex; align-items: center; gap: 16px; padding: 18px 20px; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow); border-radius: var(--radius); margin-bottom: 16px; }
@@ -29,7 +24,6 @@ p.comparison-strip { display: block; }
 .insight-banner h2 { font-size: 14px; margin-bottom: 2px; }
 .insight-banner p { color: var(--text); font-size: 13px; }
 .insight-banner > svg { color: var(--primary); }
-.overview-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px; align-items: start; }
 .workflow-row { display: flex; align-items: center; text-align: left; width: 100%; padding: 14px 20px; gap: 14px; border-bottom: 1px solid var(--divider); }
 .workflow-row:last-child { border-bottom: 0; }
 .workflow-row:hover:not(:disabled) { background: var(--surface-2); }
@@ -60,14 +54,6 @@ p.comparison-strip { display: block; }
 .jobs li .resume-review { flex: 0 0 100%; border: 1px solid var(--border); background: var(--surface-2); border-radius: var(--radius-md); padding: 16px; margin: 4px 0 4px 42px; gap: 14px; }
 .resume-review h3 { font-size: 14px; }
 .resume-review p, .resume-review label { font-size: 13px; }
-.activity-panel > summary { display: flex; align-items: center; gap: 10px; padding: 10px 20px; min-height: 52px; cursor: pointer; list-style: none; }
-.activity-panel > summary::-webkit-details-marker { display: none; }
-.activity-panel > summary h2 { flex: 1; }
-.activity-panel > summary span { font-size: 12px; color: var(--muted); }
-.activity-panel > summary > svg { color: var(--muted); transition: transform .15s; }
-.activity-panel[open] > summary > svg { transform: rotate(180deg); }
-.activity-panel[open] > summary { border-bottom: 1px solid var(--divider); }
-.activity-panel > summary:hover { background: var(--surface-2); }
 
 /* Site summary on the overview */
 .audit-summary-body { display: grid; grid-template-columns: minmax(170px, .75fr) minmax(220px, 1fr) minmax(190px, .85fr); gap: 28px; padding: 20px; align-items: center; }
@@ -122,10 +108,10 @@ p.comparison-strip { display: block; }
 }
 @media (max-width: 1100px) {
   .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .overview-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 700px) {
   .metrics { gap: 10px; }
+  .metrics.three { grid-template-columns: 1fr; }
   .metric { padding: 14px; }
   .metric-icon { width: 24px; height: 24px; }
   .metric-icon svg { width: 14px; height: 14px; }
@@ -136,7 +122,6 @@ p.comparison-strip { display: block; }
   .next-step-card > button, .insight-banner > button { width: 100%; }
   .workflow-row, .jobs li { padding-left: 14px; padding-right: 14px; }
   .jobs li .resume-review { margin-left: 0; }
-  .comparison-strip { padding: 12px 14px; }
   .audit-summary-body { grid-template-columns: 1fr; gap: 20px; padding: 16px; }
   .page-visual-body { grid-template-columns: 42px auto; justify-items: start; column-gap: 12px; padding: 14px; }
   .page-visual-icon { grid-row: span 2; margin: 0; }

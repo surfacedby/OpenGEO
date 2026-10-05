@@ -105,7 +105,7 @@ export class Store {
       }
       this.project(input.projectId);
       if (input.kind === 'diagnose' && this.jobs(input.projectId).some(job => job.kind === 'diagnose' && ['queued', 'running'].includes(job.status)))
-        throw new ProviderError('in_progress', 'An improvement plan is already being prepared. Follow its progress in Recent activity.');
+        throw new ProviderError('in_progress', 'An improvement plan is already being prepared. Follow its progress in Opportunities.');
       if (input.kind === 'competitors' && this.jobs(input.projectId).some(job => job.kind === 'competitors' && job.measurementJobId === input.measurementJobId && ['queued', 'running', 'paused'].includes(job.status)))
         throw new ProviderError('in_progress', 'A competitor review is already saved for this check. Resume it or follow its progress.');
       if (input.kind === 'revise' && !this.artifacts<any>(input.projectId, 'content').some((doc) => doc.id === input.contentId))

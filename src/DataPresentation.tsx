@@ -7,13 +7,14 @@ import {
   Link,
   Search,
   CalendarDays,
+  RefreshCw,
 } from "lucide-react";
 import { SiteIcon } from "./SiteIcon";
 import { markdownHtml, markdownSummary } from '../server/markdown';
 import { targetDomain } from './finding-groups';
 import { FileText, ListChecks, Braces } from "lucide-react";
 import type { Job, Observation } from "../server/contracts";
-import { completedMeasurement, measurementTime } from "../server/portable-results";
+import { completedMeasurement, measurementTime, portableJobResult } from "../server/portable-results";
 import type {
   Presentation,
   PromptRow,
@@ -76,7 +77,7 @@ export function MeasurementScope({
         {dateTime(measurementTime(measurement))}
       </span>
       {measurement.status !== "completed" && (
-        <span className="badge">{completedMeasurement(measurement) ? 'Answers ready' : ({ queued: 'Waiting to start', running: 'Collecting answers', paused: 'Paused', failed: 'Needs attention', cancelled: 'Stopped' } as Record<string, string>)[measurement.status] ?? measurement.status}</span>
+        <span className="badge">{completedMeasurement(measurement) ? 'Answers ready' : ({ queued: 'Waiting to start', running: 'Collecting answers', paused: 'Paused', failed: 'Did not finish', cancelled: 'Stopped' } as Record<string, string>)[measurement.status] ?? measurement.status}</span>
       )}
       {missing > 0 && (
         <span className={['queued', 'running', 'paused'].includes(measurement.status) ? '' : 'scope-missing'}>{missing} {['queued', 'running', 'paused'].includes(measurement.status) ? 'answers remaining' : 'answers missing'}</span>
@@ -344,7 +345,7 @@ export function VisibilityChart({
               ? "No completed checks match these settings yet."
               : "Finish the current check to see its comparable history."}
           </p>
-          <span>Previous checks are saved in Measurement history.</span>
+          <span>Earlier checks stay in your check history.</span>
         </div>
       )}
     </section>
@@ -624,6 +625,55 @@ export function PromptTable({
         Rates use collected answers for each question. No data means no
         collected answer.
       </p>
+    </section>
+  );
+}
+
+/**
+ * Every saved check with its own results, newest first. Checks with different questions or answer
+ * settings are labelled so a reader does not compare them as a trend.
+ */
+export function CheckHistory({ jobs, currentId, recheck, note }: {
+  jobs: Job[];
+  currentId?: string;
+  recheck?: { disabled: boolean; start: () => void };
+  note?: string;
+}) {
+  const checks = jobs.flatMap((job) => {
+    const result = ["measure", "recheck"].includes(job.kind) ? portableJobResult(job) : null;
+    return result ? [{ job, result }] : [];
+  });
+  const current = checks.find(({ job }) => job.id === currentId)?.result.comparisonKey;
+  return (
+    <section className="panel analytics-panel">
+      <div className="panel-heading">
+        <h2>Check history</h2>
+        {recheck && <button className="text-button" disabled={recheck.disabled} onClick={recheck.start}>Recheck <RefreshCw size={14} /></button>}
+      </div>
+      {checks.length ? (
+        <div className="table-wrap">
+          <table className="analytics-table check-history responsive-evidence-table">
+            <caption className="visually-hidden">Saved visibility checks, newest first</caption>
+            <thead><tr><th>Check</th><th>Brand mentions</th><th>Website citations</th><th>Answers</th></tr></thead>
+            <tbody>
+              {checks.map(({ job, result }) => (
+                <tr key={job.id} className={job.id === currentId ? "current" : undefined}>
+                  <td>
+                    <span className="check-date"><ProviderIcon provider={job.platform ?? "chat_gpt"} size={14} />{dateTime(measurementTime(job))}</span>
+                    {job.id === currentId ? <small>Shown above</small> : current && result.comparisonKey !== current ? <small>Different questions or settings</small> : null}
+                  </td>
+                  <td data-label="Brand mentions"><RateBar value={result.metrics.mentionRate} /></td>
+                  <td data-label="Website citations"><RateBar value={result.metrics.citationRate} color="teal" /></td>
+                  <td data-label="Answers">{result.metrics.completed} / {result.metrics.requested}{result.metrics.missing > 0 && <small className="scope-missing">{result.metrics.missing} missing</small>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="analytics-empty"><p>No completed checks yet</p><span>Results appear here after your first visibility check.</span></div>
+      )}
+      {note && <p className="chart-note table-note">{note}</p>}
     </section>
   );
 }

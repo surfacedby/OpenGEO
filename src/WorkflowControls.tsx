@@ -4,7 +4,7 @@ import { Select } from "./Select";
 import { FormFeedback, useFormFeedback } from "./FormFeedback";
 import { ProviderIcon, providerOptions, providerLabels } from "./provider-ui";
 import { AnswerCard } from "./DataPresentation";
-import { CalendarClock, Plus, Trash2, Upload, Download } from "lucide-react";
+import { CalendarClock, Check, Plus, Trash2, Upload, Download } from "lucide-react";
 import identity from "../brand/identity.json";
 import { dateTime, shortDate } from "./format";
 import { markdownHtml, htmlDocument } from "../server/markdown";
@@ -219,9 +219,8 @@ export function ContentEditor({
       {protection && <p className="small" role="status">{protection}</p>}
       {content.markdown !== saved && <p className="inline-error" role="alert">The saved draft changed elsewhere. Export your edits, then reopen the draft to review both versions.</p>}
       <div className="button-row">
-        <button
+        {markdown === saved ? <span className="save-state" role="status"><Check size={15} />Saved</span> : <button
           className="primary"
-          disabled={markdown === saved}
           onClick={() =>
             void run(async () => {
               setError(""); try { await api(
@@ -233,8 +232,8 @@ export function ContentEditor({
             })
           }
         >
-          {markdown === saved ? "Saved" : "Save draft"}
-        </button>
+          Save draft
+        </button>}
         <button
           className="secondary"
           onClick={() => download("opengeo-content.md", markdown)}

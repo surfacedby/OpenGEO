@@ -57,7 +57,7 @@ try {
   await page.keyboard.press("Escape");
   assert.equal(await dialog.count(), 1);
   release();
-  await dialog.getByText("The workspace did not confirm this run. Check Recent activity or retry with the same inputs.", { exact: true }).waitFor();
+  await dialog.getByText("The workspace did not confirm this run. If it started, it appears as in progress on this page; otherwise retry with the same inputs.", { exact: true }).waitFor();
   assert.equal(await dialog.getByRole("button", { name: "Start visibility check", exact: true }).isEnabled(), true);
   assert.equal(await dialog.getByLabel("Approved run budget (USD)").inputValue(), "0.20");
   assert.equal(runtime.store.jobs().length, 0);

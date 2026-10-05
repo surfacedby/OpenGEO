@@ -1,0 +1,11 @@
+[
+  {
+    "advisory": "GHSA-ch52-4w7c-c8xp",
+    "package": "http-cache-semantics",
+    "version": "4.2.0",
+    "integrity": "sha512-dTxcvPXqPvXBQpq5dUr6mEMJX4oIEFv6bwom3FDwKRDsuIjjJGANqhBuoAn9c1RQJIdAKav33ED65E2ys+87QQ==",
+    "dependents": ["node_modules/cacheable-request"],
+    "requiresUnsetDownloadCache": true,
+    "reason": "Reached only through electron-builder's Electron downloader (app-builder-lib -> @electron/get 3 -> got 11 -> cacheable-request). got creates its cacheable-request client only when a cache option is supplied; neither app-builder-lib nor this project's build configuration supplies one, so the max-stale code never runs. The package is build tooling, absent from the desktop app and the Docker image. Released 4.3.0 does not change max-stale handling, and overriding @electron/get to 5 under electron-builder 26 drops its download timeout, proxy agent and server-error retries. Revisit when a stable electron-builder release depends on @electron/get 5."
+  }
+]

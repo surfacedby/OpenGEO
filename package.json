@@ -22,7 +22,8 @@
     "check:public": "node scripts/public-surface.mjs",
     "audit:release": "node scripts/public-surface.mjs && node scripts/release-audit.mjs",
     "audit:source": "node scripts/public-surface.mjs && node scripts/release-audit.mjs --source",
-    "audit:canaries": "node scripts/scanner-canaries.mjs"
+    "audit:canaries": "node scripts/scanner-canaries.mjs",
+    "audit:deps": "node scripts/dependency-audit.mjs"
   },
   "dependencies": {
     "@fastify/static": "^10.1.5",

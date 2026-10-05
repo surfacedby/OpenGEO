@@ -52,18 +52,7 @@
 .opportunity-preview strong { color: var(--ink); font-weight: 600; font-size: 13px; }
 .opportunity-preview small { font-size: 12px; }
 .opportunity-context { display: grid; gap: 2px; margin: -6px 0 14px; }
-.opportunity-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
-.opportunity-summary > div { display: grid; grid-template-columns: 34px 1fr; align-items: center; gap: 0 12px; border: 1px solid var(--border); background: var(--surface); padding: 14px 16px; border-radius: var(--radius); box-shadow: var(--shadow); }
-.opportunity-summary svg { grid-row: span 2; box-sizing: content-box; padding: 7px; border-radius: var(--radius-md); color: var(--primary-text); background: var(--primary-50); width: 18px; height: 18px; }
-.opportunity-summary > div:nth-child(2) svg { color: var(--warning); background: var(--warning-50); }
-.opportunity-summary > div:nth-child(3) svg { color: var(--success); background: var(--success-50); }
-.opportunity-summary strong { color: var(--ink); font-size: 22px; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; }
-.opportunity-summary span { color: var(--muted); font-size: 12px; }
 @media (max-width: 700px) {
-  .opportunity-summary { gap: 8px; }
-  .opportunity-summary > div { grid-template-columns: 1fr; padding: 12px; gap: 6px; }
-  .opportunity-summary svg { grid-row: auto; }
-  .opportunity-summary strong { font-size: 20px; }
   .opportunity-expand { display: none; }
   .opportunity-symbol { width: 30px; height: 30px; }
   .improvement-toolbar { padding: 10px 14px; }

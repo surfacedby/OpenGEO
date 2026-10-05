@@ -33,9 +33,17 @@ export function Findings({ findings, projectId, run, compact = false, mode = 'op
     if (!focusedFinding) return;
     setStatus('all'); setQuery(''); setType('all');
   }, [focusedFinding]);
+  const statusCounts = {
+    active: findingGroups(findings.filter(finding => finding.status !== 'done')).length,
+    doing: findingGroups(findings.filter(finding => finding.status === 'doing')).length,
+    done: findingGroups(findings.filter(finding => finding.status === 'done')).length,
+    all: findingGroups(findings).length,
+  };
+  // Type and text filters only earn their place once the list is too long to scan.
+  const detailedFilters = statusCounts.all > 6;
   const shown = findings.filter(finding => (compact ? finding.status !== 'done' : status === 'all' || (status === 'active' ? finding.status !== 'done' : finding.status === status))
-    && (type === 'all' || finding.opportunity?.type === type)
-    && (finding.title + ' ' + finding.description + ' ' + (finding.targetUrl ?? '')).toLowerCase().includes(query.trim().toLowerCase()));
+    && (!detailedFilters || type === 'all' || finding.opportunity?.type === type)
+    && (!detailedFilters || (finding.title + ' ' + finding.description + ' ' + (finding.targetUrl ?? '')).toLowerCase().includes(query.trim().toLowerCase())));
   const groups = findingGroups(shown);
   useEffect(() => {
     if (!focusedFinding) return;
@@ -53,10 +61,10 @@ export function Findings({ findings, projectId, run, compact = false, mode = 'op
   return <div className="improvement-list" ref={root}>
     {!compact && findings.length > 0 && <div className="improvement-toolbar">
       <div className="segmented-control" role="group" aria-label="Filter improvements">
-        {[['active', 'Unfinished'], ['doing', 'In progress'], ['done', 'Done'], ['all', 'All']].map(([value, label]) => <button key={value} aria-pressed={status === value} onClick={() => setStatus(value)}>{value === 'done' && <Check size={14} />}{label}</button>)}
+        {([['active', 'To do'], ['doing', 'In progress'], ['done', 'Done'], ['all', 'All']] as const).map(([value, label]) => <button key={value} aria-pressed={status === value} onClick={() => setStatus(value)}>{value === 'done' && <Check size={14} />}{label}<span>{statusCounts[value]}</span></button>)}
       </div>
-      {mode !== 'audit' && findings.some(item => item.opportunity) && <Select label="Kind of opportunity" compact searchable={false} value={type} onChange={setType} options={[{ value: 'all', label: 'All opportunities' }, { value: 'page_update', label: 'Improve a page' }, { value: 'new_content', label: 'Create new content' }, { value: 'site_change', label: 'Website changes' }]} />}
-      <label className="search"><Search size={15} /><input aria-label="Search improvements" placeholder="Find an improvement or page" value={query} onChange={event => setQuery(event.target.value)} /></label>
+      {detailedFilters && mode !== 'audit' && findings.some(item => item.opportunity) && <Select label="Kind of opportunity" compact searchable={false} value={type} onChange={setType} options={[{ value: 'all', label: 'All opportunities' }, { value: 'page_update', label: 'Improve a page' }, { value: 'new_content', label: 'Create new content' }, { value: 'site_change', label: 'Website changes' }]} />}
+      {detailedFilters && <label className="search"><Search size={15} /><input aria-label="Search improvements" placeholder="Find an improvement or page" value={query} onChange={event => setQuery(event.target.value)} /></label>}
     </div>}
     {groups.length ? groups.map(group => <details className={'improvement-group ' + mode} key={group.key}>
       <summary><span className={'opportunity-symbol ' + group.priority}>{mode === 'audit' ? <ScanSearch size={18} /> : group.findings[0].opportunity?.type === 'new_content' ? <BookOpen size={18} /> : group.findings[0].opportunity?.type === 'site_change' ? <Wrench size={18} /> : <FilePenLine size={18} />}</span><span className="opportunity-heading"><strong>{group.title}</strong>{mode !== 'audit' && <span className="opportunity-description">{group.findings[0].opportunity?.benefit ?? group.findings[0].description}</span>}<span className="opportunity-meta"><span className={'badge ' + group.priority}>{group.priority === 'high' ? 'High priority' : group.priority === 'medium' ? 'Worth reviewing' : 'Optional'}</span><span className="opportunity-kind">{group.findings[0].opportunity?.type === 'new_content' ? 'Create new content' : group.findings[0].opportunity?.type === 'site_change' ? 'Website change' : 'Improve existing page'}</span>{group.findings.length > 1 ? <span>{group.findings.length} related pages</span> : <span className={'opportunity-page' + (group.findings[0].opportunity?.type === 'new_content' ? ' planned' : '')} title={group.findings[0].targetUrl}>{group.findings[0].opportunity?.type === 'new_content' ? <><BookOpen size={13} />{group.findings[0].opportunity.pageTitle}</> : <>{targetDomain(group.findings[0].targetUrl) && <SiteIcon projectId={projectId} domain={targetDomain(group.findings[0].targetUrl)!} size={16} />}{targetLabel(group.findings[0].targetUrl)}</>}</span>}</span></span><span className="opportunity-expand">View plan <ChevronDown size={16} /></span></summary>

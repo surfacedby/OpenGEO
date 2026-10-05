@@ -21,7 +21,7 @@ export async function api<T = any>(
 ): Promise<T> {
   const repeatable = ["/jobs", "/schedules"].includes(path) && method === "POST";
   const unavailable = repeatable
-    ? path === "/jobs" ? "The workspace did not confirm this run. Check Recent activity or retry with the same inputs."
+    ? path === "/jobs" ? "The workspace did not confirm this run. If it started, it appears as in progress on this page; otherwise retry with the same inputs."
       : "The workspace did not confirm this schedule. Check your schedules or retry with the same settings."
     : "Your local workspace could not be reached. Keep the application running and try again.";
   let response: Response;

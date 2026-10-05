@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import { ArrowUpRight, CalendarClock, Check, Database, FilePenLine, KeyRound, Link, Plus, Settings, ShieldCheck, X, LogOut, RefreshCw } from "lucide-react";
+import { ArrowUpRight, CalendarClock, Check, Database, KeyRound, Link, Plus, Settings, ShieldCheck, X, LogOut, RefreshCw } from "lucide-react";
 import { api } from "./api";
 import { BackupControls, ScheduleControls } from "./WorkflowControls";
 import { Select } from "./Select";

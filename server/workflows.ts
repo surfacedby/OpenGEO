@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { withoutEvidenceList } from './finding-text.js';
 import { Store } from "./storage.js";
-import { Providers, safeCitations, type Completion } from "./providers.js";
+import { Providers, safeCitations } from "./providers.js";
 import { crawl, auditFindings } from "./audit.js";
 import { renderedFetch } from "./render.js";
 import { crawlFetch } from "./network.js";
