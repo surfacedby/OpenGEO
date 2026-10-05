@@ -33,7 +33,7 @@ jobs:
       - run: npm run check:public
       - run: npm test
       - run: node scripts/clean-build.mjs
-      - run: npm audit --omit=dev
+      - run: npm run audit:deps
 
   desktop:
     if: github.event_name == 'workflow_dispatch'
