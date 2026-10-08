@@ -49,6 +49,7 @@ import { ProviderIcon, providerLabels, providerOptions, providerOrder } from "./
 import { AnswerCard, AnswerDistribution, AuditEssentials, CheckHistory, CitationComparison, MeasurementScope, PromptTable, SourcesTable, VisibilityChart } from "./DataPresentation";
 import { SiteIcon } from "./SiteIcon";
 import { AuditSummary } from "./AuditSummary";
+import { AuditCoverageDetails } from "./AuditCoverageDetails";
 import { Findings } from "./Findings";
 import { findingGroups, opportunityFindings, auditFindings, targetDomain, targetLabel } from "./finding-groups";
 import { ContentWorkspace } from "./ContentWorkspace";
@@ -486,14 +487,7 @@ export function App() {
                     <h2>Audited pages</h2>
                     <span>{w.pages.length} {w.pages.length === 1 ? "page" : "pages"}</span>
                   </div>
-                  {w.auditCoverage && <div className="panel-padding audit-coverage"><p>{w.auditCoverage.fetched} {w.auditCoverage.fetched === 1 ? "page inspected" : "pages inspected"} from {w.auditCoverage.attempted} {w.auditCoverage.attempted === 1 ? "address checked" : "addresses checked"}.</p>
-                    {w.auditCoverage.truncated && <p role="status">The page limit was reached. {w.auditCoverage.remainingDiscovered} discovered addresses remain. Increase the limit in a new audit to inspect more.</p>}
-                    {(w.auditCoverage.failed.length > 0 || w.auditCoverage.excludedByRobots.length > 0 || w.auditCoverage.skippedNonHtml.length > 0) && <details><summary>Inspect coverage gaps</summary>
-                      {w.auditCoverage.failed.map((entry) => <p key={entry.url}><a href={entry.url} target="_blank" rel="noreferrer">{entry.url}</a>: {entry.reason}</p>)}
-                      {w.auditCoverage.excludedByRobots.map((url) => <p key={url}>Excluded by robots.txt: {url}</p>)}
-                      {w.auditCoverage.skippedNonHtml.map((url) => <p key={url}>Not an HTML page: {url}</p>)}
-                    </details>}
-                  </div>}
+                  {w.auditCoverage && <AuditCoverageDetails coverage={w.auditCoverage} />}
                   {w.pages.length ? (
                     <div className="table-wrap">
                       <table>
