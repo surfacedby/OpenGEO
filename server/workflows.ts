@@ -19,6 +19,8 @@ import { discoverQuestions, discoverCompetitors } from "./discovery.js";
 import { consoleContent } from "./console-content.js";
 import { consoleCompetitors } from "./console-competitors.js";
 import { consoleOpportunities } from "./console-opportunities.js";
+import { consoleMeasurement, collectCancelledMeasurement } from "./console-measurement.js";
+import { consoleCapabilities } from "./console-capabilities.js";
 import { cancelConsoleManaged, managedStep } from "./console-managed.js";
 import {
   ProviderError,
@@ -124,7 +126,16 @@ export class Runner {
       await this.active.done;
     }
     if (job.provider === 'console') {
-      if (await cancelConsoleManaged(this, job)) return this.store.job(id);
+      if (await cancelConsoleManaged(this, job)) {
+        if (["measure", "recheck"].includes(job.kind)) {
+          try {
+            const snapshot = this.store.step(job.id, "project");
+            await collectCancelledMeasurement(this, job, snapshot?.body ? JSON.parse(snapshot.body) : this.store.project(job.projectId));
+          }
+          catch { this.store.updateJob(id, { error: "cancel_remote", progress: "Cancelled. Resume cancellation later to collect the saved answers." }); }
+        }
+        return this.store.job(id);
+      }
       const saved = this.store.step(id, 'console-scan');
       if (saved?.state === 'done') {
         const scan = JSON.parse(saved.body!);
@@ -851,6 +862,15 @@ export class Runner {
     });
   }
   async consoleMeasure(job: Job, project: Project, signal: AbortSignal) {
+    const savedProfile = this.store.step(job.id, "console-measurement-profile");
+    const profile = savedProfile?.body ? JSON.parse(savedProfile.body) : this.store.step(job.id, "console-scan") ? "full_check"
+      : await this.once(job, "console-measurement-profile", async () => {
+        const capability = consoleCapabilities((await this.providers.console("/capabilities", undefined, undefined, signal)).data);
+        const platform = job.platform === "chat_gpt" ? "chatgpt" : job.platform;
+        return capability.operations.includes("measurement") && capability.selected_question_platforms.includes(platform as "chatgpt" | "gemini")
+          ? "selected_questions" : "full_check";
+      });
+    if (profile === "selected_questions") return consoleMeasurement(this, job, project, signal);
     const platform = job.platform === 'chat_gpt' ? 'chatgpt' : job.platform;
     if (this.store.step(job.id, 'console-scan')?.state !== 'done') {
       const capability = await this.providers.console('/capabilities', undefined, undefined, signal);

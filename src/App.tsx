@@ -989,6 +989,7 @@ function JobDialog({
     [platform, setPlatform] = useState(baseline?.platform ?? "chat_gpt"),
     [webSearch, setWebSearch] = useState(baseline?.webSearch ?? true),
     [consolePlatforms, setConsolePlatforms] = useState<{ key: string; name: string; enabled: boolean }[]>([]),
+    [selectedQuestionPlatforms, setSelectedQuestionPlatforms] = useState<string[]>([]),
     [loading, setLoading] = useState(false),
     [budget, setBudget] = useState(0),
     [contentMode, setContentMode] = useState<'article' | 'page_update'>(finding && finding.opportunity?.type !== 'new_content' ? 'page_update' : 'article'),
@@ -1009,6 +1010,7 @@ function JobDialog({
     setModels([]);
     setModel("");
     setConsolePlatforms([]);
+    setSelectedQuestionPlatforms([]);
     setDiscoveryError("");
     setLoading(false);
     if (kind === "audit" || !connected[provider])
@@ -1025,6 +1027,7 @@ function JobDialog({
         }
         const enabled = (capability.platforms ?? []).filter((p: any) => p.enabled === true);
         setConsolePlatforms(enabled);
+        setSelectedQuestionPlatforms(capability.operations?.includes('measurement') ? capability.selected_question_platforms ?? [] : []);
         if (!enabled.some((p: any) => p.key === platform)) setPlatform(baseline ? '' : enabled[0]?.key ?? '');
         if (!enabled.length) setDiscoveryError('No answer platforms are available on this connection.');
       }).catch((e) => { if (!stopped) setDiscoveryError(e.message); }).finally(() => { if (!stopped) setLoading(false); });
@@ -1150,6 +1153,11 @@ function JobDialog({
                     ? "Collect visibility evidence for local analysis. Provider charges apply."
                     : "Checks answers from your chosen model. OpenRouter usage charges apply."}
             </p>
+            {provider === 'console' && ['measure', 'recheck'].includes(kind) && !loading && !discoveryError && <p className="small">
+              {selectedQuestionPlatforms.includes(platform === 'chat_gpt' ? 'chatgpt' : platform)
+                ? 'Checks your selected questions with fresh answers. Review the estimate before any paid work starts.'
+                : 'Runs a full managed check using your questions. The displayed estimate covers the full check.'}
+            </p>}
             {!connected[provider] && (
               <p role="alert">{baseline ? 'The previous connection is unavailable. Reconnect it in Settings or choose another connection.' : 'Connect this provider in Settings first.'}</p>
             )}

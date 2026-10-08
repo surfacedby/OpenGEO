@@ -24,7 +24,7 @@ test("Console check totals and public citations survive project edits, dashboard
   // Supplier HTTP fixtures exercise the production adapter, queue, projections and SQLite writes.
   globalThis.fetch = (async (url, init) => {
     const path = new URL(String(url)).pathname.replace("/api/v1/console", "");
-    if (path === "/capabilities") return json({ platforms: [{ key: "chatgpt", enabled: true }] });
+    if (path === "/capabilities") return json({ platforms: [{ key: "chatgpt", name: "ChatGPT", enabled: true }] });
     if (path === "/domains") return json([{ id: "fixture-domain", domain: "example.com" }]);
     if (path === "/domains/fixture-domain/brand") return json({ domain_id: "fixture-domain" });
     if (path === "/scans/preview") return json({ credits_required: 2, query_count: previewCount });

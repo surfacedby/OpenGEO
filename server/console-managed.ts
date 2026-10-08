@@ -20,6 +20,15 @@ const recoveredJob = managedJob.extend({ estimate_id: z.string().uuid(), request
 const submission = z.object({ estimate_id: z.string().uuid(), request_key: z.string().uuid(), approved_credits: credits.positive() });
 const recoveryPage = z.object({ data: z.array(recoveredJob).max(1), meta: z.object({ has_more: z.literal(false) }) });
 
+/** Result reads must repeat the settled receipt, not replace it with a different balanced charge. */
+export function validateManagedResult(remote: z.infer<typeof managedJob>, result: z.infer<typeof managedJob>) {
+  if (result.id !== remote.id || result.status !== remote.status || result.estimated_credits !== remote.estimated_credits ||
+      result.approved_credits !== remote.approved_credits || !remote.receipt || !result.receipt ||
+      result.receipt.status !== remote.receipt.status || result.receipt.charged_credits !== remote.receipt.charged_credits ||
+      result.receipt.refunded_credits !== remote.receipt.refunded_credits)
+    throw new ProviderError("invalid_response", "The result does not match this run's final charge. Resume to check the saved run; no replacement will be submitted.");
+}
+
 const contracts = {
   content: { prefix: "console-content", collection: "/content/jobs", reserve: "/content/jobs", result: "/content/jobs",
     quote: (domain: string) => "/domains/" + domain + "/content/estimates/content", label: "draft" },
@@ -29,10 +38,12 @@ const contracts = {
     quote: (domain: string) => "/domains/" + domain + "/competitors/estimate", label: "website role review" },
   local_opportunities: { prefix: "console-opportunities", collection: "/jobs", reserve: "/opportunities/jobs", result: "/opportunities/jobs",
     quote: (domain: string) => "/domains/" + domain + "/opportunities/estimate", label: "recommendations" },
+  measurement: { prefix: "console-measurement", collection: "/jobs", reserve: "/measurement/jobs", result: "/measurement/jobs",
+    quote: (domain: string) => "/domains/" + domain + "/measurement/estimate", label: "visibility check" },
 } as const;
 type Operation = keyof typeof contracts;
 export function managedOperation(job: Job): Operation {
-  return job.kind === "discover" ? "questions" : job.kind === "competitors" ? "competitors" : job.kind === "diagnose" ? "local_opportunities" : "content";
+  return ["measure", "recheck"].includes(job.kind) ? "measurement" : job.kind === "discover" ? "questions" : job.kind === "competitors" ? "competitors" : job.kind === "diagnose" ? "local_opportunities" : "content";
 }
 export function managedStep(job: Job, step: string) {
   return contracts[managedOperation(job)].prefix + "-" + step;
@@ -94,8 +105,10 @@ export async function cancelConsoleManaged(runner: Runner, job: Job) {
     const cancelled = managedJob.parse((await runner.providers.console(contracts[managedOperation(job)].collection + "/" + remote.id + "/cancel", {}, job.id + ":cancel", AbortSignal.timeout(20000))).data);
     if (cancelled.id !== remote.id) throw new Error("Unrelated cancellation receipt");
     recordReceipt(runner, job, cancelled, { estimated: remote.estimated_credits, approved: remote.approved_credits });
+    runner.store.setStep(job.id, managedStep(job, "job"), "done", cancelled);
     runner.store.updateJob(job.id, { error: cancelled.receipt ? null : "cancel_remote", progress: cancelled.receipt
-      ? "Cancelled. Completed work is charged and unused credits returned."
+      ? cancelled.status === "completed" ? "Work finished before cancellation. Its final charge is saved."
+        : "Cancelled. Completed work is charged and unused credits returned."
       : "Cancellation requested. Waiting for the final charge. Retry cancellation to check again." });
   } catch {
     runner.store.updateJob(job.id, { error: "cancel_remote", progress: "Stopped locally. Cancellation was not confirmed. Check SurfacedBy before starting another run." });
@@ -106,7 +119,7 @@ export async function cancelConsoleManaged(runner: Runner, job: Job) {
 /** A quote freezes inputs; every interface uses the same approval and recovery path. */
 export async function consoleManaged<I, O extends { job: z.infer<typeof managedJob> }>(
   runner: Runner, job: Job, project: Project, signal: AbortSignal,
-  prepareInput: () => I | Promise<I>, resultSchema: z.ZodType<O>,
+  prepareInput: () => I | Promise<I>, resultSchema: z.ZodType<O>, collectTerminal = false,
 ) {
   const operation = managedOperation(job), contract = contracts[operation], step = (name: string) => managedStep(job, name);
   await recoverSubmission(runner, job, signal);
@@ -167,14 +180,13 @@ export async function consoleManaged<I, O extends { job: z.infer<typeof managedJ
     await delay(5000, undefined, { signal });
   }
   if (!remote.receipt) throw new ProviderError("waiting", "Your run is still being prepared. Resume later to collect it.");
-  if (remote.receipt.status !== "completed")
+  if (remote.receipt.status !== "completed" && !collectTerminal)
     throw new ProviderError("provider", "This run did not complete. Its final charge is saved. Review it in SurfacedBy.");
   const parsed = resultSchema.safeParse((await runner.providers.console(contract.result + "/" + remoteId + "/results", undefined, undefined, signal)).data);
   if (!parsed.success)
     throw new ProviderError("invalid_response", "SurfacedBy returned an incomplete result. Resume to check this saved run again; no replacement will be submitted.");
   const output = parsed.data;
-  if (output.job.id !== remoteId || output.job.receipt?.status !== "completed")
-    throw new ProviderError("invalid_response", "SurfacedBy did not return a completed result. The saved request will not be submitted again.");
+  validateManagedResult(remote, output.job);
   recordReceipt(runner, job, output.job, expected);
   return { output, input, capability };
 }

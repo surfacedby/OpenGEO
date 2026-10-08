@@ -29,7 +29,7 @@ import {
 } from "./provider-ui";
 import "./analytics.css";
 
-import { percent, shortDate as date, dateTime } from "./format";
+import { percent, shortDate as date, dateTime, usd } from "./format";
 function languageName(locale: string) {
   try {
     return new Intl.DisplayNames(["en"], { type: "language" }).of(locale);
@@ -80,7 +80,7 @@ export function MeasurementScope({
         <span className="badge">{completedMeasurement(measurement) ? 'Answers ready' : ({ queued: 'Waiting to start', running: 'Collecting answers', paused: 'Paused', failed: 'Did not finish', cancelled: 'Stopped' } as Record<string, string>)[measurement.status] ?? measurement.status}</span>
       )}
       {missing > 0 && (
-        <span className={['queued', 'running', 'paused'].includes(measurement.status) ? '' : 'scope-missing'}>{missing} {['queued', 'running', 'paused'].includes(measurement.status) ? 'answers remaining' : 'answers missing'}</span>
+        <span className={['queued', 'running', 'paused'].includes(measurement.status) ? '' : 'scope-missing'}>{missing} {missing === 1 ? 'answer' : 'answers'} {['queued', 'running', 'paused'].includes(measurement.status) ? 'remaining' : 'missing'}</span>
       )}
       <details>
         <summary>
@@ -97,6 +97,9 @@ export function MeasurementScope({
           {collection.length > 0 && <p>Collected through: {collection.join(" / ")}</p>}
           {latest?.locale && (
             <p>Answer language: {languageName(latest.locale)}</p>
+          )}
+          {measurement.provider === "console" && measurement.costBasis === "reported" && (
+            <p>Final charge: {usd(measurement.spentUsd)}</p>
           )}
           <p>
             Rates use collected answers. Missing answers are not counted as

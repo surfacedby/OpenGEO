@@ -7,8 +7,9 @@ const publicCapabilities = z.object({
   operations: z.array(z.string().max(80)).max(40).default([]),
   content_available: z.boolean().default(false),
   models: z.array(z.object({ id: z.string().min(1).max(150), operations: z.array(z.string().max(80)).max(40) })).max(200).default([]),
+  selected_question_platforms: z.array(z.enum(["chatgpt", "gemini"])).max(2).default([]),
 });
-const operations = new Set(["full_check", "observations", "diagnoses", "opportunities", "brand_configuration", "competitor_configuration", "content", "research", "questions", "competitors", "local_opportunities"]);
+const operations = new Set(["full_check", "observations", "diagnoses", "opportunities", "brand_configuration", "competitor_configuration", "content", "research", "questions", "competitors", "local_opportunities", "measurement"]);
 /** Only fields used by connection setup cross the backend boundary, even if a provider adds private diagnostics. */
 export function consoleCapabilities(value: unknown) {
   const result = publicCapabilities.safeParse(value);
