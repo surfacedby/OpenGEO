@@ -7,6 +7,9 @@ export async function renderedFetch(
   allowed?: CrawlPermission,
 ) {
   publicUrl(url);
+  const initial = await crawlFetch(url, signal, allowed);
+  if (!initial.contentType.includes("text/html")) return initial;
+  const navigationResponses = new Map([[url, initial], [initial.url, initial]]);
   const browser = await chromium.launch({ headless: true });
   try {
     const context = await browser.newContext({
@@ -16,7 +19,10 @@ export async function renderedFetch(
     await context.route("**/*", async (route) => {
       try {
         const navigation = route.request().isNavigationRequest();
-        const response = await crawlFetch(route.request().url(), signal, navigation ? allowed : undefined);
+        const requested = route.request().url();
+        const cached = navigation ? navigationResponses.get(requested) : undefined;
+        if (cached) navigationResponses.delete(requested);
+        const response = cached ?? await crawlFetch(requested, signal, navigation ? allowed : undefined);
         if (navigation && response.url !== route.request().url()) {
           await route.fulfill({ status: 302, headers: { location: response.url } });
           return;
