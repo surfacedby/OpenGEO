@@ -426,3 +426,20 @@ test("a business cited on several of its own hosts is offered once under its par
   assert.equal(sites[0].reason, "Offers API monitoring.", "a reference cannot erase the competing explanation");
   assert.deepEqual(new Set(sites[0].observationIds), new Set(["a1", "a2", "a3"]));
 });
+
+test("typographic name variants retain cited roles without accepting unnamed or uncited businesses", () => {
+  const observations = [
+    { id: 'named', answer: "Cedar\u2019s offers meeting rooms.", citations: [{ url: 'https://cedar.example/rooms' }] },
+    { id: 'reference', answer: 'See the booking guide.', citations: [{ url: 'https://guide.example/', title: "Cedar\u02bcs booking guide" }] },
+    { id: 'unnamed', answer: 'Another venue offers rooms.', citations: [{ url: 'https://absent.example/' }] },
+    { id: 'uncited', answer: "Cedar's offers rooms.", citations: [{ url: 'https://other.example/' }] },
+  ] as unknown as Observation[];
+  const sites = confirmedWebsites({ domain: 'example.com' }, observations, [
+    { name: "Cedar's", domain: 'cedar.example', role: 'competitor', observationIds: ['named', 'uncited'] },
+    { name: "Cedar's booking guide", domain: 'guide.example', role: 'reference', observationIds: ['reference'] },
+    { name: "Cedar's", domain: 'absent.example', role: 'competitor', observationIds: ['unnamed'] },
+  ] as any);
+  assert.deepEqual(sites.map(site => [site.domain, site.role, site.observationIds]), [
+    ['cedar.example', 'competitor', ['named']], ['guide.example', 'reference', ['reference']],
+  ]);
+});

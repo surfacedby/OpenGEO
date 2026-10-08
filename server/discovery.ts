@@ -144,13 +144,15 @@ export async function discoverCompetitors(runner: Runner, job: Job, project: Pro
 /** Cited evidence determines eligible roles; a reference cannot erase a competing-offering explanation. */
 export function confirmedWebsites(project: Pick<Project, 'domain'>, observations: Observation[], candidates: z.infer<typeof suggestedCompetitors>['competitors']) {
   const confirmed = new Map<string, DiscoveredWebsite>();
+  const nameText = (value: string) => value.normalize('NFKC').toLocaleLowerCase().replace(/[\u2018\u2019\u02bc]/g, "'").replace(/\s+/g, ' ').trim();
   for (const candidate of candidates) {
     let domain: string;
     try { domain = publicUrl(candidate.domain).hostname.replace(/^www\./, ""); } catch { continue; }
     if (domain === project.domain || domain.endsWith("." + project.domain)) continue;
-    const named = (answer: typeof observations[number]) => answer.answer.toLocaleLowerCase().includes(candidate.name.toLocaleLowerCase());
-    const referenceName = (answer: typeof observations[number]) => candidate.name.toLocaleLowerCase() === domain || answer.citations.some(citation => {
-      try { return publicUrl(citation.url).hostname.replace(/^www\./, '') === domain && citation.title?.toLocaleLowerCase().includes(candidate.name.toLocaleLowerCase()); } catch { return false; }
+    const name = nameText(candidate.name);
+    const named = (answer: typeof observations[number]) => nameText(answer.answer).includes(name);
+    const referenceName = (answer: typeof observations[number]) => name === domain || answer.citations.some(citation => {
+      try { return publicUrl(citation.url).hostname.replace(/^www\./, '') === domain && nameText(citation.title ?? '').includes(name); } catch { return false; }
     });
     const evidence = observations.filter(answer => candidate.observationIds.includes(answer.id) && (named(answer) || (candidate.role === 'reference' && referenceName(answer))) && answer.citations.some(citation => {
       try { const host = publicUrl(citation.url).hostname.replace(/^www\./, ""); return host === domain || host.endsWith("." + domain); } catch { return false; }
