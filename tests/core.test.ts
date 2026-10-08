@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync,readFileSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
 import {Store} from '../server/storage.js';
 import {Vault} from '../server/vault.js';
 import {createApp} from '../server/app.js';
@@ -25,6 +28,31 @@ test('crawling blocks private networks and embedded credentials, including redir
 test('a paused scheduled run blocks new work across month boundaries until resolved',()=>{const f=fixture();try{const p=f.store.createProject(input),s=new Scheduler(f.store);const config=s.add({job:{projectId:p.id,kind:'measure',provider:'chatgpt',maxCostUsd:0},frequency:'daily',hour:9,timezone:'UTC',monthlyBudgetUsd:0});f.store.set('schedules',[{...config,nextAt:'2026-09-30T09:00:00.000Z'}]);s.tick(new Date('2026-09-30T10:00:00Z'));const first=f.store.jobs()[0];f.store.updateJob(first.id,{status:'paused'});s.tick(new Date('2026-10-01T10:00:00Z'));assert.equal(f.store.jobs().length,1);assert.match(s.list()[0].lastError??'',/previous scheduled run/);f.store.updateJob(first.id,{status:'cancelled'});s.tick(new Date('2026-10-02T10:00:00Z'));assert.equal(f.store.jobs().length,2);}finally{f.close()}});
 test('provider annotations are citations; missing checks never depress measured rates',()=>{const result=parseDfs({status_code:20000,tasks:[{status_code:20000,cost:.05,result:[{model_name:'test-model',items:[{sections:[{type:'text',text:'Useful examples.',annotations:[{url:'https://example.com',title:'Example',tracking_id:'private'}]}]}]}]}]});assert.deepEqual(result.citations,[{url:'https://example.com',title:'Example'}]);assert.equal(result.costUsd,.05);const project={...input,id:'p',createdAt:''};assert.equal(presence(project,'Not Examplesque.',[]).mentioned,false);const metric=summarize([{...presence(project,'Example',['https://example.com']),citations:result.citations}as any],2);assert.equal(metric.mentionRate,100);assert.equal(metric.missing,1);});
 test('a second runtime cannot interrupt the owner of a database',()=>{const dir=mkdtempSync(join(tmpdir(),'opengeo-lock-'));try{const release=lockRuntime(dir);assert.throws(()=>lockRuntime(dir),/already running/);release();lockRuntime(dir)();}finally{rmSync(dir,{recursive:true,force:true})}});
+
+test('a crashed runtime releases ownership without relying on a saved process number',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'opengeo-lock-crash-'));
+  const module=pathToFileURL(join(process.cwd(),'server/runtime-lock.ts')).href;
+  const child=spawn(process.execPath,['--import','tsx','--input-type=module','-e',
+    `import {lockRuntime} from ${JSON.stringify(module)}; const release=lockRuntime(process.env.OPENGEO_LOCK_TEST_DIR); process.on('SIGTERM',()=>{release();process.exit();}); process.stdout.write('ready'); setInterval(()=>{},1000);`],
+    {env:{...process.env,OPENGEO_LOCK_TEST_DIR:dir},stdio:['ignore','pipe','pipe']});
+  let release:(()=>void)|undefined, timer:ReturnType<typeof setTimeout>|undefined;
+  try {
+    const ready=once(child.stdout,'data'), exited=once(child,'close');
+    const signal=await Promise.race([ready.then(([data])=>String(data)),exited.then(()=>{throw new Error('Lock owner exited before readiness');}),
+      new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('Lock owner did not become ready')),10000);})]);
+    clearTimeout(timer); assert.equal(signal,'ready');
+    assert.throws(()=>{const unexpected=lockRuntime(dir);unexpected();},/already running/);
+    child.kill('SIGKILL'); await exited;
+    writeFileSync(join(dir,'runtime.lock'),String(process.pid));
+    release=lockRuntime(dir);
+    assert.throws(()=>lockRuntime(dir),/already running/);
+    release(); release=lockRuntime(dir);
+  } finally {
+    clearTimeout(timer);
+    if(child.exitCode===null && child.signalCode===null){const exited=once(child,'close');child.kill('SIGKILL');await exited;}
+    release?.(); rmSync(dir,{recursive:true,force:true,maxRetries:3,retryDelay:100});
+  }
+});
 
 test('resuming a scheduled job respects its monthly allowance and preserves other settled charges',()=>{
   const f=fixture();
