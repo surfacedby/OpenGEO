@@ -843,6 +843,7 @@ function Jobs({
             event.preventDefault(); const data = new FormData(event.currentTarget); setResuming(true); setReviewError("");
             void run(async () => { try { await api("/jobs/" + j.id + "/resume", { reviewed: review.reason === "approval" || data.get("reviewed") === "on", ...(data.has("budget") ? { maxCostUsd: Number(data.get("budget")) } : {}) }); setReview(null); } catch (failure) { setReviewError((failure as Error).message); } }).finally(() => setResuming(false));
           }}><h3>{review.reason === "approval" ? "Approve this run" : "Resume this run"}</h3><p>{review.reason === "approval" ? j.progress : review.uncertainRequests ? "A previous request may have completed. Check your provider's activity before allowing another attempt." : j.error === "quota" ? "Resume when your provider's limits allow requests again. Saved results will be kept." : "Saved results will be kept. Resolve the issue shown above before continuing."}</p>
+            {review.reason === "approval" && review.provider === "console" && <p className="hint">Up to {usd(Math.floor(review.maxCostUsd * 10 + 1e-9) / 10)} will be held from your balance. Unused funds are returned when the run ends.</p>}
             {review.uncertainRequests > 0 && <label className="checkbox-field"><input type="checkbox" name="reviewed" required />I reviewed provider activity and approve retrying uncertain requests.</label>}
             {review.reason === "budget" && review.provider !== "chatgpt" && <label>New approved total budget (USD)<input name="budget" type="number" min={Math.max(review.spentUsd, review.maxCostUsd)} max={review.scheduledBudgetCeilingUsd ?? 10000} step="0.01" defaultValue={Math.max(review.spentUsd, review.maxCostUsd)} required /><small>Includes ${review.spentUsd.toFixed(3)} already committed. Increasing this amount approves additional provider spending.</small>{review.scheduledBudgetCeilingUsd !== undefined && <small>Schedule allowance for this run: ${review.scheduledBudgetCeilingUsd.toFixed(2)}.</small>}</label>}
             {reviewError && <p className="inline-error" role="alert">{reviewError}</p>}<div className="button-row"><button className="primary" disabled={resuming}>{resuming ? "Starting..." : review.reason === "approval" ? "Approve and start" : "Resume run"}</button><button type="button" className="secondary" disabled={resuming} onClick={() => setReview(null)}>Keep paused</button></div>
@@ -976,9 +977,9 @@ function JobDialog({
   onStarted: (job: Job) => void;
 }) {
   const choices: Provider[] =
-    ["diagnose", "competitors"].includes(kind)
+    kind === "diagnose"
       ? ["chatgpt", "openrouter"]
-      : kind === "content" || kind === "revise"
+      : ["content", "revise", "competitors"].includes(kind)
         ? ["chatgpt", "console", "openrouter"]
         : ["chatgpt", "console", "dataforseo", "openrouter"];
   const baseline = kind === 'recheck' ? previousMeasurement : null;
@@ -1018,9 +1019,10 @@ function JobDialog({
     if (provider === 'console') {
       void api('/providers/console/capabilities').then((capability) => {
         if (stopped) return;
-        if (kind === "content") {
-          if (!capability.content_available || !capability.operations?.includes("content"))
-            setDiscoveryError("Content is unavailable on this SurfacedBy connection. Choose ChatGPT or OpenRouter.");
+        if (["content", "revise", "competitors"].includes(kind)) {
+          const operation = kind === "competitors" ? "competitors" : "content";
+          if (!capability.operations?.includes(operation) || operation === "content" && !capability.content_available)
+            setDiscoveryError("This task is unavailable on this SurfacedBy connection. Choose ChatGPT or OpenRouter.");
           return;
         }
         const enabled = (capability.platforms ?? []).filter((p: any) => p.enabled === true);
@@ -1154,7 +1156,7 @@ function JobDialog({
               <p role="alert">{baseline ? 'The previous connection is unavailable. Reconnect it in Settings or choose another connection.' : 'Connect this provider in Settings first.'}</p>
             )}
             {baseline && connected[provider] && !loading && !discoveryError && <p className="small" role="status">{provider === baseline.provider && platform === baseline.platform && (provider === 'console' || model === baseline.model) && (provider !== 'chatgpt' || webSearch === baseline.webSearch) ? 'Keeps the previous connection and answer settings. Changes to your questions or website settings start a separate comparison.' : !model && provider !== 'console' ? 'Choose an available model. Different answer settings start a separate comparison.' : 'Different answer settings start a separate comparison.'}</p>}
-            {["dataforseo", "console"].includes(provider) && !['content', 'revise'].includes(kind) && (
+            {["dataforseo", "console"].includes(provider) && ['measure', 'recheck'].includes(kind) && (
               <label>
                 Answer platform
                 <Select label="Answer platform" {...feedback.field("platform")} value={platform} options={(provider === "console" ? consolePlatforms : [{ key: "chat_gpt", name: "ChatGPT" }, { key: "gemini", name: "Gemini" }, { key: "perplexity", name: "Perplexity" }]).map((platform) => ({ value: platform.key, label: platform.name, icon: <ProviderIcon provider={platform.key} size={18} /> }))} onChange={setPlatform} />
@@ -1216,7 +1218,7 @@ function JobDialog({
             submitting ||
             loading ||
             !!discoveryError ||
-            (provider === 'console' && kind !== 'content' && !platform) ||
+            (provider === 'console' && ['measure', 'recheck'].includes(kind) && !platform) ||
             (kind !== "audit" &&
               (!connected[provider] ||
                 (provider !== "console" && !model) ||

@@ -10,6 +10,8 @@ ChatGPT and OpenRouter suggestions use three separate AI passes: establish the w
 
 The first ChatGPT check can suggest competitors from its collected answers. A candidate must be named in an answer and have a matching website citation in that answer. This conservative rule can miss competitors with no cited website; it avoids guessing domains or treating every source as a competitor. Candidates are added to comparisons only after user selection.
 
+When SurfacedBy supports website role review, it receives your selected check's saved answers and citation links, reads the tracked website and cited websites, and returns competing offerings and references with their original answer IDs. This is analysis of client-supplied evidence, not a new visibility measurement or an authority score. The comparison list changes only when you select websites. Availability and supported request sizes are checked before approval; a partial or unrelated result is not published.
+
 Local presence matching uses configured brand names, aliases and the website with Unicode word boundaries. A citation must link to the configured host or a subdomain. Literal matching can confuse generic names; review the answer when recognition is ambiguous. It is not an entity classifier.
 
 Rates use collected answers as their denominator. The requested count and missing count remain visible. A failed request is never converted into an answer with zero mentions. Console presence uses the provider's canonical recognition rather than local reinterpretation.

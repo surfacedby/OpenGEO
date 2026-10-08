@@ -17,6 +17,7 @@ import {
 import { prompts } from "./prompts.js";
 import { discoverQuestions, discoverCompetitors } from "./discovery.js";
 import { consoleContent } from "./console-content.js";
+import { consoleCompetitors } from "./console-competitors.js";
 import { cancelConsoleManaged, managedStep } from "./console-managed.js";
 import {
   ProviderError,
@@ -259,10 +260,11 @@ export class Runner {
       this.store.updateJob(job.id, { progress });
     if (job.kind === "discover") return discoverQuestions(this, job, project, signal);
     if (job.kind === "competitors") {
-      if (!["chatgpt", "openrouter"].includes(job.provider ?? "")) throw new ProviderError("capability", "Choose ChatGPT or OpenRouter to review saved answers.");
+      if (!["chatgpt", "openrouter", "console"].includes(job.provider ?? "")) throw new ProviderError("capability", "Choose a connected analysis provider to review saved answers.");
       const measurement = this.store.job(job.measurementJobId!);
       if (measurement.projectId !== project.id || !completedMeasurement(measurement) || !this.store.observations(project.id, measurement.id).length)
         throw new ProviderError("evidence", "Choose a completed visibility check from this website.");
+      if (job.provider === "console") return consoleCompetitors(this, job, project, signal);
       const model = await this.contentModel(job);
       const websites = await discoverCompetitors(this, job, project, model, signal, measurement.id);
       return { measurementJobId: measurement.id, competitors: websites.filter(site => site.role !== 'reference'), references: websites.filter(site => ['reference', 'both'].includes(site.role ?? '')) };
