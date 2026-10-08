@@ -1,5 +1,5 @@
 import { Store } from "./storage.js";
-import type { PageEvidence } from "./contracts.js";
+import type { PageEvidence, ManagedSourceEvidence } from "./contracts.js";
 import type { PortableContent } from "./import.js";
 import { portableJobResult, completedMeasurement, measurementTime } from "./portable-results.js";
 import { currentFindings } from "./presentation.js";
@@ -40,6 +40,7 @@ export function exportProject(store: Store, id: string) {
         }),
       ),
     pages: store.portableArtifacts<PageEvidence>(id, "page"),
+    sourceEvidence: store.portableArtifacts<ManagedSourceEvidence>(id, "source"),
     observations: store.observations(id),
     findings: store.findings(id),
     content: store.portableArtifacts<PortableContent>(id, "content"),

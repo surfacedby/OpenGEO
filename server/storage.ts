@@ -181,7 +181,7 @@ export class Store {
   pages(id: string, jobId?: string) {
     return this.artifacts<PageEvidence>(id, "page", jobId);
   }
-  portableArtifacts<T = Record<string, unknown>>(projectId: string, kind: "page" | "content"): (T & { jobId: string })[] {
+  portableArtifacts<T = Record<string, unknown>>(projectId: string, kind: "page" | "source" | "content"): (T & { jobId: string })[] {
     return this.db.prepare("SELECT body,job_id FROM artifacts WHERE project_id=? AND kind=? ORDER BY rowid DESC")
       .all(projectId, kind).map((row: any) => ({ ...JSON.parse(row.body), jobId: row.job_id }));
   }

@@ -26,7 +26,9 @@ export async function consoleContent(runner: Runner, job: Job, project: Project,
     if (original) urls = (original.sourceEvidence ?? []).map((source: { url: string }) => source.url);
     else {
       const audit = runner.store.jobs(project.id).find(item => item.kind === "audit" && item.status === "completed");
-      const pages = audit ? runner.store.pages(project.id, audit.id) : [];
+      const finding = task.findingId ? runner.store.findings(project.id).find(row => row.id === task.findingId) : undefined;
+      const pages = [...(audit ? runner.store.pages(project.id, audit.id) : []),
+        ...runner.store.artifacts<import("./contracts.js").ManagedSourceEvidence>(project.id, "source").filter(source => finding?.evidenceIds.includes(source.id))];
       if (!pages.length) throw new ProviderError("evidence", "Complete a website audit before creating a draft.");
       urls = contentSources(pages, question, 65000, required).sources.map(page => page.url);
     }

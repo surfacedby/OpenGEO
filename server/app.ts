@@ -346,10 +346,12 @@ export async function createApp(
     if (!row) throw new Error("Finding not found");
     const ids = new Set(row.evidenceIds);
     const pages = store.pages(id).filter((page) => ids.has(page.id));
+    const sources = store.artifacts<{ id: string }>(id, "source").filter(source => ids.has(source.id));
     const observations = store.observations(id).filter((answer) => ids.has(answer.id));
-    const found = new Set([...pages, ...observations].map((record) => record.id));
+    const found = new Set([...pages, ...sources, ...observations].map((record) => record.id));
     return {
       pages,
+      sources,
       observations,
       missing: row.evidenceIds.filter((key) => !found.has(key)).length,
     };

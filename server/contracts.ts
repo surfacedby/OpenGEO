@@ -79,6 +79,15 @@ export type PageEvidence = {
   schemaTypes: string[];
   links: string[];
 };
+export type ManagedSourceEvidence = {
+  id: string;
+  jobId: string;
+  url: string;
+  title: string;
+  text: string;
+  fetchedAt: string;
+  provenance: "managed_public_page";
+};
 export const auditCoverage = z.object({
   attempted: z.number().int().nonnegative(),
   fetched: z.number().int().nonnegative(),

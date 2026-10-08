@@ -59,6 +59,8 @@ const observation = z
     costUsd: z.number().nullable(),
   })
   .strict();
+const sourceEvidence = z.object({ id, jobId: id, url: safeUrl, title: z.string(), text: z.string(),
+  fetchedAt: date, provenance: z.literal("managed_public_page") }).strict();
 const finding = z
   .object({
     id,
@@ -148,6 +150,7 @@ export const migrationPackage = z
     project: projectInput.extend({ id, createdAt: date }),
     jobs: z.array(job),
     pages: z.array(page),
+    sourceEvidence: z.array(sourceEvidence).default([]),
     observations: z.array(observation),
     findings: z.array(finding),
     content: z.array(content),
@@ -169,9 +172,9 @@ export function previewImport(store: Store, input: unknown) {
   }
   const jobs = new Set(data.jobs.map((j) => j.id));
   if (jobs.size !== data.jobs.length) throw new Error("Duplicate job ids");
-  const allIds = [...data.jobs, ...data.pages, ...data.observations, ...data.findings, ...data.content].map((row) => row.id);
+  const allIds = [...data.jobs, ...data.pages, ...data.sourceEvidence, ...data.observations, ...data.findings, ...data.content].map((row) => row.id);
   if (new Set(allIds).size !== allIds.length) throw new Error("Duplicate record ids");
-  for (const row of [...data.pages, ...data.content])
+  for (const row of [...data.pages, ...data.sourceEvidence, ...data.content])
     if (row.jobId && !jobs.has(row.jobId)) throw new Error("Evidence references an unknown job");
   for (const row of [...data.observations, ...data.findings])
     if (!jobs.has(row.jobId) || row.projectId !== data.project.id)
@@ -228,6 +231,7 @@ export function importProject(store: Store, input: unknown) {
     for (const row of [
       ...data.jobs,
       ...data.pages,
+      ...data.sourceEvidence,
       ...data.observations,
       ...data.findings,
       ...data.content,
@@ -288,6 +292,7 @@ export function importProject(store: Store, input: unknown) {
     });
     for (const [kind, rows] of [
       ["page", data.pages],
+      ["source", data.sourceEvidence],
       ["observation", data.observations],
       ["finding", data.findings],
       ["content", data.content],

@@ -14,18 +14,8 @@ const result = z.object({ job: managedJob, review_complete: z.literal(true),
 
 /** Roles retain the original local citation evidence and never change the comparison list. */
 export async function consoleCompetitors(runner: Runner, job: Job, project: Project, signal: AbortSignal) {
-  const { output, input } = await consoleManaged(runner, job, project, signal, () => {
-    const observations = runner.store.observations(project.id, job.measurementJobId);
-    if (!observations.length || observations.length > 100 || observations.some(answer => answer.answer.length > 32000 || answer.citations.length > 50))
-      throw new ProviderError("evidence", "Choose a completed check with up to 100 answers within this connection's supported size.");
-    const audit = runner.store.jobs(project.id).find(item => item.kind === "audit" && item.status === "completed" &&
-      JSON.parse(runner.store.step(item.id, "project")?.body ?? "null")?.domain === project.domain);
-    const pages = audit ? runner.store.pages(project.id, audit.id) : [];
-    return { locale: project.locale, source_urls: pages.filter(page => page.status >= 200 && page.status < 300 && !page.noindex)
-      .sort((a, b) => new URL(a.url).pathname.length - new URL(b.url).pathname.length).slice(0, 5).map(page => page.url),
-      answers: observations.map(answer => ({ id: answer.id, question: answer.prompt, answer: answer.answer,
-        observed_at: answer.observedAt, citations: answer.citations.map(citation => ({ url: citation.url, title: citation.title ?? "" })) })) };
-  }, result);
+  const { output, input } = await consoleManaged(runner, job, project, signal,
+    () => consoleAnswerInput(runner, project, job.measurementJobId!), result);
   if (output.locale !== input.locale)
     throw new ProviderError("invalid_response", "The role review used a different language setting. Your comparison list is unchanged.");
   const seen = new Set<string>();
@@ -43,4 +33,18 @@ export async function consoleCompetitors(runner: Runner, job: Job, project: Proj
   });
   return { measurementJobId: job.measurementJobId, competitors: websites.filter(site => site.role === "competitor"),
     references: websites.filter(site => site.role === "reference") };
+}
+
+/** Both role review and recommendations freeze the same original answer contract. */
+export function consoleAnswerInput(runner: Runner, project: Project, measurementJobId: string) {
+    const observations = runner.store.observations(project.id, measurementJobId);
+    if (!observations.length || observations.length > 100 || observations.some(answer => answer.answer.length > 32000 || answer.citations.length > 50))
+      throw new ProviderError("evidence", "Choose a completed check with up to 100 answers within this connection's supported size.");
+    const audit = runner.store.jobs(project.id).find(item => item.kind === "audit" && item.status === "completed" &&
+      JSON.parse(runner.store.step(item.id, "project")?.body ?? "null")?.domain === project.domain);
+    const pages = audit ? runner.store.pages(project.id, audit.id) : [];
+    return { locale: project.locale, source_urls: pages.filter(page => page.status >= 200 && page.status < 300 && !page.noindex)
+      .sort((a, b) => new URL(a.url).pathname.length - new URL(b.url).pathname.length).slice(0, 5).map(page => page.url),
+      answers: observations.map(answer => ({ id: answer.id, question: answer.prompt, answer: answer.answer,
+        observed_at: answer.observedAt, citations: answer.citations.map(citation => ({ url: citation.url, title: citation.title ?? "" })) })) };
 }

@@ -14,6 +14,8 @@ When SurfacedBy supports website role review, it receives your selected check's 
 
 Local presence matching uses configured brand names, aliases and the website with Unicode word boundaries. A citation must link to the configured host or a subdomain. Literal matching can confuse generic names; review the answer when recognition is ambiguous. It is not an entity classifier.
 
+When SurfacedBy supports recommendations from saved answers, it reviews business scope and cited website roles before proposing and independently checking improvements. Existing-page edits, new resources and website changes remain distinct. Fresh owned-page excerpts have their own read dates and are stored separately from local audits. They travel with credential-free backups and project imports. Original answers retain their original dates and text. Selected pages are not a complete site inventory; check existing coverage before creating a new resource. An empty reviewed set is valid, and unsupported or incomplete results publish no recommendations.
+
 Rates use collected answers as their denominator. The requested count and missing count remain visible. A failed request is never converted into an answer with zero mentions. Console presence uses the provider's canonical recognition rather than local reinterpretation.
 
 Source coverage counts each collected answer once per domain or page, regardless of repeated citation annotations. Page fragments are combined; distinct paths and queries remain separate. Each source rate is bounded by 100%; rates across sources can sum to more than 100% because an answer can cite multiple sources. Unsafe or credential-bearing links are excluded from source tables.

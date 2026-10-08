@@ -44,6 +44,8 @@
 .improvement-detail > details[open] summary { margin-bottom: 8px; }
 .improvement-detail > details article { margin-top: 10px; }
 .improvement-detail > details article h3 { font-size: 13px; }
+.evidence-source-link { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
+.evidence-source-link > span:last-child { overflow-wrap: anywhere; }
 .answer-text { white-space: pre-wrap; font-size: 13px; line-height: 1.6; margin: 6px 0 12px; max-height: 320px; overflow: auto; color: var(--text); }
 .finding-reason p { font-size: 13px; line-height: 1.65; max-width: 880px; margin: 0 0 6px; color: var(--text); }
 .opportunity-preview > button { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 20px; text-align: left; border-bottom: 1px solid var(--divider); }

@@ -18,6 +18,7 @@ import { prompts } from "./prompts.js";
 import { discoverQuestions, discoverCompetitors } from "./discovery.js";
 import { consoleContent } from "./console-content.js";
 import { consoleCompetitors } from "./console-competitors.js";
+import { consoleOpportunities } from "./console-opportunities.js";
 import { cancelConsoleManaged, managedStep } from "./console-managed.js";
 import {
   ProviderError,
@@ -388,6 +389,7 @@ export class Runner {
     if (job.kind === "diagnose") {
       const completed = this.store.step(job.id, "diagnosis-result");
       if (completed?.state === "done") return JSON.parse(completed.body!);
+      if (job.provider === "console") return consoleOpportunities(this, job, project, signal);
       if (job.provider === "chatgpt" || job.provider === "openrouter") {
         const model = await this.contentModel(job);
         const priorEvidence = this.store.step(job.id, "diagnosis-inputs");
@@ -574,7 +576,10 @@ export class Runner {
       .jobs(project.id)
       .find((j) => j.kind === "audit" && j.status === "completed");
     const sourceIds = new Set<string>(original?.sourceEvidence?.map((s: any) => s.id) ?? []);
-    const sourcePages = sourceIds.size ? this.store.pages(project.id).filter((p) => sourceIds.has(p.id)) : latest ? this.store.pages(project.id, latest.id) : [];
+    const managedSources = this.store.artifacts<import("./contracts.js").ManagedSourceEvidence>(project.id, "source");
+    const finding = task.findingId ? this.store.findings(project.id).find(row => row.id === task.findingId) : undefined;
+    const sourcePages = sourceIds.size ? [...this.store.pages(project.id), ...managedSources].filter(p => sourceIds.has(p.id))
+      : [...(latest ? this.store.pages(project.id, latest.id) : []), ...managedSources.filter(source => finding?.evidenceIds.includes(source.id))];
     const topic = original?.topic ?? job.topic ?? project.brand;
     const savedSources = this.store.step(job.id, "content-sources");
     if (!savedSources?.body && !sourcePages.length) throw new Error("Complete a local audit first");

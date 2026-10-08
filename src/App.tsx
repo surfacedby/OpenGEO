@@ -258,7 +258,7 @@ export function App() {
   const omittedSuggestions = (completedAnalysis?.result as { omittedSuggestions?: number } | null)?.omittedSuggestions ?? 0;
   const activeAnalysis = w?.jobs.find(job => job.kind === 'diagnose' && ['queued', 'running'].includes(job.status));
   const pausedAnalysis = w?.jobs.find(job => job.kind === 'diagnose' && job.status === 'paused' && (!w.measurement || job.createdAt >= w.measurement.createdAt));
-  const canAnalyze = connected.chatgpt || connected.openrouter;
+  const canAnalyze = connected.chatgpt || connected.console || connected.openrouter;
   const activeAudit = w?.jobs.find((job) => job.kind === "audit" && ["running", "queued"].includes(job.status));
   const auditLabel = activeAudit?.status === "queued" ? "Audit queued" : activeAudit ? "Auditing..." : "Run audit";
   const canMeasure = providerOptions(connected).length > 0;
@@ -604,7 +604,7 @@ export function App() {
               )}
               {page === "Opportunities" && <>
                 {(analysisMeasurement || omittedSuggestions > 0) && <div className="opportunity-context">
-                  {analysisMeasurement && <p className="small">Recommendations use the completed visibility check from {shortDate(analysisMeasurement.createdAt)} and your audited pages.</p>}
+                  {analysisMeasurement && <p className="small">Recommendations use answers collected {shortDate(analysisMeasurement.createdAt)} and {completedAnalysis?.provider === 'console' ? 'website pages read for this analysis.' : 'your audited pages.'}</p>}
                   {omittedSuggestions > 0 && <p className="small">{omittedSuggestions} {omittedSuggestions === 1 ? 'suggestion was' : 'suggestions were'} left out because the supporting evidence could not be verified.</p>}
                 </div>}
                 <RunsPanel jobs={runsNeedingAttention(w.jobs, ['diagnose'])} run={run} title={pausedAnalysis ? 'Continue your saved analysis' : undefined} />
@@ -977,9 +977,7 @@ function JobDialog({
   onStarted: (job: Job) => void;
 }) {
   const choices: Provider[] =
-    kind === "diagnose"
-      ? ["chatgpt", "openrouter"]
-      : ["content", "revise", "competitors"].includes(kind)
+    ["diagnose", "content", "revise", "competitors"].includes(kind)
         ? ["chatgpt", "console", "openrouter"]
         : ["chatgpt", "console", "dataforseo", "openrouter"];
   const baseline = kind === 'recheck' ? previousMeasurement : null;
@@ -1019,8 +1017,8 @@ function JobDialog({
     if (provider === 'console') {
       void api('/providers/console/capabilities').then((capability) => {
         if (stopped) return;
-        if (["content", "revise", "competitors"].includes(kind)) {
-          const operation = kind === "competitors" ? "competitors" : "content";
+        if (["content", "revise", "competitors", "diagnose"].includes(kind)) {
+          const operation = kind === "competitors" ? "competitors" : kind === "diagnose" ? "local_opportunities" : "content";
           if (!capability.operations?.includes(operation) || operation === "content" && !capability.content_available)
             setDiscoveryError("This task is unavailable on this SurfacedBy connection. Choose ChatGPT or OpenRouter.");
           return;
@@ -1130,7 +1128,7 @@ function JobDialog({
           </div>
         ) : (
           <>
-            {kind === 'diagnose' && previousMeasurement && <p className="small">Reviews the completed visibility check from {shortDate(previousMeasurement.createdAt)} alongside your audited pages.</p>}
+            {kind === 'diagnose' && previousMeasurement && <p className="small">Reviews answers collected {shortDate(previousMeasurement.createdAt)} alongside {provider === 'console' ? 'freshly read website pages.' : 'your audited pages.'}</p>}
             {kind === 'content' && finding && <section className="draft-origin" aria-label="Selected opportunity">
               <span className="draft-origin-icon"><Lightbulb size={19} /></span><div><strong>{finding.title}</strong>{targetDomain(finding.targetUrl) && <a href={finding.targetUrl} target="_blank" rel="noreferrer"><SiteIcon projectId={project.id} domain={targetDomain(finding.targetUrl)!} size={18} /><span>{finding.opportunity?.type === 'new_content' ? 'View context page' : 'View the existing page'}</span><ArrowUpRight size={13} /></a>}</div>
               <p>{finding.opportunity?.type === 'new_content' ? 'Create a separate resource supported by your website and saved answers.' : 'Draft focused copy for this improvement.'}</p>
@@ -1147,7 +1145,7 @@ function JobDialog({
               {kind === "competitors" ? "Reviews your saved answers and website evidence. No visibility questions are asked again. Your connection's usage limits or charges apply." : provider === "chatgpt"
                 ? "Uses your ChatGPT plan within its limits. Answers can differ from the ChatGPT website."
                 : provider === "console"
-                  ? kind === "content" ? "A researched draft with source links and review notes. Pay as you go, within your approved maximum." : "Managed measurement and analysis through one connection. Pay as you go."
+                  ? kind === "content" ? "A researched draft with source links and review notes. Pay as you go, within your approved maximum." : kind === "diagnose" ? "Find useful page improvements and new content ideas from your saved evidence. Pay as you go, within your approved maximum." : "Managed measurement and analysis through one connection. Pay as you go."
                   : provider === "dataforseo"
                     ? "Collect visibility evidence for local analysis. Provider charges apply."
                     : "Checks answers from your chosen model. OpenRouter usage charges apply."}

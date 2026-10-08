@@ -27,10 +27,12 @@ const contracts = {
     quote: (domain: string) => "/domains/" + domain + "/questions/estimate", label: "question suggestions" },
   competitors: { prefix: "console-competitors", collection: "/jobs", reserve: "/competitors/jobs", result: "/competitors/jobs",
     quote: (domain: string) => "/domains/" + domain + "/competitors/estimate", label: "website role review" },
+  local_opportunities: { prefix: "console-opportunities", collection: "/jobs", reserve: "/opportunities/jobs", result: "/opportunities/jobs",
+    quote: (domain: string) => "/domains/" + domain + "/opportunities/estimate", label: "recommendations" },
 } as const;
 type Operation = keyof typeof contracts;
 export function managedOperation(job: Job): Operation {
-  return job.kind === "discover" ? "questions" : job.kind === "competitors" ? "competitors" : "content";
+  return job.kind === "discover" ? "questions" : job.kind === "competitors" ? "competitors" : job.kind === "diagnose" ? "local_opportunities" : "content";
 }
 export function managedStep(job: Job, step: string) {
   return contracts[managedOperation(job)].prefix + "-" + step;

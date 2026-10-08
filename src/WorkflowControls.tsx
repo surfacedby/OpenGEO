@@ -4,15 +4,17 @@ import { Select } from "./Select";
 import { FormFeedback, useFormFeedback } from "./FormFeedback";
 import { ProviderIcon, providerOptions, providerLabels } from "./provider-ui";
 import { AnswerCard } from "./DataPresentation";
+import { SiteIcon } from "./SiteIcon";
+import { targetDomain } from "./finding-groups";
 import { CalendarClock, Check, Plus, Trash2, Upload, Download } from "lucide-react";
 import identity from "../brand/identity.json";
 import { dateTime, shortDate } from "./format";
 import { markdownHtml, htmlDocument } from "../server/markdown";
 import type { Model, Project, Provider } from "../server/contracts";
-import type { Observation, PageEvidence } from "../server/contracts";
+import type { Observation, PageEvidence, ManagedSourceEvidence } from "../server/contracts";
 
 export function FindingEvidence({ projectId, findingId }: { projectId: string; findingId: string }) {
-  const [evidence, setEvidence] = useState<{ pages: PageEvidence[]; observations: Observation[]; missing: number } | null>(null);
+  const [evidence, setEvidence] = useState<{ pages: PageEvidence[]; sources: ManagedSourceEvidence[]; observations: Observation[]; missing: number } | null>(null);
   const [error, setError] = useState("");
   return <details onToggle={(event) => {
     if (event.currentTarget.open && !evidence)
@@ -22,13 +24,18 @@ export function FindingEvidence({ projectId, findingId }: { projectId: string; f
     {error && <p role="alert">{error}</p>}
     {evidence && <>
       {evidence.pages.map((page) => <article key={page.id}>
-        <h3><a href={page.url} target="_blank" rel="noreferrer">{page.title || page.url}</a></h3>
+        <h3><a className="evidence-source-link" href={page.url} target="_blank" rel="noreferrer"><SiteIcon projectId={projectId} domain={targetDomain(page.url)!} size={24} /><span>{page.title || page.url}</span></a></h3>
         <p className="small">Inspected {shortDate(page.fetchedAt)}{page.status >= 400 ? " / Page unavailable" : ""}</p>
         <p className="answer-text">{page.text}</p>
       </article>)}
+      {evidence.sources.map(source => <article key={source.id}>
+        <h3><a className="evidence-source-link" href={source.url} target="_blank" rel="noreferrer"><SiteIcon projectId={projectId} domain={targetDomain(source.url)!} size={24} /><span>{source.title || source.url}</span></a></h3>
+        <p className="small">Read by SurfacedBy {shortDate(source.fetchedAt)} / Page excerpt</p>
+        <p className="answer-text">{source.text}</p>
+      </article>)}
       {evidence.observations.map((answer) => <AnswerCard observation={answer} key={answer.id} />)}
       {evidence.missing > 0 && <p>{evidence.missing} supporting records are unavailable on this installation.</p>}
-      {!evidence.pages.length && !evidence.observations.length && !evidence.missing && <p>This domain-level interpretation has no linked answer records. Review its evidence period and explanation.</p>}
+      {!evidence.pages.length && !evidence.sources.length && !evidence.observations.length && !evidence.missing && <p>This domain-level interpretation has no linked answer records. Review its evidence period and explanation.</p>}
     </>}
   </details>;
 }

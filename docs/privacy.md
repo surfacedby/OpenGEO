@@ -2,7 +2,7 @@
 
 Projects and evidence reside in SQLite on your installation. Encrypted provider credentials reside in a separate vault. The local session file authorizes CLI/MCP access and must stay private. Provider status endpoints never return credentials.
 
-No telemetry or hosted authentication is required. Crawling requests public pages. ChatGPT and OpenRouter receive instructions, source excerpts and project context for selected content tasks. DataForSEO receives prompts, models and supported locale parameters. Console receives domain configuration and explicitly requested tasks. Review each provider's own data policies.
+No telemetry or hosted authentication is required. Crawling requests public pages. ChatGPT and OpenRouter receive instructions, source excerpts and project context for selected content tasks. DataForSEO receives prompts, models and supported locale parameters. Console receives domain configuration and explicitly requested tasks. When you request role review or recommendations from saved answers, Console also receives the selected answers, their original identifiers and timestamps, citation links and selected owned page URLs. It reads those public pages and returns dated excerpts. Review each provider's own data policies.
 
 ## Optional usage sharing
 

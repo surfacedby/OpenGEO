@@ -1,4 +1,4 @@
-import type { PageEvidence } from "./contracts.js";
+import type { PageEvidence, ManagedSourceEvidence } from "./contracts.js";
 import { ProviderError } from "./contracts.js";
 
 export function evidenceBatches<T>(items: T[], maximumBytes: number): T[][] {
@@ -22,12 +22,12 @@ export function evidenceBatches<T>(items: T[], maximumBytes: number): T[][] {
  * broad page matching many words cannot crowd out the page that answers a specific question.
  * Pages are sized at the excerpt length actually sent, so the budget holds as many pages as it can.
  */
-export function contentSources(pages: PageEvidence[], subjects: string | string[], maximumBytes: number, requiredUrls: string[] = [], excerptChars = 8000) {
-  const readable = pages.filter(page => page.status >= 200 && page.status < 300 && !page.noindex && page.text.trim());
+export function contentSources(pages: (PageEvidence | ManagedSourceEvidence)[], subjects: string | string[], maximumBytes: number, requiredUrls: string[] = [], excerptChars = 8000) {
+  const readable = pages.filter(page => (!("status" in page) || page.status >= 200 && page.status < 300 && !page.noindex) && page.text.trim());
   const segmenter = new Intl.Segmenter(undefined, { granularity: "word" });
   const words = (text: string) => new Set([...segmenter.segment(text.normalize("NFKC").toLowerCase())]
     .filter(part => part.isWordLike).map(part => part.segment));
-  const documents = readable.map(page => ({ page, heading: words(page.title + " " + page.h1.join(" ")), text: words(page.text) }));
+  const documents = readable.map(page => ({ page, heading: words(page.title + " " + ("h1" in page ? page.h1.join(" ") : "")), text: words(page.text) }));
   const rank = (topic: string) => {
     const terms = [...words(topic)];
     // Corpus frequency discounts repeated navigation and common query words without a niche or language blacklist.
