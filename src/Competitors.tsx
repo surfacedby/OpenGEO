@@ -53,13 +53,15 @@ export function Competitors({ project, jobs, review, run, activity }: {
   const discovered = (result?.competitors ?? []).filter(site => site.role !== 'reference').map(site => ({ ...site, observationIds: site.observationIds.filter(id => knownIds.has(id)) })).filter(site => site.observationIds.length);
   const tracked = new Set(project.competitors.map(hostname));
   const references = new Map((result?.references ?? []).map(site => [hostname(site.domain), site]));
+  const unreviewed = new Map<string, DiscoveredWebsite>();
   const alternatives = new Map(discovered.map(site => [hostname(site.domain), site]));
   for (const domain of tracked) if (domain && !alternatives.has(domain) && references.get(domain)?.role !== 'reference')
     alternatives.set(domain, { name: domain, domain, observationIds: [], reason: 'Added to your comparison. Its role has not been confirmed in this check.' });
-  for (const domain of cited.keys()) if (domain !== hostname(project.domain) && !alternatives.has(domain) && !references.has(domain))
-    references.set(domain, { name: domain, domain, observationIds: coverage(domain), reason: 'Cited in this check. Review its role to distinguish a reference from a competing offering.' });
+  const reviewedDomains = [hostname(project.domain), ...alternatives.keys(), ...references.keys()];
+  for (const domain of cited.keys()) if (!reviewedDomains.some(known => domain === known || domain.endsWith('.' + known)))
+    unreviewed.set(domain, { name: domain, domain, observationIds: coverage(domain), reason: 'Cited in this check. Review its role to distinguish a reference from a competing offering.' });
   const candidates = discovered.filter(site => !tracked.has(hostname(site.domain)));
-  const rows = [...(tab === 'competitors' ? alternatives : references).values()].filter(site => (site.name + ' ' + site.domain).toLowerCase().includes(query.trim().toLowerCase())).sort((a, b) => coverage(b.domain).length - coverage(a.domain).length || a.name.localeCompare(b.name));
+  const rows = [...(tab === 'competitors' ? alternatives : tab === 'references' ? references : unreviewed).values()].filter(site => (site.name + ' ' + site.domain).toLowerCase().includes(query.trim().toLowerCase())).sort((a, b) => coverage(b.domain).length - coverage(a.domain).length || a.name.localeCompare(b.name));
   async function save(domains: string[], message: string) {
     const { id, createdAt, ...settings } = project;
     setSaving(true); setError('');
@@ -87,11 +89,12 @@ export function Competitors({ project, jobs, review, run, activity }: {
     {error && <div className="inline-error" role="alert">{error}<button className="secondary compact" onClick={() => setRetry(value => value + 1)}>Try again</button></div>}
     {check && !completedMeasurement(check) && <p className="competitor-progress">This check is incomplete. You can explore its saved answers; website role review becomes available when collection finishes.</p>}
     <section className="panel competitor-ranking">
-      <div className="competitor-toolbar"><div className="segmented-control" role="group" aria-label="Website roles"><button aria-pressed={tab === 'competitors'} onClick={() => { setTab('competitors'); setDetail(null); }}><Users size={14} />Competitors <span>{alternatives.size}</span></button><button aria-pressed={tab === 'references'} onClick={() => { setTab('references'); setDetail(null); }}><BookOpen size={14} />References <span>{references.size}</span></button></div>
+      <div className="competitor-toolbar"><div className="segmented-control" role="group" aria-label="Website roles"><button aria-pressed={tab === 'competitors'} onClick={() => { setTab('competitors'); setDetail(null); }}><Users size={14} />Competitors <span>{alternatives.size}</span></button><button aria-pressed={tab === 'references'} onClick={() => { setTab('references'); setDetail(null); }}><BookOpen size={14} />References <span>{references.size}</span></button><button aria-pressed={tab === 'unreviewed'} onClick={() => { setTab('unreviewed'); setDetail(null); }}><Search size={14} />To review <span>{unreviewed.size}</span></button></div>
         <label className="search"><Search size={15} /><input aria-label="Search comparison websites" placeholder="Find a website" value={query} onChange={event => setQuery(event.target.value)} /></label>
         <button className="secondary compact" disabled={loading || !answers.length || !check || !completedMeasurement(check) || !!pending} onClick={() => check && review(check.id)}><RefreshCw size={14} />Review website roles</button></div>
       {pending && activity(pending)}
       {tab === 'references' && <div className="competitor-table-intro"><p>These websites supply cited information. Citation frequency alone does not establish authority or competition.</p></div>}
+      {tab === 'unreviewed' && <div className="competitor-table-intro"><p>These websites were cited, but their role is unconfirmed. Review website roles to identify competing offerings and references.</p></div>}
       {tab === 'competitors' && candidates.length > 0 && <div className="competitor-discovery-heading"><h3>Discover competitors</h3><button className="primary compact" disabled={saving || !selected.length} onClick={() => void save([...project.competitors, ...selected], 'Competitors added to your comparison.')}><Plus size={14} />Add selected competitors</button></div>}
       <div className="competitor-ranking-head"><span>Website</span><span>Why it appears</span><span>Cited answers</span><span /></div>
       {loading ? <div className="analytics-empty" role="status">Loading saved answers...</div> : rows.length ? rows.map(site => {
@@ -102,7 +105,7 @@ export function Competitors({ project, jobs, review, run, activity }: {
           <div className="competitor-rate"><strong>{rate === null ? 'No data' : rate.toFixed(0) + '%'}</strong><span>{ids.length} / {answers.length} answers</span><div><i style={{ width: (rate ?? 0) + '%' }} /></div></div>
           <button className="secondary compact" disabled={!ids.length && !site.observationIds.length} aria-label={'View answers for ' + site.name} onClick={() => setDetail(detail === site.domain ? null : site.domain)}><ArrowRight size={16} /></button>
         </div>;
-      }) : <div className="empty"><Users size={28} /><h3>{answers.length ? tab === 'competitors' ? 'No competing offerings confirmed yet' : 'No cited references in this check' : 'Start with a visibility check'}</h3><p>{answers.length ? 'Review website roles using your connected analysis provider, or add a competitor you already know below.' : 'Your saved answers will show which websites appear for your customers\' questions.'}</p></div>}
+      }) : <div className="empty"><Users size={28} /><h3>{answers.length ? tab === 'competitors' ? 'No competing offerings confirmed yet' : tab === 'references' ? 'No cited references in this check' : 'All cited websites have a reviewed role' : 'Start with a visibility check'}</h3><p>{answers.length ? tab === 'unreviewed' ? 'Explore competitors and references to read the supporting answers.' : 'Review website roles using your connected analysis provider, or add a competitor you already know below.' : 'Your saved answers will show which websites appear for your customers\' questions.'}</p></div>}
       <p className="competitor-footnote">Citation rate counts answers linking to a website, not recommendations or market share. All values use the selected check.</p>
     </section>
     {detail && <section className="panel competitor-answer-detail"><div className="panel-heading"><h2>Explore {inspected?.name ?? detail}</h2><button className="secondary compact" aria-label="Close website answers" onClick={() => setDetail(null)}><X size={16} /></button></div>
