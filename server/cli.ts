@@ -14,6 +14,14 @@ else if (command === "workspace")
   );
 else if (command === "job")
   console.log(JSON.stringify(await call("/jobs/" + args[0]), null, 2));
+else if (command === "review")
+  console.log(JSON.stringify(await call("/jobs/" + args[0] + "/resume-preview"), null, 2));
+else if (command === "cancel")
+  console.log(JSON.stringify(await call("/jobs/" + args[0] + "/cancel", {}), null, 2));
+else if (command === "resume") {
+  if (!args[0] || !args[1]) throw new Error("Pass the job ID and an approval JSON file");
+  console.log(JSON.stringify(await call("/jobs/" + args[0] + "/resume", JSON.parse(readFileSync(args[1], "utf8"))), null, 2));
+}
 else if (command === "run") {
   if (!args[0])
     throw new Error(
@@ -37,5 +45,5 @@ else if (command === "run") {
   );
 } else
   throw new Error(
-    "Commands: projects, workspace <id>, job <id>, run <file.json>, schedule <file.json>",
+    "Commands: projects, workspace <id>, job <id>, review <id>, resume <id> <approval.json>, cancel <id>, run <file.json>, schedule <file.json>",
   );

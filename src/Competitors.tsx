@@ -52,9 +52,10 @@ export function Competitors({ project, jobs, review, run, activity }: {
   const knownIds = new Set(answers.map(answer => answer.id));
   const discovered = (result?.competitors ?? []).filter(site => site.role !== 'reference').map(site => ({ ...site, observationIds: site.observationIds.filter(id => knownIds.has(id)) })).filter(site => site.observationIds.length);
   const tracked = new Set(project.competitors.map(hostname));
-  const alternatives = new Map(discovered.map(site => [hostname(site.domain), site]));
-  for (const domain of tracked) if (domain && !alternatives.has(domain)) alternatives.set(domain, { name: domain, domain, observationIds: [], reason: 'Added to your comparison. Its role has not been confirmed in this check.' });
   const references = new Map((result?.references ?? []).map(site => [hostname(site.domain), site]));
+  const alternatives = new Map(discovered.map(site => [hostname(site.domain), site]));
+  for (const domain of tracked) if (domain && !alternatives.has(domain) && references.get(domain)?.role !== 'reference')
+    alternatives.set(domain, { name: domain, domain, observationIds: [], reason: 'Added to your comparison. Its role has not been confirmed in this check.' });
   for (const domain of cited.keys()) if (domain !== hostname(project.domain) && !alternatives.has(domain) && !references.has(domain))
     references.set(domain, { name: domain, domain, observationIds: coverage(domain), reason: 'Cited in this check. Review its role to distinguish a reference from a competing offering.' });
   const candidates = discovered.filter(site => !tracked.has(hostname(site.domain)));

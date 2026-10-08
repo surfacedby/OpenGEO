@@ -37,6 +37,29 @@ export function Onboarding({ connected, profiles, refresh, finish, cancel, initi
   const suggestionRequest = useRef<string | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const feedback = useFormFeedback(), { setError } = feedback;
+  const [questionAccess, setQuestionAccess] = useState<boolean | null>(null);
+  const [questionAccessError, setQuestionAccessError] = useState("");
+  const [availabilityAttempt, setAvailabilityAttempt] = useState(0);
+  const [resumeReview, setResumeReview] = useState<{ id: string; uncertainRequests: number } | null>(null);
+  const [reviewedRequests, setReviewedRequests] = useState(false);
+  useEffect(() => {
+    if (provider !== "console" || !connected.console) return;
+    let current = true;
+    setQuestionAccess(null); setQuestionAccessError("");
+    void api<{ operations: string[] }>("/providers/console/capabilities").then(result => {
+      if (current) setQuestionAccess(result.operations.includes("questions"));
+    }).catch(() => { if (current) setQuestionAccessError("We couldn't check question suggestions. Your saved questions are still available."); });
+    return () => { current = false; };
+  }, [provider, connected.console, availabilityAttempt]);
+  useEffect(() => {
+    if (discovery?.status !== "paused") { setResumeReview(null); return; }
+    let current = true;
+    setReviewedRequests(false);
+    void api<{ uncertainRequests: number }>("/jobs/" + discovery.id + "/resume-preview").then(result => {
+      if (current) setResumeReview({ id: discovery.id, uncertainRequests: result.uncertainRequests });
+    }).catch(setError);
+    return () => { current = false; };
+  }, [discovery?.id, discovery?.status, discovery?.error]);
   useEffect(() => { heading.current?.focus(); }, [step]);
   const prompts = [...new Set(rows.filter(row => row.selected).map(row => row.text.trim()).filter(item => item.length >= 3))];
   const connectionReady = provider === "dataforseo" ? connected.dataforseo && connected.openrouter : connected[provider];
@@ -102,7 +125,7 @@ export function Onboarding({ connected, profiles, refresh, finish, cancel, initi
   async function saveWebsite() {
     const changed = Boolean(project && (domain.trim() !== project.domain || brand.trim() !== project.brand || locale !== project.locale));
     if (changed) {
-      for (const job of [discovery, check]) if (job && ["queued", "running"].includes(job.status)) await api("/jobs/" + job.id + "/cancel", {});
+      for (const job of [discovery, check]) if (job && ["queued", "running", "paused"].includes(job.status)) await api("/jobs/" + job.id + "/cancel", {});
       rowRevision.current++; await draftSave.current.catch(() => {});
       setRows([]); setDiscoveryId(""); setDiscovery(null); setReadingAudit(null); setCheckId(""); setCheck(null); appliedDiscovery.current = "";
     }
@@ -117,12 +140,21 @@ export function Onboarding({ connected, profiles, refresh, finish, cancel, initi
   }
   async function suggestQuestions() {
     if (!project) return;
-    const ai = provider === "chatgpt" ? "chatgpt" : "openrouter";
+    const ai = provider === "chatgpt" ? "chatgpt" : provider === "console" ? "console" : "openrouter";
     suggestionRequest.current ??= crypto.randomUUID();
     const job = await api<Job>("/onboarding/questions", { projectId: project.id, provider: ai, maxCostUsd: ai === "chatgpt" ? 0 : Number(budget), requestId: suggestionRequest.current });
     suggestionRequest.current = null;
     setPreviewSuggestions(false);
     setDiscoveryId(job.id); setDiscovery(job);
+  }
+  async function resumeSuggestions() {
+    if (!discovery || resumeReview?.id !== discovery.id) return;
+    const maximum = Number(budget);
+    const job = await api<Job>("/jobs/" + discovery.id + "/resume", {
+      reviewed: discovery.error === "approval" || reviewedRequests,
+      ...(discovery.error === "budget" ? { maxCostUsd: maximum } : {}),
+    });
+    setDiscovery(job);
   }
   function useSuggestions() {
     const questions = (discovery?.result as { questions?: { text: string }[] } | undefined)?.questions;
@@ -175,8 +207,24 @@ export function Onboarding({ connected, profiles, refresh, finish, cancel, initi
           <div className="setup-actions"><button type="button" className="secondary" onClick={() => go(0)} disabled={busy}><ArrowLeft size={15} />Back</button><button className="primary" disabled={busy}>{busy ? "Reading website..." : !localOnly && provider === "chatgpt" ? "Find my questions" : "Continue"}<ArrowRight size={16} /></button></div>
         </form>}
         {step === 2 && <form onSubmit={(event) => { event.preventDefault(); void run(saveQuestions); }}>
-          {discovery && <div className="question-discovery" role="status">{["queued", "running"].includes(discovery.status) ? <LoaderCircle className="loading-spin" size={21} /> : <Sparkles size={21} />}<div><strong>{discovery.status === "completed" ? "Questions based on your website" : readingAudit ? "Reading your website before suggesting questions" : discovery.progress}</strong><p>{discovery.status === "completed" ? `${(discovery.result as { pagesRead: number }).pagesRead} ${(discovery.result as { pagesRead: number }).pagesRead === 1 ? "page" : "pages"} reviewed. Choose what matters to your business.` : readingAudit ? (readingAudit.status === "running" ? readingAudit.progress : "Starting with your home page and sitemap") : ["queued", "running"].includes(discovery.status) ? "Finding relevant customer questions from your pages." : "Your progress is saved. You can add questions yourself or resume from the dashboard."}</p></div>{["queued", "running"].includes(discovery.status) && <button type="button" className="secondary" disabled={busy} onClick={() => void run(() => api("/jobs/" + discovery.id + "/cancel", {}))}>Stop</button>}</div>}
-          {!["queued", "running"].includes(discovery?.status ?? "") && <div className="question-tools">{provider !== "console" && <>{provider === "dataforseo" && <label>Maximum for suggestions (USD)<input type="number" min="0.01" step="0.01" value={budget} onChange={event => setBudget(event.target.value)} /></label>}<button type="button" className="secondary" disabled={busy || provider === "dataforseo" && !(Number(budget) > 0)} onClick={() => void run(suggestQuestions)}><Sparkles size={15} />{discovery ? "Refresh suggestions" : "Suggest from my website"}</button>{discovery?.status === "completed" && (discovery.result as { questions: { text: string }[] }).questions.length > 0 && JSON.stringify(rows.map(row => row.text)) !== JSON.stringify((discovery.result as { questions: { text: string }[] }).questions.map(item => item.text)) && <button type="button" className="secondary" disabled={busy} onClick={() => setPreviewSuggestions(current => !current)} aria-expanded={previewSuggestions}>Review suggestions</button>}</>}{provider === "console" && <p className="small">Add the questions you want to track. SurfacedBy will analyze the answers in your visibility check.</p>}</div>}
+          {discovery && discovery.status !== "paused" && <div className="question-discovery" role="status">{["queued", "running"].includes(discovery.status) ? <LoaderCircle className="loading-spin" size={21} /> : <Sparkles size={21} />}<div><strong>{discovery.status === "completed" ? "Questions based on your website" : readingAudit ? "Reading your website before suggesting questions" : discovery.progress}</strong><p>{discovery.status === "completed" ? `${(discovery.result as { pagesRead: number }).pagesRead} ${(discovery.result as { pagesRead: number }).pagesRead === 1 ? "page" : "pages"} reviewed. Choose what matters to your business.` : readingAudit ? (readingAudit.status === "running" ? readingAudit.progress : "Starting with your home page and sitemap") : ["queued", "running"].includes(discovery.status) ? "Finding relevant customer questions from your pages." : "Your progress is saved. You can add questions yourself or resume from the dashboard."}</p></div>{["queued", "running"].includes(discovery.status) && <button type="button" className="secondary" disabled={busy} onClick={() => void run(() => api("/jobs/" + discovery.id + "/cancel", {}))}>Stop</button>}</div>}
+          {discovery?.status === "paused" && <section className="suggestion-approval" aria-label="Review question suggestions">
+            <div className="suggestion-approval-heading"><Sparkles size={19} /><h2>{discovery.error === "approval" ? "Review your price" : discovery.error === "budget" ? "Choose your spending limit" : "Your suggestions are saved"}</h2></div>
+            <p>{discovery.progress}</p>
+            {discovery.error === "approval" && <small>Up to ${discovery.maxCostUsd.toFixed(2)} will be held from your balance. You only pay for completed work.</small>}
+            {discovery.error === "budget" && <label>Maximum for this run (USD)<input type="number" min={Math.max(discovery.maxCostUsd, discovery.spentUsd)} step="0.10" max="100" value={budget} onChange={event => setBudget(event.target.value)} /></label>}
+            {(resumeReview?.uncertainRequests ?? 0) > 0 && <label className="checkbox-field"><input type="checkbox" checked={reviewedRequests} onChange={event => setReviewedRequests(event.target.checked)} />I reviewed provider activity. Check this saved run again.</label>}
+            <div className="button-row"><button type="button" className="primary" disabled={busy || resumeReview?.id !== discovery.id || (resumeReview.uncertainRequests > 0 && !reviewedRequests) || discovery.error === "budget" && !(Number(budget) > discovery.maxCostUsd)} onClick={() => void run(resumeSuggestions)}>{discovery.error === "approval" ? "Approve and suggest questions" : discovery.error === "budget" ? "Update limit" : "Resume suggestions"}<ArrowRight size={15} /></button><button type="button" className="secondary" disabled={busy} onClick={() => void run(() => api("/jobs/" + discovery.id + "/cancel", {}))}>Cancel suggestions</button></div>
+          </section>}
+          {!["queued", "running", "paused"].includes(discovery?.status ?? "") && <div className="question-tools">
+            {(provider !== "console" || questionAccess === true) && <>
+              {provider !== "chatgpt" && <label>Maximum for suggestions (USD)<input type="number" min={provider === "console" ? "0.10" : "0.01"} step={provider === "console" ? "0.10" : "0.01"} max="100" value={budget} onChange={event => setBudget(event.target.value)} /></label>}
+              <button type="button" className="secondary" disabled={busy || provider !== "chatgpt" && !(Number(budget) >= (provider === "console" ? 0.10 : 0.01))} onClick={() => void run(suggestQuestions)}><Sparkles size={15} />{discovery ? "Refresh suggestions" : "Suggest from my website"}</button>
+            </>}
+            {provider === "console" && questionAccess !== true && <p className="small" role="status">{questionAccessError || (questionAccess === null ? "Checking question suggestions..." : "Question suggestions aren't available on this connection yet. Add your questions below, or use ChatGPT or OpenRouter.")}</p>}
+            {provider === "console" && questionAccessError && <button type="button" className="secondary" onClick={() => setAvailabilityAttempt(value => value + 1)}>Try again</button>}
+            {discovery?.status === "completed" && (discovery.result as { questions: { text: string }[] }).questions.length > 0 && JSON.stringify(rows.map(row => row.text)) !== JSON.stringify((discovery.result as { questions: { text: string }[] }).questions.map(item => item.text)) && <button type="button" className="secondary" disabled={busy} onClick={() => setPreviewSuggestions(current => !current)} aria-expanded={previewSuggestions}>Review suggestions</button>}
+          </div>}
           {previewSuggestions && discovery?.status === "completed" && <section className="suggestion-preview" aria-label="Suggested questions"><header><Sparkles size={17} /><h2>Suggested questions</h2></header><ol>{(discovery.result as { questions: { text: string }[] }).questions.map((question, index) => <li key={index}>{question.text}</li>)}</ol><footer><p>Using these replaces your current list.</p><div><button type="button" className="secondary" onClick={() => setPreviewSuggestions(false)}>Keep my questions</button><button type="button" className="primary" onClick={useSuggestions}>Use these questions<Check size={15} /></button></div></footer></section>}
           <QuestionRows rows={rows} onChange={setRows} disabled={busy} feedback={feedback} />
           <p className="small">Only selected questions will be checked. You can change them later.</p>

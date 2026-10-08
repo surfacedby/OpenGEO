@@ -46,7 +46,7 @@ server.registerTool(
       "Run a selected provider workflow with an explicitly approved USD budget. Never substitute providers.",
     inputSchema: {
       projectId: z.string().uuid(),
-      kind: z.enum(["measure", "recheck", "diagnose", "competitors", "content", "revise"]),
+      kind: z.enum(["discover", "measure", "recheck", "diagnose", "competitors", "content", "revise"]),
       provider: z.enum(["chatgpt", "openrouter", "dataforseo", "console"]),
       model: z.string().optional(),
       maxCostUsd: z.number().nonnegative(),
@@ -56,6 +56,7 @@ server.registerTool(
       findingId: z.string().uuid().optional(),
       contentMode: z.enum(["article", "page_update"]).optional(),
       measurementJobId: z.string().uuid().optional(),
+      auditJobId: z.string().uuid().optional(),
       revisionInstructions: z.string().min(3).max(2000).optional(),
       webSearch: z.boolean().optional(),
     },
@@ -71,5 +72,32 @@ server.registerTool(
     annotations: { readOnlyHint: true },
   },
   ({ id }) => call("/jobs/" + id),
+);
+server.registerTool(
+  "preview_resume",
+  {
+    description: "Read the saved spending ceiling and uncertain requests before approving a paused workflow.",
+    inputSchema: { id: z.string().uuid() },
+    annotations: { readOnlyHint: true },
+  },
+  ({ id }) => call("/jobs/" + id + "/resume-preview"),
+);
+server.registerTool(
+  "resume_workflow",
+  {
+    description: "Resume saved work after explicit review. Paid estimates need approval; unknown completion is recovered before any new purchase.",
+    inputSchema: { id: z.string().uuid(), reviewed: z.boolean(), maxCostUsd: z.number().finite().nonnegative().max(10000).optional() },
+    annotations: { readOnlyHint: false, openWorldHint: true },
+  },
+  ({ id, ...approval }) => call("/jobs/" + id + "/resume", approval),
+);
+server.registerTool(
+  "cancel_workflow",
+  {
+    description: "Stop a saved workflow and request remote cancellation. Completed work may remain billable; inspect the saved receipt afterward.",
+    inputSchema: { id: z.string().uuid() },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+  },
+  ({ id }) => call("/jobs/" + id + "/cancel", {}),
 );
 await server.connect(new StdioServerTransport());

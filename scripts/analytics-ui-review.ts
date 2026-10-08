@@ -302,6 +302,9 @@ try {
     references: [{ name: 'IANA', domain: 'iana.org', role: 'reference', reason: 'Provides documentation used in these answers.', observationIds: supporting.map(answer => answer.id) }],
   } });
   await page.getByRole('button', { name: 'Refresh workspace', exact: true }).click();
+  await page.getByRole('button', { name: 'View answers for W3C', exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: 'View answers for iana.org', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('button', { name: 'Remove iana.org from comparison', exact: true }).count(), 1);
   await page.getByRole('button', { name: 'View answers for W3C', exact: true }).click();
   await page.getByRole('heading', { name: 'Questions where your website wasn\'t cited', exact: true }).waitFor();
   assert.equal(await page.locator('.competitor-detail-grid > div').first().getByRole('link').count(), 2);

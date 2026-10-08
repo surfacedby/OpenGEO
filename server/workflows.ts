@@ -16,7 +16,8 @@ import {
 } from "./analysis.js";
 import { prompts } from "./prompts.js";
 import { discoverQuestions, discoverCompetitors } from "./discovery.js";
-import { consoleContent, cancelConsoleContent } from "./console-content.js";
+import { consoleContent } from "./console-content.js";
+import { cancelConsoleManaged, managedStep } from "./console-managed.js";
 import {
   ProviderError,
   contentTask,
@@ -121,7 +122,7 @@ export class Runner {
       await this.active.done;
     }
     if (job.provider === 'console') {
-      if (await cancelConsoleContent(this, job)) return this.store.job(id);
+      if (await cancelConsoleManaged(this, job)) return this.store.job(id);
       const saved = this.store.step(id, 'console-scan');
       if (saved?.state === 'done') {
         const scan = JSON.parse(saved.body!);
@@ -156,7 +157,7 @@ export class Runner {
     if (this.resumePreview(id).uncertainRequests && !reviewed)
       throw new ProviderError("review", "Review uncertain provider requests before resuming.");
     if (job.error === "approval" && !reviewed)
-      throw new ProviderError("review", "Approve the displayed draft estimate before starting paid work.");
+      throw new ProviderError("review", "Approve the displayed estimate before starting paid work.");
     if (maxCostUsd !== undefined && (!Number.isFinite(maxCostUsd) || maxCostUsd < Math.max(job.maxCostUsd, job.spentUsd) || maxCostUsd > 10000))
       throw new ProviderError("budget", "The new budget must cover the current ceiling and completed work.");
     return this.store.db.transaction(() => {
@@ -168,9 +169,9 @@ export class Runner {
       .all(id) as any[])
       this.store.setStep(id, row.step, "approved-retry");
     if (job.error === "approval") {
-      const quote = this.store.step(id, "console-content-estimate");
-      if (quote?.state !== "done") throw new ProviderError("estimate", "A current draft estimate is required.");
-      this.store.setStep(id, "console-content-approval", "done", JSON.parse(quote.body!).id);
+      const quote = this.store.step(id, managedStep(job, "estimate"));
+      if (quote?.state !== "done") throw new ProviderError("estimate", "A current estimate is required.");
+      this.store.setStep(id, managedStep(job, "approval"), "done", JSON.parse(quote.body!).id);
     }
     return this.store.updateJob(id, {
       status: "queued",

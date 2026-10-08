@@ -62,7 +62,7 @@ No rankings or growth are guaranteed. An observed change does not prove that a p
 | Connection | Useful for | Cost and limits |
 | --- | --- | --- |
 | ChatGPT | ChatGPT API answer checks, analysis and content | Your eligible plan and granted permissions are required. Plan limits apply; no separate API key. Web search depends on model and account permissions. |
-| SurfacedBy API | Managed checks and processed insights through one connection | Pay as you go with Console credits. Platform availability is verified when you connect. |
+| SurfacedBy API | Managed checks and processed insights; reviewed question suggestions and drafts when available | Pay as you go. OpenGEO checks which operations your connection supports before offering them. |
 | DataForSEO + OpenRouter | Direct measurement with AI analysis and content | Both connections are needed for the full workflow. Each provider charges for its own usage. |
 | OpenRouter | API answer checks, analysis and content with model selection | Your account pays the selected model's usage charges. OAuth and existing keys are supported. |
 

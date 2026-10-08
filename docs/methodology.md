@@ -1,10 +1,12 @@
 # Evidence methodology
 
-Observations are immutable records. Audits retain fetched page text and technical facts; visibility checks retain answer text and citation annotations. Editing an action changes its progress, not its originating observation. Draft changes keep prior revisions.
+When the SurfacedBy connection supports question suggestions, it reads selected public pages and the primary website page, then returns reviewed rows with source links and timestamps. Its result can differ from suggestions based on your saved local audit. Neither path selects questions for a visibility check without your review.
+
+Observations are immutable records. Audits retain fetched page text and technical facts; visibility checks retain answer text and citation annotations. Updating an opportunity's status changes its progress, not its originating observation. Draft changes keep prior revisions.
 
 During setup, sitemaps help discover public pages within the audit's crawl limit and robots policy. Sitemap URLs are not factual evidence: the page must still be fetched. Website-grounded question suggestions reference readable page records, exclude brand-led prompts and are reviewed before becoming tracked questions. Thin or unreadable evidence can produce no suggestions.
 
-Suggestions use three separate AI passes: establish the website's purpose and current offerings or resources, draft audience questions, then independently review relevance and wording. Offering quotations must match the supplied page text; their attribution, context and current availability determine what they support. Questions start from the audience's knowledge, observable need or goal, rather than copying product specifications or assuming a diagnosis. These checks reduce errors; they do not prove search demand or guarantee that every suggestion fits the website. Review the rows before checking them. Your saved expertise can clarify scope; it does not substitute for page evidence. Each pass uses the same connection and approved spending ceiling.
+ChatGPT and OpenRouter suggestions use three separate AI passes: establish the website's purpose and current offerings or resources, draft audience questions, then independently review relevance and wording. Offering quotations must match the supplied page text; their attribution, context and current availability determine what they support. Questions start from the audience's knowledge, observable need or goal, rather than copying product specifications or assuming a diagnosis. These checks reduce errors; they do not prove search demand or guarantee that every suggestion fits the website. Review the rows before checking them. Your saved expertise can clarify scope; it does not substitute for page evidence. Each pass uses the same connection and approved spending ceiling.
 
 The first ChatGPT check can suggest competitors from its collected answers. A candidate must be named in an answer and have a matching website citation in that answer. This conservative rule can miss competitors with no cited website; it avoids guessing domains or treating every source as a competitor. Candidates are added to comparisons only after user selection.
 
@@ -31,5 +33,7 @@ Research separates source-supported claims from unknowns and user-supplied exper
 AI revisions snapshot the saved draft and reuse its original source records. They create a separate draft with its own research, brief and final verification; the original is preserved. Save manual changes before requesting a revision.
 
 Cost receipts distinguish reported spend from conservative estimates held when a provider omits its cost. A held estimate is not a claim about the eventual charge. Cancellation stops local work and requests remote Console cancellation when a submitted check is known. A confirmed pending-check refund reduces the receipt; unconfirmed cancellation remains visibly unresolved.
+
+Console managed suggestions and drafts require a price review before purchase. The approved maximum is held until a receipt confirms the charge and return of unused credits. A lost acknowledgement is looked up by the saved request identity before any retry. Missing confirmation pauses the run; it does not purchase a replacement. Saved results remain collectible when new generation is unavailable.
 
 Console findings identify their originating scan and evidence period. Its score is proprietary and distinct from local mention and citation rates. Older domain findings are not represented as new-scan evidence.

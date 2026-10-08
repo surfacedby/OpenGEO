@@ -1,4 +1,13 @@
 .account-summary{display:flex;align-items:center;gap:12px;padding:16px;background:var(--surface-2);border:1px solid var(--border);border-radius:12px;margin-bottom:16px;min-width:0}
+.suggestion-approval { padding: 18px; margin: 0 0 20px; background: var(--primary-50); border: 1px solid var(--primary-100); border-radius: var(--radius); }
+.suggestion-approval-heading { display: flex; align-items: center; gap: 9px; color: var(--primary); }
+.suggestion-approval-heading h2 { margin: 0; font-size: 15px; color: var(--ink); }
+.suggestion-approval p { margin: 12px 0 8px; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.suggestion-approval > small { display: block; margin-bottom: 14px; color: var(--muted); font-size: 12px; }
+.suggestion-approval > label { margin: 12px 0; }
+.suggestion-approval .button-row { margin-top: 16px; }
+.suggestion-approval .button-row button { min-height: 40px; font-size: 12px; }
+.setup-body .suggestion-approval .checkbox-field input { min-height: 0; }
 .account-summary-icon{display:grid;place-items:center;flex:none;width:40px;height:40px;border-radius:11px;background:var(--surface);border:1px solid var(--border)}
 .account-summary div{min-width:0}.account-summary strong{display:block;font-size:14px;overflow-wrap:anywhere}.account-summary small{display:block;font-size:12px;color:var(--muted);margin-top:4px}
 .account-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.account-actions .secondary{font-size:12px;min-height:36px;padding:8px 12px;display:inline-flex;align-items:center;gap:7px;text-decoration:none}.account-actions .account-disconnect{margin-left:auto;color:var(--danger);background:var(--danger-50);border-color:var(--danger-200)}

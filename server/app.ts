@@ -203,7 +203,7 @@ export async function createApp(
     })();
   });
   app.post("/api/onboarding/questions", (req) => {
-    const { requestId, ...input } = z.object({ projectId: z.string().uuid(), provider: z.enum(["chatgpt", "openrouter"]), maxCostUsd: z.number().finite().min(0).max(100).default(0), requestId: z.string().uuid().optional() }).strict().parse(req.body);
+    const { requestId, ...input } = z.object({ projectId: z.string().uuid(), provider: z.enum(["chatgpt", "openrouter", "console"]), maxCostUsd: z.number().finite().min(0).max(100).default(0), requestId: z.string().uuid().optional() }).strict().parse(req.body);
     const project = store.project(input.projectId);
     if (!vault.status()[input.provider]) throw new ProviderError("auth", "Connect your chosen AI provider first.");
     return store.db.transaction(() => {

@@ -8,7 +8,7 @@ const publicCapabilities = z.object({
   content_available: z.boolean().default(false),
   models: z.array(z.object({ id: z.string().min(1).max(150), operations: z.array(z.string().max(80)).max(40) })).max(200).default([]),
 });
-const operations = new Set(["full_check", "observations", "diagnoses", "opportunities", "brand_configuration", "competitor_configuration", "content", "research"]);
+const operations = new Set(["full_check", "observations", "diagnoses", "opportunities", "brand_configuration", "competitor_configuration", "content", "research", "questions"]);
 /** Only fields used by connection setup cross the backend boundary, even if a provider adds private diagnostics. */
 export function consoleCapabilities(value: unknown) {
   const result = publicCapabilities.safeParse(value);

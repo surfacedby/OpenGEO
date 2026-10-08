@@ -5,6 +5,7 @@ import type { Runner } from "./workflows.js";
 import { publicUrl } from "./network.js";
 import { prompts } from "./prompts.js";
 import { contentSources } from "./evidence-context.js";
+import { consoleQuestions } from "./console-questions.js";
 
 export const questionDiscoveryVersion = 4;
 const offeringInventory = z.object({
@@ -25,6 +26,7 @@ const suggestedCompetitors = z.object({
 
 /** Suggestions reuse the durable pass receipts; generated questions never become tracked prompts without review. */
 export async function discoverQuestions(runner: Runner, job: Job, project: Project, signal: AbortSignal) {
+  if (job.provider === "console") return consoleQuestions(runner, job, project, signal);
   if (!["chatgpt", "openrouter"].includes(job.provider ?? ""))
     throw new ProviderError("capability", "Connect ChatGPT or OpenRouter to suggest questions. You can also add your own.");
   const model = await runner.contentModel(job);

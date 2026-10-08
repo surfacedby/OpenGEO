@@ -823,7 +823,7 @@ function Jobs({
               className="secondary"
               onClick={() => { setReviewError(""); void run(async () => { const receipt = await api<Omit<NonNullable<typeof review>, "id">>("/jobs/" + j.id + "/resume-preview"); setReview({ ...receipt, id: j.id }); }); }}
             >
-              {j.error === "approval" ? "Review draft price" : "Resume"}
+              {j.error === "approval" ? "Review price" : "Resume"}
             </button>
           )}
           {["running", "queued", "paused"].includes(j.status) && (
@@ -842,10 +842,10 @@ function Jobs({
           {review?.id === j.id && <form className="resume-review" onSubmit={(event) => {
             event.preventDefault(); const data = new FormData(event.currentTarget); setResuming(true); setReviewError("");
             void run(async () => { try { await api("/jobs/" + j.id + "/resume", { reviewed: review.reason === "approval" || data.get("reviewed") === "on", ...(data.has("budget") ? { maxCostUsd: Number(data.get("budget")) } : {}) }); setReview(null); } catch (failure) { setReviewError((failure as Error).message); } }).finally(() => setResuming(false));
-          }}><h3>{review.reason === "approval" ? "Approve your draft" : "Resume this run"}</h3><p>{review.reason === "approval" ? j.progress : review.uncertainRequests ? "A previous request may have completed. Check your provider's activity before allowing another attempt." : j.error === "quota" ? "Resume when your provider's limits allow requests again. Saved results will be kept." : "Saved results will be kept. Resolve the issue shown above before continuing."}</p>
+          }}><h3>{review.reason === "approval" ? "Approve this run" : "Resume this run"}</h3><p>{review.reason === "approval" ? j.progress : review.uncertainRequests ? "A previous request may have completed. Check your provider's activity before allowing another attempt." : j.error === "quota" ? "Resume when your provider's limits allow requests again. Saved results will be kept." : "Saved results will be kept. Resolve the issue shown above before continuing."}</p>
             {review.uncertainRequests > 0 && <label className="checkbox-field"><input type="checkbox" name="reviewed" required />I reviewed provider activity and approve retrying uncertain requests.</label>}
             {review.reason === "budget" && review.provider !== "chatgpt" && <label>New approved total budget (USD)<input name="budget" type="number" min={Math.max(review.spentUsd, review.maxCostUsd)} max={review.scheduledBudgetCeilingUsd ?? 10000} step="0.01" defaultValue={Math.max(review.spentUsd, review.maxCostUsd)} required /><small>Includes ${review.spentUsd.toFixed(3)} already committed. Increasing this amount approves additional provider spending.</small>{review.scheduledBudgetCeilingUsd !== undefined && <small>Schedule allowance for this run: ${review.scheduledBudgetCeilingUsd.toFixed(2)}.</small>}</label>}
-            {reviewError && <p className="inline-error" role="alert">{reviewError}</p>}<div className="button-row"><button className="primary" disabled={resuming}>{resuming ? "Starting..." : review.reason === "approval" ? "Approve and start draft" : "Resume run"}</button><button type="button" className="secondary" disabled={resuming} onClick={() => setReview(null)}>Keep paused</button></div>
+            {reviewError && <p className="inline-error" role="alert">{reviewError}</p>}<div className="button-row"><button className="primary" disabled={resuming}>{resuming ? "Starting..." : review.reason === "approval" ? "Approve and start" : "Resume run"}</button><button type="button" className="secondary" disabled={resuming} onClick={() => setReview(null)}>Keep paused</button></div>
           </form>}
         </li>
       ))}
