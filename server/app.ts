@@ -253,14 +253,27 @@ export async function createApp(
     "/api/import/preview",
     (req) => previewImport(store, req.body).summary,
   );
-  app.post("/api/import", (req) => importProject(store, req.body));
+  function restoreWork<T>(restore: () => T): T {
+    return store.db.transaction(() => {
+      const firstProject = store.projects().length === 0;
+      const result = restore();
+      if (firstProject && store.projects().length > 0) {
+        store.set("onboarding", { completed: true });
+        store.set("setupDraft", null);
+        // Restoring history does not grant consent or start a new workflow.
+        if (store.setting("usageConsent", null) === null) store.set("usageSetupDefault", false);
+      }
+      return result;
+    })();
+  }
+  app.post("/api/import", (req) => restoreWork(() => importProject(store, req.body)));
   app.get("/api/backup", () => ({
     format: "opengeo-backup",
     version: 1,
     projects: store.projects().map((p) => exportProject(store, p.id)),
   }));
   app.post("/api/backup/preview", (req) => previewRestore(store, req.body));
-  app.post("/api/backup/restore", (req) => restoreBackup(store, req.body));
+  app.post("/api/backup/restore", (req) => restoreWork(() => restoreBackup(store, req.body)));
   const parseProject = (raw: unknown) => {
     const input = projectInput.parse(raw);
     try { input.domain = publicUrl(input.domain).hostname.replace(/^www\./, ""); }

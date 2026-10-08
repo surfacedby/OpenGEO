@@ -41,9 +41,11 @@ export function FindingEvidence({ projectId, findingId }: { projectId: string; f
 }
 
 export function BackupControls({
-  run,
+  run, restoreOnly = false, onImported,
 }: {
   run: (f: () => Promise<unknown>) => Promise<void>;
+  restoreOnly?: boolean;
+  onImported?: (project: Project) => Promise<void>;
 }) {
   const [pending, setPending] = useState<{
       body: unknown;
@@ -54,15 +56,14 @@ export function BackupControls({
   return (
     <section className="panel">
       <div className="panel-heading">
-        <h2>Backup and restore</h2>
+        <h2>{restoreOnly ? "Open saved work" : "Backup and restore"}</h2>
       </div>
       <div className="panel-padding">
         <p>
-          Save your projects, evidence, improvements and drafts. Provider credentials
-          stay on this installation and are excluded.
+          {restoreOnly ? "Choose an exported project or backup. Your evidence and drafts stay together; connect providers when you need a new check." : "Save your projects, evidence, improvements and drafts. Provider credentials stay on this installation and are excluded."}
         </p>
         <div className="button-row">
-          <button
+          {!restoreOnly && <button
             className="secondary"
             onClick={() =>
               void run(async () =>
@@ -75,7 +76,7 @@ export function BackupControls({
             }
           >
             <Download size={16} />Download backup
-          </button>
+          </button>}
           <label className="secondary file-upload">
             <Upload size={16} />Choose a backup or project
             <input
@@ -131,14 +132,16 @@ export function BackupControls({
                 className="primary"
                 onClick={() =>
                   void run(async () => {
-                    await api(
+                    const result = await api<{ project: Project; replayed: boolean } | { project: Project; replayed: boolean }[]>(
                       pending.backup ? "/backup/restore" : "/import",
                       pending.body,
                     );
+                    const imported = Array.isArray(result) ? result[0]?.project : result.project;
                     setPending(null);
                     setMessage(
-                      "Your work has been imported. Select the website in the sidebar.",
+                      imported ? "Your work has been imported. Select the website in the sidebar." : "This backup has no projects. Choose another file to restore.",
                     );
+                    if (imported && onImported) await onImported(imported);
                   })
                 }
               >

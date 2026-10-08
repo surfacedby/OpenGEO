@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, Globe, LoaderCircle, ShieldCheck, ScanSearch, X, MessagesSquare, FileCheck2, Plus, Sparkles, Users } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Globe, LoaderCircle, ShieldCheck, ScanSearch, X, MessagesSquare, FileCheck2, Plus, Sparkles, Users, Upload } from "lucide-react";
 import { ConnectionSettings, type ChatGPTProfiles } from "./ConnectionSettings";
 import { providerLabels, ProviderIcon } from "./provider-ui";
 import { Select } from "./Select";
@@ -8,6 +8,7 @@ import { FormFeedback, useFormFeedback } from "./FormFeedback";
 import identity from "../brand/identity.json";
 import { UsagePreference } from "./UsagePreference";
 import { QuestionRows, type QuestionRow } from "./QuestionRows";
+import { BackupControls } from "./WorkflowControls";
 import type { DiscoveredWebsite, Job, Project, Provider, SetupDraft } from "../server/contracts";
 
 const steps = ["Connection", "Website", "Questions", "Review"];
@@ -42,6 +43,7 @@ export function Onboarding({ connected, profiles, refresh, finish, cancel, initi
   const [availabilityAttempt, setAvailabilityAttempt] = useState(0);
   const [resumeReview, setResumeReview] = useState<{ id: string; uncertainRequests: number } | null>(null);
   const [reviewedRequests, setReviewedRequests] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   useEffect(() => {
     if (provider !== "console" || !connected.console) return;
     let current = true;
@@ -60,7 +62,7 @@ export function Onboarding({ connected, profiles, refresh, finish, cancel, initi
     }).catch(setError);
     return () => { current = false; };
   }, [discovery?.id, discovery?.status, discovery?.error]);
-  useEffect(() => { heading.current?.focus(); }, [step]);
+  useEffect(() => { heading.current?.focus(); }, [step, restoring]);
   const prompts = [...new Set(rows.filter(row => row.selected).map(row => row.text.trim()).filter(item => item.length >= 3))];
   const connectionReady = provider === "dataforseo" ? connected.dataforseo && connected.openrouter : connected[provider];
   useEffect(() => { if (draft) { setProvider(draft.provider === "openrouter" ? "dataforseo" : draft.provider); setLocalOnly(draft.localOnly); } }, [draft?.provider, draft?.localOnly]);
@@ -188,17 +190,19 @@ export function Onboarding({ connected, profiles, refresh, finish, cancel, initi
       {cancel ? <button className="icon-button" aria-label="Cancel website setup" disabled={busy} onClick={() => void run(async () => { await api("/onboarding/draft", null, "PUT"); cancel(); })}><X size={20} /></button> : <span className="setup-local"><ShieldCheck size={15} />Your local workspace</span>}
     </header>
     <main className="setup-main" id="main-content">
-      <ol className="setup-progress" aria-label="Setup progress">{steps.map((label, index) => ({ label, index })).filter(({ index }) => !localOnly || index !== 2).map(({ label, index }, position) => <li key={label} className={index === step ? "current" : index < step ? "complete" : ""} aria-current={index === step ? "step" : undefined}><span>{index < step ? <Check size={14} /> : position + 1}</span><strong>{label}</strong></li>)}</ol>
+      {!restoring && <ol className="setup-progress" aria-label="Setup progress">{steps.map((label, index) => ({ label, index })).filter(({ index }) => !localOnly || index !== 2).map(({ label, index }, position) => <li key={label} className={index === step ? "current" : index < step ? "complete" : ""} aria-current={index === step ? "step" : undefined}><span>{index < step ? <Check size={14} /> : position + 1}</span><strong>{label}</strong></li>)}</ol>}
       <div className="setup-layout"><aside className="setup-story" aria-label="How your workspace works"><h2>Get found<br />in AI search.</h2><p>See where your brand appears.<br />Turn the evidence into improvements.</p><div className="setup-workflow-visual"><div><span><Globe size={21} /></span><section><strong>Your website</strong><small>Audit your public pages</small></section></div><div><span><MessagesSquare size={21} /></span><section><strong>AI visibility</strong><small>Track mentions and citations</small></section></div><div><span><FileCheck2 size={21} /></span><section><strong>Your next move</strong><small>Improve content and recheck</small></section></div></div><div className="setup-story-privacy"><ShieldCheck size={15} /><span>Your projects stay on your device.</span></div></aside>
       <section className="setup-body" aria-busy={busy}>
-        <div className="setup-heading"><h1 ref={heading} tabIndex={-1}>{step === 0 ? "Power your AI visibility workspace" : step === 1 ? "Which website are you improving?" : step === 2 ? "Choose how customers find you" : check?.status === "completed" ? "Your first answers are ready" : "Ready for your first check?"}</h1>
-          <p>{step === 0 ? "Use your ChatGPT subscription, connect SurfacedBy, or bring your own measurement and AI providers." : step === 1 ? "Add your public website and the brand you want to track." : step === 2 ? "Review questions suggested from your website. Edit them, add your own and choose which to check." : localOnly ? "Start with a free audit of your public pages." : provider === "chatgpt" ? "Check your selected questions with ChatGPT and see which businesses appear." : "Your local audit is free. Review a price before starting visibility checks from your dashboard."}</p>
+        <div className="setup-heading"><h1 ref={heading} tabIndex={-1}>{restoring ? "Restore your workspace" : step === 0 ? "Power your AI visibility workspace" : step === 1 ? "Which website are you improving?" : step === 2 ? "Choose how customers find you" : check?.status === "completed" ? "Your first answers are ready" : "Ready for your first check?"}</h1>
+          <p>{restoring ? "Pick up where you left off, without running your saved checks again." : step === 0 ? "Use your ChatGPT subscription, connect SurfacedBy, or bring your own measurement and AI providers." : step === 1 ? "Add your public website and the brand you want to track." : step === 2 ? "Review questions suggested from your website. Edit them, add your own and choose which to check." : localOnly ? "Start with a free audit of your public pages." : provider === "chatgpt" ? "Check your selected questions with ChatGPT and see which businesses appear." : "Your local audit is free. Review a price before starting visibility checks from your dashboard."}</p>
         </div>
         <FormFeedback feedback={feedback} />
-        {step === 0 && <>
+        {restoring && <><BackupControls run={run} restoreOnly onImported={finish} /><div className="setup-actions"><button className="secondary" disabled={busy} onClick={() => setRestoring(false)}><ArrowLeft size={15} />Back to setup</button></div></>}
+        {step === 0 && !restoring && <>
           <div className="setup-provider-options" role="group" aria-label="Choose your setup">{(["chatgpt", "console", "dataforseo"] as const).map((item) => <button key={item} className={provider === item ? "selected" : ""} aria-pressed={provider === item} disabled={busy} onClick={() => void run(async () => { await api("/onboarding/draft", { ...makeDraft(0), provider: item, localOnly: false }, "PUT"); setProvider(item); setLocalOnly(false); })}><div className="setup-choice-icons"><ProviderIcon provider={item} size={21} />{item === "dataforseo" && <><Plus size={12} /><ProviderIcon provider="openrouter" size={21} /></>}</div><span>{item === "dataforseo" ? "Bring your own" : providerLabels[item]}<small>{item === "chatgpt" ? "Your subscription" : item === "console" ? "Managed insights" : "DataForSEO + OpenRouter"}</small></span>{(item === "dataforseo" ? connected.dataforseo && connected.openrouter : connected[item]) && <Check size={14} />}</button>)}</div>
           <ConnectionSettings connected={connected} profiles={profiles} run={run} variant="onboarding" provider={provider} beforeConnect={persistConnection} />
           <div className="setup-actions"><div className="local-audit-option"><button className="secondary" disabled={busy} onClick={() => void run(() => continueConnection(true))}>Use local audits only</button><small>Not recommended: no AI visibility or content.</small></div><button className="primary" disabled={busy || !connectionReady} onClick={() => void run(() => continueConnection(false))}>Continue <ArrowRight size={16} /></button></div>
+          {!project && <div className="setup-actions"><button className="secondary" disabled={busy} onClick={() => { setError(""); setRestoring(true); }}><Upload size={16} />Restore saved work</button></div>}
         </>}
         {step === 1 && <form onSubmit={(event) => { event.preventDefault(); void run(saveWebsite); }}>
           <label htmlFor="setup-website">Website<input id="setup-website" name="domain" {...feedback.field("domain")} value={domain} onChange={(event) => setDomain(event.target.value)} placeholder="example.com" required autoFocus autoCapitalize="none" autoCorrect="off" spellCheck={false} inputMode="url" /></label>
