@@ -17,6 +17,92 @@ import { exportProject } from "../server/export.js";
 import { importProject } from "../server/import.js";
 import { Scheduler } from "../server/scheduler.js";
 
+test("lost managed submissions recover their approved identity for collection and cancellation without another purchase", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "opengeo-managed-recovery-")), store = new Store(directory);
+  const vault = new Vault(directory, { encrypt: text => Buffer.from(text), decrypt: bytes => bytes.toString() });
+  vault.set("console", { key: "synthetic-console-credential" });
+  const connections = new Connections(store, vault), runner = new Runner(store, new Providers(vault, connections));
+  const project = store.createProject(projectInput.parse({ domain: "example.com", brand: "Example" }));
+  const audit = store.enqueue(jobInput.parse({ projectId: project.id, kind: "audit" }), "site-audit");
+  store.put("page", project.id, audit.id, parsePage("https://example.com/", 200, "<title>Reports</title><main><p>Shared reports for teams.</p></main>"));
+  store.updateJob(audit.id, { status: "completed" });
+  const domainId = randomUUID(), quotes = new Map<string, string>(), jobs = new Map<string, any>();
+  let mode = "collect", available = true, purchases = 0, lookups = 0, cancellations = 0, capabilityReads = 0;
+  const server = createServer(async (request, response) => {
+    let raw = ""; for await (const chunk of request) raw += chunk;
+    const body = raw ? JSON.parse(raw) : null, address = new URL(request.url!, "http://localhost");
+    const path = address.pathname; let data: unknown, meta: unknown;
+    if (path === "/capabilities") { capabilityReads++; data = { platforms: [], operations: available ? ["content"] : [], content_available: available, models: [] }; }
+    else if (path === "/domains") data = [{ id: domainId, domain: project.domain }];
+    else if (path.includes("/estimates/")) {
+      const id = randomUUID(); quotes.set(request.headers["idempotency-key"] as string, id);
+      data = { id, domain_id: domainId, operation: "content", estimated_credits: 3, expires_at: new Date(Date.now() + 3600000).toISOString() };
+    } else if (path === "/content/jobs" && request.method === "POST") {
+      purchases++;
+      jobs.set(body.request_key, { id: randomUUID(), ...body, status: mode === "cancel" ? "queued" : "completed", estimated_credits: 3, cancel_requested: false,
+        receipt: mode === "cancel" ? null : { status: "completed", charged_credits: 1, refunded_credits: body.approved_credits - 1 } });
+      request.socket.destroy(); return;
+    } else if (path === "/content/jobs") {
+      lookups++; const key = address.searchParams.get("request_key")!, saved = jobs.get(key);
+      assert.equal(address.searchParams.get("page_size"), "1");
+      data = mode === "missing" ? [] : [{ ...saved, ...(mode === "mismatch" ? { request_key: randomUUID() } : {}) }];
+      meta = { has_more: false, next_cursor: null };
+    } else {
+      const saved = [...jobs.values()].find(job => path.startsWith("/content/jobs/" + job.id));
+      assert.ok(saved);
+      if (path.endsWith("/cancel")) {
+        cancellations++; saved.cancel_requested = true; saved.status = "cancelled";
+        saved.receipt = { status: "cancelled", charged_credits: 1, refunded_credits: saved.approved_credits - 1 }; data = saved;
+      } else if (path.endsWith("/results")) data = { job: saved, brief: "Shared reports", draft: { title: "Reports", markdown: "# Reports\n\nShare a report with your team." },
+        review: { requires_human_review: true, claim_scope: "numeric_and_absolute_statements", coverage_complete: true, issues: [] },
+        sources: [{ url: "https://example.com/", title: "Reports" }] };
+      else data = saved;
+    }
+    response.setHeader("Content-Type", "application/json"); response.end(JSON.stringify({ data, ...(meta ? { meta } : {}) }));
+  });
+  server.listen(0, "127.0.0.1"); await once(server, "listening");
+  const original = globalThis.fetch;
+  globalThis.fetch = ((url, init) => { const address = new URL(String(url)); return original(`http://127.0.0.1:${(server.address() as any).port}` + address.pathname.replace("/api/v1/console", "") + address.search, init); }) as typeof fetch;
+  try {
+    for (const scenario of ["collect", "cancel", "missing", "mismatch"]) {
+      mode = scenario; available = true;
+      const job = store.enqueue(jobInput.parse({ projectId: project.id, kind: "content", provider: "console", topic: "How can I share reports?", maxCostUsd: 0.5 }), "recover-" + scenario);
+      await runner.tick(); runner.resume(job.id, true); await runner.tick();
+      assert.equal(store.job(job.id).status, "paused");
+      assert.equal(store.step(job.id, "console-content-job")?.state, "started");
+      const approved = JSON.parse(store.step(job.id, "console-content-submission")!.body!);
+      assert.deepEqual(approved, { estimate_id: quotes.get(job.id + ":estimate"), request_key: job.id, approved_credits: 5 });
+      const quote = JSON.parse(store.step(job.id, "console-content-estimate")!.body!);
+      store.setStep(job.id, "console-content-estimate", "done", { ...quote, expires_at: new Date(Date.now() - 1000).toISOString() });
+      const reads = capabilityReads, bought = purchases; available = false;
+      if (scenario === "cancel") {
+        await runner.cancel(job.id);
+        assert.equal(store.job(job.id).status, "cancelled");
+        assert.equal(store.job(job.id).error, null);
+      } else {
+        runner.resume(job.id, true); await runner.tick();
+        if (["missing", "mismatch"].includes(scenario)) {
+          assert.equal(store.job(job.id).status, "paused");
+          assert.equal(store.job(job.id).error, scenario === "missing" ? "waiting" : "invalid_response");
+          assert.notEqual(store.step(job.id, "console-content-job")?.state, "done");
+          mode = "collect"; runner.resume(job.id, true); await runner.tick();
+        }
+        assert.equal(store.job(job.id).status, "completed", store.job(job.id).progress);
+      }
+      assert.equal(purchases, bought);
+      assert.equal(capabilityReads, reads, "disabled generation cannot block existing job recovery");
+      assert.equal(store.job(job.id).spentUsd, 0.1);
+      assert.equal(store.job(job.id).costBasis, "reported");
+    }
+    assert.equal(purchases, 4); assert.equal(cancellations, 1); assert.equal(lookups, 6);
+    assert.equal(store.artifacts(project.id, "content").length, 3);
+  } finally {
+    globalThis.fetch = original; connections.close(); await runner.stop(); store.close();
+    server.closeAllConnections(); server.close(); await once(server, "close");
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("managed drafts preserve approved quotes, survive interrupted collection, settle once and export scoped reviews", async () => {
   const directory = mkdtempSync(join(tmpdir(), "opengeo-managed-content-")), store = new Store(directory);
   const vault = new Vault(directory, { encrypt: text => Buffer.from(text), decrypt: bytes => bytes.toString() });

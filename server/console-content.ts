@@ -14,6 +14,9 @@ const receipt = z.object({ charged_credits: credits, refunded_credits: credits,
   status: z.enum(["completed", "cancelled", "failed", "expired"]) });
 const remoteJob = z.object({ id: z.string().uuid(), status: z.enum(["queued", "running", "cancelling", "waiting_reconciliation", "completed", "cancelled", "failed", "expired"]),
   estimated_credits: credits, approved_credits: credits, receipt: receipt.nullable(), cancel_requested: z.boolean() });
+const recoveredJob = remoteJob.extend({ estimate_id: z.string().uuid(), request_key: z.string().uuid() });
+const submission = z.object({ estimate_id: z.string().uuid(), request_key: z.string().uuid(), approved_credits: credits.positive() });
+const recoveryPage = z.object({ data: z.array(recoveredJob).max(1), meta: z.object({ has_more: z.literal(false) }) });
 const estimate = z.object({ id: z.string().uuid(), estimated_credits: credits,
   operation: z.literal("content"), domain_id: z.string().uuid(), expires_at: z.string().datetime({ offset: true }) });
 const source = z.object({ url: z.string().url().refine(value => {
@@ -38,12 +41,42 @@ function recordReceipt(runner: Runner, job: Job, remote: z.infer<typeof remoteJo
     costBasis: remote.receipt ? "reported" : "includes_estimates" });
 }
 
-export async function cancelConsoleContent(runner: Runner, job: Job) {
+/** A lost acknowledgement is recovered by the approved identity, never by purchasing a replacement. */
+async function recoverSubmission(runner: Runner, job: Job, signal: AbortSignal) {
   const saved = runner.store.step(job.id, "console-content-job");
+  if (!saved || saved.state === "done" || saved.state === "rejected") return;
+  const approved = runner.store.step(job.id, "console-content-submission");
+  const quote = runner.store.step(job.id, "console-content-estimate");
+  if (!approved?.body || !quote?.body)
+    throw new ProviderError("waiting", "The earlier draft submission needs confirmation. Check SurfacedBy before starting another draft.", true);
+  const request = submission.parse(JSON.parse(approved.body));
+  const estimateValue = estimate.parse(JSON.parse(quote.body));
+  if (request.request_key !== job.id || request.estimate_id !== estimateValue.id)
+    throw new ProviderError("invalid_response", "The saved draft approval does not match this request. Check SurfacedBy before continuing.", true);
+  const page = recoveryPage.safeParse(await runner.providers.console("/content/jobs?request_key=" + encodeURIComponent(job.id) + "&page_size=1", undefined, undefined, signal));
+  if (!page.success)
+    throw new ProviderError("invalid_response", "SurfacedBy did not return a confirmed draft. Resume later to check again; no new draft was submitted.", true);
+  const remote = page.data.data[0];
+  if (!remote)
+    throw new ProviderError("waiting", "SurfacedBy has not confirmed the earlier submission yet. Resume later to check again; no replacement draft will be submitted.", true);
+  if (remote.request_key !== request.request_key || remote.estimate_id !== request.estimate_id || remote.approved_credits !== request.approved_credits)
+    throw new ProviderError("invalid_response", "The returned draft does not match its saved approval. Check SurfacedBy before continuing.", true);
+  recordReceipt(runner, job, remote, { estimated: estimateValue.estimated_credits, approved: request.approved_credits });
+  runner.store.setStep(job.id, "console-content-job", "done", remoteJob.parse(remote));
+}
+
+export async function cancelConsoleContent(runner: Runner, job: Job) {
+  let saved = runner.store.step(job.id, "console-content-job");
   if (!saved) return false;
   if (saved.state !== "done") {
-    runner.store.updateJob(job.id, { error: "cancel_remote", progress: "Stopped locally. Submission was not confirmed. Review content jobs in SurfacedBy before starting another draft." });
-    return true;
+    try {
+      await recoverSubmission(runner, job, AbortSignal.timeout(20000));
+      saved = runner.store.step(job.id, "console-content-job");
+    } catch {
+      runner.store.updateJob(job.id, { error: "cancel_remote", progress: "Stopped locally. Submission was not confirmed. Retry cancellation to check for your draft before starting another." });
+      return true;
+    }
+    if (saved?.state !== "done") return false;
   }
   const remote = remoteJob.parse(JSON.parse(saved.body!));
   try {
@@ -63,6 +96,7 @@ export async function cancelConsoleContent(runner: Runner, job: Job) {
 export async function consoleContent(runner: Runner, job: Job, project: Project, signal: AbortSignal) {
   const completed = runner.store.step(job.id, "content-result");
   if (completed?.state === "done") return JSON.parse(completed.body!);
+  await recoverSubmission(runner, job, signal);
   const submitted = runner.store.step(job.id, "console-content-job")?.state === "done";
   const savedCapability = runner.store.step(job.id, "console-content-capabilities");
   // Stopping new purchases must not prevent collection of an existing reservation.
@@ -128,11 +162,16 @@ export async function consoleContent(runner: Runner, job: Job, project: Project,
   }
   // The approved maximum is reserved; settlement charges verified work and returns the rest.
   const approvedCredits = Math.floor(job.maxCostUsd * 10 + 1e-9);
+  const savedSubmission = runner.store.step(job.id, "console-content-submission");
+  const request = submission.parse(savedSubmission?.body ? JSON.parse(savedSubmission.body) : {
+    estimate_id: quote.id, request_key: job.id, approved_credits: approvedCredits });
+  if (request.estimate_id !== quote.id || request.request_key !== job.id || request.approved_credits > approvedCredits)
+    throw new ProviderError("invalid_response", "The saved approval does not match this draft's budget. No new request was submitted.");
+  if (!savedSubmission) runner.store.setStep(job.id, "console-content-submission", "done", request);
   let remote = remoteJob.parse(await runner.once(job, "console-content-job", async () =>
-    remoteJob.parse((await runner.providers.console("/content/jobs", { estimate_id: quote.id, request_key: job.id,
-      approved_credits: approvedCredits }, job.id, signal)).data)));
+    remoteJob.parse((await runner.providers.console("/content/jobs", request, job.id, signal)).data)));
   const remoteId = remote.id, expected = { estimated: quote.estimated_credits, approved: remote.approved_credits };
-  if (remote.estimated_credits !== quote.estimated_credits || remote.approved_credits > approvedCredits)
+  if (remote.estimated_credits !== quote.estimated_credits || remote.approved_credits !== request.approved_credits)
     throw new ProviderError("invalid_response", "The reserved credits do not match your approved draft. Review SurfacedBy before continuing.");
   recordReceipt(runner, job, remote, expected);
   for (let attempt = 0; attempt < 180; attempt++) {
