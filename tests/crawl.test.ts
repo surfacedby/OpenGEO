@@ -1,9 +1,23 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { MockAgent } from "undici";
-import { crawl } from "../server/audit.js";
+import { auditFindings, crawl, parsePage } from "../server/audit.js";
 import { crawlFetch, publicAgent, type CrawlPermission } from "../server/network.js";
-import type { PageEvidence } from "../server/contracts.js";
+import { projectInput, type PageEvidence } from "../server/contracts.js";
+
+test("an error response requires access review, not changes to its error-page content", () => {
+  const project = { ...projectInput.parse({ domain: "example.com", brand: "Example" }), id: "project", createdAt: "2026-10-01T00:00:00Z" };
+  const html = '<title>Not found</title><meta name="robots" content="noindex"><p>Missing</p>';
+  for (const status of [404, 410, 503]) {
+    const page = parsePage("https://example.com/missing", status, html);
+    const findings = auditFindings(project, "audit", [page]);
+    assert.equal(findings.length, 1); assert.equal(findings[0].kind, "http");
+    assert.deepEqual(findings[0].evidenceIds, [page.id]); assert.equal(findings[0].targetUrl, page.url);
+  }
+  const valid = auditFindings(project, "audit", [parsePage("https://example.com/private", 200, html)]);
+  assert.ok(valid.some(finding => finding.kind === "indexing"));
+  assert.ok(valid.some(finding => finding.kind === "description"));
+});
 
 test("crawls www redirects and sitemap pages with each origin's own policy and no foreign subdomains", async () => {
   const requests: string[] = [], pages: PageEvidence[] = [];

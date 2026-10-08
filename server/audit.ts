@@ -172,14 +172,16 @@ export function auditFindings(
         status: "open",
         kind,
       });
-    if (p.status >= 400)
+    if (p.status < 200 || p.status >= 300) {
       add(
         "http",
         "Page could not be retrieved",
         "The page returned HTTP " + p.status + ".",
         "high",
-        ["Restore a successful response for the page.", "Recheck the URL."],
+        ["Confirm whether this URL should still exist. Restore the page or update links to its replacement.", "Recheck the URL."],
       );
+      continue;
+    }
     if (!p.title)
       add(
         "title",

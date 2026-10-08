@@ -117,6 +117,7 @@ test("page essentials count only inspected pages and ignore blank metadata", () 
   ]);
   assert.deepEqual(result.audit, {
     pages: 2,
+    available: 2,
     titles: 1,
     descriptions: 1,
     structuredData: 1,
@@ -124,11 +125,14 @@ test("page essentials count only inspected pages and ignore blank metadata", () 
   });
   assert.deepEqual(workspacePresentation([], undefined, [], [], 0).audit, {
     pages: 0,
+    available: 0,
     titles: 0,
     descriptions: 0,
     structuredData: 0,
     noindex: 0,
   });
+  const withError = workspacePresentation([], undefined, [], [], 0, [page, { ...page, id: "missing", status: 404, title: "Not found", description: "Missing page", noindex: true }]);
+  assert.deepEqual(withError.audit, { pages: 2, available: 1, titles: 1, descriptions: 0, structuredData: 1, noindex: 0 });
 });
 
 test("source coverage deduplicates each answer and excludes unsafe links without inflating percentages", () => {

@@ -910,8 +910,8 @@ export function AuditEssentials({ audit }: { audit: Presentation["audit"] }) {
       <div className="panel-heading">
         <h2>Page essentials</h2>
         <span>
-          {audit.pages}{" "}
-          {audit.pages === 1 ? "page inspected" : "pages inspected"}
+          {audit.available}{" "}
+          {audit.available === 1 ? "page available" : "pages available"}
         </span>
       </div>
       <div className="audit-essentials">
@@ -924,11 +924,11 @@ export function AuditEssentials({ audit }: { audit: Presentation["audit"] }) {
               <span>
                 {label}
                 <strong>
-                  {count} / {audit.pages}
+                  {count} / {audit.available}
                 </strong>
               </span>
               <div className="coverage-track" aria-hidden="true">
-                <span style={{ width: (count / audit.pages) * 100 + "%" }} />
+                <span style={{ width: (audit.available ? count / audit.available : 0) * 100 + "%" }} />
               </div>
             </div>
           </div>

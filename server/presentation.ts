@@ -42,6 +42,7 @@ export type Presentation = {
   }[];
   audit: {
     pages: number;
+    available: number;
     titles: number;
     descriptions: number;
     structuredData: number;
@@ -223,17 +224,19 @@ export function workspacePresentation(
   requested: number,
   auditPages: PageEvidence[] = [],
 ): Presentation {
+  const availablePages = auditPages.filter(page => page.status >= 200 && page.status < 300);
   return {
     ...sourceCoverage(observations),
     prompts: promptCoverage(prompts, observations, requested),
     ...comparableHistory(jobs, measurement),
     audit: {
       pages: auditPages.length,
-      titles: auditPages.filter((page) => page.title.trim()).length,
-      descriptions: auditPages.filter((page) => page.description.trim()).length,
-      structuredData: auditPages.filter((page) => page.schemaTypes.length)
+      available: availablePages.length,
+      titles: availablePages.filter((page) => page.title.trim()).length,
+      descriptions: availablePages.filter((page) => page.description.trim()).length,
+      structuredData: availablePages.filter((page) => page.schemaTypes.length)
         .length,
-      noindex: auditPages.filter((page) => page.noindex).length,
+      noindex: availablePages.filter((page) => page.noindex).length,
     },
     outcomes: (
       [
