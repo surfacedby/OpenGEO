@@ -10,13 +10,13 @@ import { projectInput } from "../server/contracts.js";
 const directory = mkdtempSync(join(tmpdir(), "opengeo-connection-ui-"));
 const runtime = await start({ directory, port: 0, protector: { encrypt: text => Buffer.from(text), decrypt: bytes => bytes.toString() } });
 const original = globalThis.fetch;
-let requests = 0, release!: () => void;
+let requests = 0, contentAvailable = false, release!: () => void;
 const validation = new Promise<void>(resolve => { release = resolve; });
 globalThis.fetch = (async url => {
   assert.equal(String(url), "https://api.surfacedby.com/api/v1/console/capabilities");
   requests++;
   if (requests === 1) await validation;
-  return new Response(JSON.stringify({ data: { platforms: [{ key: "chatgpt", name: "ChatGPT", enabled: true }] } }), {
+  return new Response(JSON.stringify({ data: { platforms: [{ key: "chatgpt", name: "ChatGPT", enabled: true }], content_available: contentAvailable, operations: contentAvailable ? ["content"] : [] } }), {
     status: requests === 2 ? 503 : 200, headers: { "Content-Type": "application/json" },
   });
 }) as typeof fetch;
@@ -52,11 +52,32 @@ try {
   await card.locator(".platform-list").getByText("ChatGPT", { exact: true }).waitFor();
   assert.equal(await card.getByRole("button", { name: "Retry platform check", exact: true }).count(), 0);
   assert.equal(requests, 3);
+  await page.getByRole("tab", { name: "Schedules", exact: true }).click();
+  await page.getByRole("button", { name: "Add schedule", exact: true }).click();
+  await page.getByRole("button", { name: "Scheduled workflow", exact: true }).click();
+  await page.getByRole("option", { name: "Visibility recheck", exact: true }).waitFor();
+  assert.equal(await page.getByRole("option", { name: "Content draft", exact: true }).count(), 0);
+  await page.getByRole("option", { name: "Visibility recheck", exact: true }).click();
+  await page.getByRole("button", { name: "Schedule connection", exact: true }).click();
+  assert.equal(await page.getByRole("option", { name: "ChatGPT", exact: true }).count(), 0);
+  await page.getByRole("option", { name: "SurfacedBy API", exact: true }).click();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  contentAvailable = true;
+  await page.getByRole("tab", { name: "Connections", exact: true }).click();
+  await page.getByRole("tab", { name: "Schedules", exact: true }).click();
+  await page.getByRole("button", { name: "Add schedule", exact: true }).click();
+  await page.getByRole("button", { name: "Scheduled workflow", exact: true }).click();
+  await page.getByRole("option", { name: "Content draft", exact: true }).waitFor();
+  await page.getByRole("option", { name: "Content draft", exact: true }).click();
+  await page.getByLabel("Topic", { exact: true }).waitFor();
+  assert.equal(await page.getByRole("button", { name: "Schedule connection", exact: true }).innerText(), "SurfacedBy API");
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await page.getByRole("tab", { name: "Connections", exact: true }).click();
   await card.getByRole("button", { name: "Disconnect", exact: true }).click();
   await card.getByRole("button", { name: "4 more", exact: true }).waitFor();
   assert.equal(await card.locator(".platform-list").getByText("Gemini", { exact: true }).count(), 1);
   assert.equal(await card.getByText("Platform availability could not be checked.", { exact: true }).count(), 0);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   assert.deepEqual(failures, []);
-  console.log("Actual browser verified: connection mutation guard, capability failure, explicit retry, refreshed supported platforms, disconnect cleanup and mobile layout. No paid requests.");
+  console.log("Actual browser verified: connection mutation guard, capability failure, explicit retry, capability-aware schedules, refreshed supported platforms, disconnect cleanup and mobile layout. No paid requests.");
 } finally { release(); globalThis.fetch = original; await browser.close(); await runtime.app.close(); rmSync(directory, { recursive: true, force: true }); }

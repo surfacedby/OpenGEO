@@ -307,14 +307,30 @@ export function ScheduleControls({ run, connected }: { run: (f: () => Promise<un
     [provider, setProvider] = useState<Provider>("chatgpt"), [platform, setPlatform] = useState("chat_gpt"),
     [models, setModels] = useState<Model[]>([]), [model, setModel] = useState(""), [loading, setLoading] = useState(false),
     [platforms, setPlatforms] = useState<{ key: string; name: string }[]>([]), [frequency, setFrequency] = useState("weekly"), [saving, setSaving] = useState(false), [message, setMessage] = useState(""),
-    [discoveryError, setDiscoveryError] = useState(""), [discoveryRevision, setDiscoveryRevision] = useState(0);
+    [discoveryError, setDiscoveryError] = useState(""), [discoveryRevision, setDiscoveryRevision] = useState(0),
+    [consoleAvailability, setConsoleAvailability] = useState<{ content: boolean; answers: boolean } | null>(null),
+    [availabilityError, setAvailabilityError] = useState("");
   async function mutate(action: () => Promise<unknown>) {
     setSaving(true); setError(""); setMessage("");
     try { await run(async () => { try { await action(); } catch (failure) { setError(failure); } }); }
     finally { setSaving(false); }
   }
-  const allowed: Provider[] = kind === "content" ? ["chatgpt", "console", "openrouter"] : ["chatgpt", "console", "dataforseo", "openrouter"],
-    choices = providerOptions(connected, allowed), local = kind === "audit";
+  const availableConnections: Record<string, boolean> = { ...connected, console: connected.console && (kind === "content" ? consoleAvailability?.content : consoleAvailability?.answers) === true },
+    allowed: Provider[] = kind === "content" ? ["chatgpt", "console", "openrouter"] : ["chatgpt", "console", "dataforseo", "openrouter"],
+    choices = providerOptions(availableConnections, allowed), local = kind === "audit",
+    workflows = [{ value: "audit", label: "Local audit", detail: "No provider required" },
+      ...(connected.chatgpt || connected.openrouter || connected.dataforseo || connected.console && consoleAvailability?.answers ? [{ value: "recheck", label: "Visibility recheck" }] : []),
+      ...(connected.chatgpt || connected.openrouter || connected.console && consoleAvailability?.content ? [{ value: "content", label: "Content draft" }] : [])];
+  useEffect(() => {
+    let stopped = false;
+    setConsoleAvailability(null); setAvailabilityError("");
+    if (!connected.console) return;
+    void api("/providers/console/capabilities").then(capabilities => {
+      if (!stopped) setConsoleAvailability({ content: capabilities.content_available === true && capabilities.operations?.includes("content") === true,
+        answers: (capabilities.platforms ?? []).some((entry: any) => entry.enabled) });
+    }).catch(() => { if (!stopped) setAvailabilityError("SurfacedBy availability could not be checked."); });
+    return () => { stopped = true; };
+  }, [connected.console, discoveryRevision]);
   useEffect(() => {
     let stopped = false;
     const refresh = () => void Promise.all([api("/schedules"), api("/projects")]).then(([nextSchedules, nextProjects]) => { if (!stopped) { setSchedules(nextSchedules); setProjects(nextProjects); } }).catch((failure) => { if (!stopped) setError(failure.message); });
@@ -323,7 +339,7 @@ export function ScheduleControls({ run, connected }: { run: (f: () => Promise<un
   }, []);
   useEffect(() => {
     if (!choices.some((choice) => choice.value === provider) && choices.length) setProvider(choices[0].value as Provider);
-  }, [kind, connected.chatgpt, connected.console, connected.dataforseo, connected.openrouter]);
+  }, [kind, connected.chatgpt, connected.console, connected.dataforseo, connected.openrouter, consoleAvailability]);
   useEffect(() => {
     let stopped = false;
     setModels([]); setModel(""); setPlatforms([]); setDiscoveryError(""); setError("");
@@ -379,7 +395,7 @@ export function ScheduleControls({ run, connected }: { run: (f: () => Promise<un
     }}>
       <div className="form-grid">
         <label>Website<Select label="Scheduled website" name="project" {...feedback.field("projectId")} options={projects.map((project) => ({ value: project.id, label: project.domain, detail: project.brand }))} placeholder="Add a website first" /></label>
-        <label>Workflow<Select label="Scheduled workflow" {...feedback.field("kind")} value={kind} onChange={setKind} searchable={false} options={[{ value: "audit", label: "Local audit", detail: "No provider required" }, { value: "recheck", label: "Visibility recheck" }, { value: "content", label: "Content draft" }]} /></label>
+        <label>Workflow<Select label="Scheduled workflow" {...feedback.field("kind")} value={kind} onChange={setKind} searchable={false} options={workflows} /></label>
         {!local && choices.length > 0 && <><label>Connection<Select label="Schedule connection" {...feedback.field("provider")} value={provider} onChange={(value) => { setProvider(value as Provider); setPlatform("chat_gpt"); }} options={choices} placeholder="Connect a provider first" /></label>
           {["dataforseo", "console"].includes(provider) && kind !== "content" && <label>Answer platform<Select label="Schedule answer platform" {...feedback.field("platform")} value={platform} onChange={setPlatform} options={(provider === "console" ? platforms : [{ key: "chat_gpt", name: "ChatGPT" }, { key: "gemini", name: "Gemini" }, { key: "perplexity", name: "Perplexity" }]).map((entry) => ({ value: entry.key, label: entry.name, icon: <ProviderIcon provider={entry.key} size={18} /> }))} /></label>}
           {provider !== "console" && <ModelSelector models={models} value={model} onChange={setModel} loading={loading} validation={feedback.field("model")} />}
@@ -392,10 +408,11 @@ export function ScheduleControls({ run, connected }: { run: (f: () => Promise<un
       </div>
       {kind === "content" && <label>Topic<input name="topic" {...feedback.field("topic")} required placeholder="What should this scheduled content help readers understand?" /></label>}
       {!local && !choices.length && <p role="status">Connect a provider in Connections before scheduling AI work.</p>}
+      {availabilityError && <div><p className="inline-error" role="alert">{availabilityError}</p><button type="button" className="secondary" disabled={saving} onClick={() => setDiscoveryRevision(value => value + 1)}>Retry SurfacedBy availability</button></div>}
       {!local && discoveryError && <div><p className="inline-error" role="alert">{discoveryError}</p><button type="button" className="secondary" disabled={loading || saving} onClick={() => setDiscoveryRevision(value => value + 1)}>Retry availability check</button></div>}
       {!local && provider === "chatgpt" && <p className="small">Uses your ChatGPT plan within its limits. Affected work pauses if access is unavailable.</p>}
       {kind === "content" && provider === "console" && <p className="small">Scheduled drafts run automatically only when their estimate fits both approved maximums. Unused credits are returned after completion.</p>}
-      <div className="button-row"><button className="primary" disabled={saving || !projects.length || loading || (!local && (!!discoveryError || !choices.length || !connected[provider] || (provider !== "console" && !model) || (provider === "console" && kind !== "content" && !platform)))}>{saving ? "Saving schedule..." : "Save schedule"}</button><button type="button" disabled={saving} className="secondary" onClick={() => setAdding(false)}>Cancel</button></div>
+      <div className="button-row"><button className="primary" disabled={saving || !projects.length || loading || (!local && (!!discoveryError || !choices.length || !availableConnections[provider] || (provider !== "console" && !model) || (provider === "console" && kind !== "content" && !platform)))}>{saving ? "Saving schedule..." : "Save schedule"}</button><button type="button" disabled={saving} className="secondary" onClick={() => setAdding(false)}>Cancel</button></div>
     </form>}
   </section>;
 }
