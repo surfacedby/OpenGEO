@@ -72,7 +72,7 @@ ChatGPT uses an independent implementation of the [published subscription-sharin
 
 ## Evidence you can inspect
 
-Observations record the prompt, provider, model, locale, retrieval mode, collection time, answer and citation URLs. These are API measurements, which can differ from answers in a consumer application. ChatGPT checks can request web search; OpenRouter checks use model-only answers without a search plugin. Links are saved only when returned as citation annotations. Failed checks are missing observations, not absent mentions.
+Observations record the prompt, provider, model, locale, retrieval mode, collection time, answer and citation URLs. ChatGPT and OpenRouter collect API answers, which can differ from consumer applications. DataForSEO and supported SurfacedBy checks collect consumer-interface answers; each result keeps its collection surface. ChatGPT checks can request web search; OpenRouter checks use model-only answers without a search plugin. Citation links come from the provider's answer evidence. Failed checks are missing observations, not absent mentions.
 
 Mention rate is the percentage of collected answers detecting the configured brand or aliases. Citation rate is the percentage linking to the configured website. Local matching is literal; generic brand names need careful review. Console recognition and proprietary scores retain their own labels and provenance.
 

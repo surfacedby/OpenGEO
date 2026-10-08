@@ -28,9 +28,7 @@ const lock = JSON.parse(readFileSync(join(root, 'package-lock.json'), 'utf8')).p
 const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const dispositions = JSON.parse(readFileSync(join(root, 'scripts', 'dependency-dispositions.json'), 'utf8'));
 
-function unmet(finding) {
-  const review = dispositions.find((entry) => entry.advisory === finding.advisory && entry.package === finding.package);
-  if (!review) return 'no reviewed disposition';
+function lockedDependencyProblem(review) {
   const installs = Object.entries(lock).filter(([path]) => path === 'node_modules/' + review.package || path.endsWith('/node_modules/' + review.package));
   if (installs.length !== 1) return `expected one locked copy, found ${installs.length}`;
   const [, entry] = installs[0];
@@ -40,6 +38,16 @@ function unmet(finding) {
   const requires = (item) => ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'].some((map) => item[map]?.[review.package]);
   const dependents = Object.entries(lock).filter(([, item]) => requires(item)).map(([name]) => name).sort();
   if (JSON.stringify(dependents) !== JSON.stringify([...review.dependents].sort())) return `dependents changed to ${dependents.join(', ') || 'none'}`;
+  return null;
+}
+
+function unmet(finding) {
+  const review = dispositions.find((entry) => entry.advisory === finding.advisory && entry.package === finding.package);
+  if (!review) return 'no reviewed disposition';
+  for (const dependency of [review, ...(review.reviewedDependencies ?? [])]) {
+    const problem = lockedDependencyProblem(dependency);
+    if (problem) return dependency.package + ': ' + problem;
+  }
   if (review.requiresUnsetDownloadCache) {
     const download = manifest.build?.electronDownload;
     if (download?.cache !== undefined || download?.downloadOptions?.cache !== undefined) return 'the build configuration now enables a download cache';

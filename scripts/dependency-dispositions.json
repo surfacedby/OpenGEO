@@ -7,5 +7,27 @@
     "dependents": ["node_modules/cacheable-request"],
     "requiresUnsetDownloadCache": true,
     "reason": "Reached only through electron-builder's Electron downloader (app-builder-lib -> @electron/get 3 -> got 11 -> cacheable-request). got creates its cacheable-request client only when a cache option is supplied; neither app-builder-lib nor this project's build configuration supplies one, so the max-stale code never runs. The package is build tooling, absent from the desktop app and the Docker image. Released 4.3.0 does not change max-stale handling, and overriding @electron/get to 5 under electron-builder 26 drops its download timeout, proxy agent and server-error retries. Revisit when a stable electron-builder release depends on @electron/get 5."
+  },
+  {
+    "advisory": "GHSA-hp3w-g68c-fv3c",
+    "package": "sprintf-js",
+    "version": "1.1.3",
+    "integrity": "sha512-Oo+0REFV59/rz3gfJNKQiBlwfHaSESl1pcGyABQsnnIfWOFt6JNj5gCog2U6MLZ//IGYD+nA8nI+mTShREReaA==",
+    "dependents": ["node_modules/roarr"],
+    "reviewedDependencies": [
+      {
+        "package": "roarr",
+        "version": "2.15.4",
+        "integrity": "sha512-CHhPh+UNHD2GTXNYhPWLnU8ONHdI+5DI+4EYIAOaiD63rHeYlZvyh8P+in5999TTSFgUYuKUAjzRI4mdh/p+2A==",
+        "dependents": ["node_modules/global-agent"]
+      },
+      {
+        "package": "global-agent",
+        "version": "3.0.0",
+        "integrity": "sha512-PT6XReJ+D07JvGoxQMkT6qji/jVNfX/h364XHZOWeRzy64sSFr+xJ5OX7LI3b4MPQzdL4H8Y8M0xzPpsVMwA8Q==",
+        "dependents": ["node_modules/app-builder-lib/node_modules/@electron/get"]
+      }
+    ],
+    "reason": "The reviewed advisory requires attacker-controlled numeric precision in a format string and has no published patched version. The only chain is electron-builder -> app-builder-lib -> @electron/get 3 -> global-agent 3 -> roarr 2 -> sprintf-js. Every global-agent logger format is a fixed string without numeric precision; network URLs, headers and errors enter structured context, never the format argument. Single-string roarr calls use the fixed %s format. All three packages are build-only and excluded from the application and Docker runtime. Their exact locked versions, integrities and sole dependents are checked so a changed logging caller invalidates this review. Revisit when the upstream advisory publishes a fix or the downloader removes this chain."
   }
 ]
