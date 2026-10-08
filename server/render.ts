@@ -1,9 +1,10 @@
 import { chromium } from "playwright";
-import { crawlFetch, publicUrl } from "./network.js";
+import { crawlFetch, publicUrl, type CrawlPermission } from "./network.js";
 /** Browser traffic goes through the same pinned public-network fetcher as HTML audits. */
 export async function renderedFetch(
   url: string,
   signal = AbortSignal.timeout(60000),
+  allowed?: CrawlPermission,
 ) {
   publicUrl(url);
   const browser = await chromium.launch({ headless: true });
@@ -14,7 +15,12 @@ export async function renderedFetch(
     });
     await context.route("**/*", async (route) => {
       try {
-        const response = await crawlFetch(route.request().url(), signal);
+        const navigation = route.request().isNavigationRequest();
+        const response = await crawlFetch(route.request().url(), signal, navigation ? allowed : undefined);
+        if (navigation && response.url !== route.request().url()) {
+          await route.fulfill({ status: 302, headers: { location: response.url } });
+          return;
+        }
         if (!/text\/|javascript|json|xml/.test(response.contentType)) {
           await route.abort();
           return;

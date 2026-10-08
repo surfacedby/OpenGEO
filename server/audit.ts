@@ -1,6 +1,6 @@
 import { load } from "cheerio";
 import { randomUUID } from "node:crypto";
-import { crawlFetch, publicUrl } from "./network.js";
+import { crawlFetch, publicUrl, sameSiteHost } from "./network.js";
 import { loadRobots } from "./robots.js";
 import { sitemapPages } from "./sitemap.js";
 import type { PageEvidence, Finding, Project, AuditCoverage } from "./contracts.js";
@@ -75,35 +75,49 @@ export async function crawl(
   metadataFetcher = fetcher,
 ): Promise<AuditCoverage> {
   const base = publicUrl(domain);
-  const allowed = await loadRobots(base, signal, metadataFetcher);
+  const policies = new Map<string, ReturnType<typeof loadRobots>>();
+  const policy = (url: URL) => {
+    let pending = policies.get(url.origin);
+    if (!pending) { pending = loadRobots(url, signal, metadataFetcher); policies.set(url.origin, pending); }
+    return pending;
+  };
+  const basePolicy = await policy(base);
+  const allowed = async (value: string) => {
+    const url = publicUrl(value);
+    return sameSiteHost(url, base) && (await policy(url))(url.href);
+  };
   progress("Discovering your website pages");
-  const discovered = await sitemapPages(base, allowed.sitemaps, allowed, signal, maxPages * 4, metadataFetcher);
+  const discovered = await sitemapPages(base, basePolicy.sitemaps, allowed, signal, maxPages * 4, metadataFetcher);
   const queue = [...new Set([base.href, ...discovered])],
     seen = new Set<string>();
   const queued = new Set(queue),
     errors: { url: string; reason: string }[] = [];
+  const visited = new Set<string>();
   let fetched = 0;
   const excluded: string[] = [], skippedNonHtml: string[] = [];
   while (queue.length && seen.size < maxPages) {
     signal.throwIfAborted();
     const url = queue.shift()!;
-    if (seen.has(url)) continue;
+    if (visited.has(url)) continue;
+    visited.add(url);
     seen.add(url);
-    if (!allowed(url)) {
+    if (!await allowed(url)) {
       excluded.push(url);
       continue;
     }
     progress("Auditing " + new URL(url).pathname);
     try {
-      const r = await fetcher(url, signal);
+      const r = await fetcher(url, signal, allowed);
+      if (!await allowed(r.url)) throw new Error("The response is outside the website's permitted crawl scope");
+      visited.add(r.url);
       if (!r.contentType.includes("text/html")) { skippedNonHtml.push(url); continue; }
       const p = parsePage(r.url, r.status, r.text);
       save(p);
       fetched++;
       for (const link of p.links)
         if (
-          new URL(link).hostname === base.hostname &&
-          !seen.has(link) &&
+          sameSiteHost(new URL(link), base) &&
+          !visited.has(link) &&
           !queued.has(link) &&
           queue.length < maxPages * 4
         ) {

@@ -45,6 +45,11 @@ export function publicUrl(value: string): URL {
   u.hash = "";
   return u;
 }
+/** A site's apex and www address share crawl scope; other subdomains do not. */
+export function sameSiteHost(left: URL, right: URL) {
+  return left.hostname.replace(/^www\./, "") === right.hostname.replace(/^www\./, "");
+}
+export type CrawlPermission = (url: string) => boolean | Promise<boolean>;
 export const publicAgent = new Agent({
   connect: {
     lookup: (host, options, callback) => {
@@ -84,9 +89,10 @@ export async function readLimited(
   }
   return Buffer.concat(chunks).toString("utf8");
 }
-export async function crawlFetch(value: string, signal?: AbortSignal) {
+export async function crawlFetch(value: string, signal?: AbortSignal, allowed?: CrawlPermission) {
   let u = publicUrl(value);
   for (let i = 0; i < 6; i++) {
+    if (allowed && !await allowed(u.href)) throw new Error("The URL is outside the website's permitted crawl scope");
     const r = await safeFetch(u, {
       dispatcher: publicAgent,
       redirect: "manual",

@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { Job, Model, Project, DiscoveredWebsite, Observation } from "./contracts.js";
 import { ProviderError } from "./contracts.js";
 import type { Runner } from "./workflows.js";
-import { publicUrl } from "./network.js";
+import { publicUrl, sameSiteHost } from "./network.js";
 import { prompts } from "./prompts.js";
 import { contentSources } from "./evidence-context.js";
 import { consoleQuestions } from "./console-questions.js";
@@ -11,7 +11,7 @@ export const questionDiscoveryVersion = 4;
 const offeringInventory = z.object({
   siteType: z.enum(["business", "marketplace", "publication", "personal", "unclear"]),
   audience: z.string().trim().max(500),
-  offerings: z.array(z.object({ id: z.string().min(1).max(80), label: z.string().trim().min(3).max(300), customerNeed: z.string().trim().min(3).max(500), evidence: z.array(z.object({ pageId: z.string(), quote: z.string().trim().min(16).max(600) }).strict()).min(1).max(5) }).strict()).max(30),
+  offerings: z.array(z.object({ id: z.string().min(1).max(80), label: z.string().trim().min(3).max(300), customerNeed: z.string().trim().min(3).max(500), evidence: z.array(z.object({ pageId: z.string(), quote: z.string().trim().min(1).max(600) }).strict()).min(1).max(5) }).strict()).max(30),
   incidentalTopics: z.array(z.string().max(300)).max(30),
 }).strict();
 const suggestedQuestions = z.object({
@@ -48,7 +48,7 @@ export async function discoverQuestions(runner: Runner, job: Job, project: Proje
     const pages = [];
     let remaining = Math.max(0, Math.min(60000, model.contextLength - 7000));
     for (const page of sorted) {
-      const source = { id: page.id, url: page.url, title: page.title.slice(0, 300), headings: page.h1.slice(0, 5), schemaTypes: page.schemaTypes, text: page.text.slice(0, 3500), externalLinks: page.links.filter(link => { try { return new URL(link).hostname !== new URL(page.url).hostname; } catch { return false; } }).slice(0, 30) };
+      const source = { id: page.id, url: page.url, title: page.title.slice(0, 300), headings: page.h1.slice(0, 5), schemaTypes: page.schemaTypes, text: page.text.slice(0, 3500), externalLinks: page.links.filter(link => { try { return !sameSiteHost(new URL(link), new URL(page.url)); } catch { return false; } }).slice(0, 30) };
       const size = Buffer.byteLength(JSON.stringify(source), "utf8");
       if (size > remaining) continue;
       pages.push(source); remaining -= size;

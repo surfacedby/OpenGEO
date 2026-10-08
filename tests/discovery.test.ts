@@ -93,6 +93,33 @@ test("question discovery rejects unsupported inventory and exposes only independ
   } finally { globalThis.fetch = original; await f.close(); }
 });
 
+test("short source labels remain valid evidence but blank and unsupported quotations cannot establish offerings", async () => {
+  const f = fixture(), original = globalThis.fetch;
+  let quote = "Support", calls = 0;
+  globalThis.fetch = (async (url, init) => {
+    if (String(url).endsWith("/models")) return json({ models: [{ slug: "fixture-model", display_name: "Fixture model", visibility: "list", context_window: 32768 }] });
+    calls++;
+    const input = JSON.parse(JSON.parse(init!.body as string).input[0].content);
+    if (input.pages && !input.candidates) return stream(JSON.stringify({ siteType: "business", audience: "Small support teams", offerings: [{ id: "support", label: "Support workspace", customerNeed: "Keep customer questions organized", evidence: [{ pageId: f.page.id, quote }] }], incidentalTopics: [] }));
+    if (input.inventory) return stream(JSON.stringify({ questions: [{ text: "How can our team keep customer questions organized?", offeringId: "support", intent: "discover" }] }));
+    return stream(JSON.stringify({ questions: [{ index: 0, text: "How can our team keep customer questions organized?" }] }));
+  }) as typeof fetch;
+  try {
+    for (const [proof, expectedError] of [["Support", null], ["Buy", "evidence"], ["   ", "format"]] as const) {
+      quote = proof; const before = calls;
+      const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: "discover", provider: "chatgpt", auditJobId: f.audit.id }), "short-source-" + proof);
+      await f.runner.tick();
+      assert.equal(f.store.job(job.id).error, expectedError);
+      assert.equal(calls - before, expectedError ? 1 : 3);
+      if (!expectedError) {
+        assert.equal(f.store.job(job.id).status, "completed");
+        assert.equal((f.store.job(job.id).result as any).questions[0].sources[0].url, f.page.url);
+      } else assert.equal(f.store.job(job.id).status, "paused");
+    }
+    assert.deepEqual(f.store.project(f.project.id).prompts, f.project.prompts);
+  } finally { globalThis.fetch = original; await f.close(); }
+});
+
 test("a response that breaks its contract pauses the run, and resuming requests it again instead of re-reading it", async () => {
   const f = fixture(), original = globalThis.fetch; let offeringCalls = 0;
   globalThis.fetch = (async (url, init) => {
