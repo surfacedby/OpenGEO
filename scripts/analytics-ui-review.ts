@@ -136,6 +136,8 @@ try {
       runtime.store.put("observation", project.id, job.id, observation);
     currentId = job.id;
   }
+  const campaign = { id: randomUUID(), name: "Documentation examples", goal: "Answers about example domains link to the example page.", prompts: [prompts[0], prompts[2]], targetUrls: ["https://example.com/"], competitors: ["iana.org"], reviewBy: "2026-10-01", status: "active", createdAt: "2026-09-20T10:00:00.000Z" };
+  assert.equal((await runtime.app.inject({ method: "PATCH", url: `/api/projects/${project.id}`, headers: { authorization: "Bearer " + runtime.token }, payload: { campaigns: [campaign] } })).statusCode, 200);
   const page = await browser.newPage({
     viewport: { width: 1360, height: 900 },
     deviceScaleFactor: 2,
@@ -160,6 +162,7 @@ try {
   assert.equal(projection.presentation.domains[0].answers, 4);
   assert.equal(projection.presentation.domains[0].answerRate, 100);
   assert.equal(projection.presentation.prompts[0].requested, 2);
+  assert.deepEqual(projection.campaigns.map((item: { questions: number; targets: number; targetsCited: number }) => [item.questions, item.targets, item.targetsCited]), [[3, 1, 1]]);
   assert.deepEqual(
     projection.presentation.outcomes.map(
       (group: { count: number }) => group.count,
@@ -201,6 +204,7 @@ try {
       "Overview",
       "Visibility",
       "Prompts",
+      "Campaigns",
       "Responses",
       "Sources",
       "Competitors",
@@ -307,6 +311,44 @@ try {
         });
       }
     }
+  }
+  // Campaign screens: the list and each tab of one campaign, then the lens over the evidence screens.
+  for (const width of [1360, 760, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 780 : 900 });
+    await navigate(page, "Campaigns");
+    await page.getByRole("button", { name: campaign.name, exact: true }).click();
+    await page.getByRole("heading", { name: campaign.name, exact: true }).waitFor();
+    for (const tab of ["Results", "Questions", "Target pages", "Competitors", "Checks"]) {
+      await page.getByRole("tab", { name: new RegExp("^" + tab) }).click();
+      if (tab === "Target pages") assert.match(await page.getByRole("tabpanel").innerText(), /Cited in 2 of 3 answers/);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `Campaign ${tab} at ${width}px`);
+      await page.screenshot({ path: join(output, `campaign-${tab.toLowerCase().replaceAll(" ", "-")}-${width}.png`), fullPage: true });
+    }
+    await navigate(page, "Visibility");
+    await page.getByRole("button", { name: width === 1360 ? "Campaign" : "Mobile campaign", exact: true }).click();
+    await page.getByRole("option", { name: new RegExp(campaign.name) }).click();
+    await page.getByText("Showing 3 of 4 questions", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Check these 3 questions", exact: true }).waitFor();
+    for (const view of ["Visibility", "Responses", "Sources", "Competitors"]) {
+      await navigate(page, view);
+      await page.getByRole("heading", { name: view, exact: true }).waitFor();
+      await page.locator(".workspace-loading").waitFor({ state: "hidden" });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `${view} for a campaign at ${width}px`);
+      await page.screenshot({ path: join(output, `campaign-lens-${view.toLowerCase()}-${width}.png`) });
+    }
+    await page.getByRole("button", { name: width === 1360 ? "Campaign" : "Mobile campaign", exact: true }).click();
+    await page.getByRole("option", { name: /All questions/ }).click();
+    await navigate(page, "Prompts");
+    await page.getByRole("button", { name: /^No campaign/ }).waitFor();
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `Grouped prompts at ${width}px`);
+    await page.screenshot({ path: join(output, `prompts-grouped-${width}.png`) });
+    await navigate(page, "Campaigns");
+    await page.getByRole("button", { name: "New campaign", exact: true }).click();
+    const editor = page.getByRole("dialog", { name: "New campaign" });
+    await editor.getByLabel("Campaign name").waitFor();
+    assert.equal(await editor.getByRole("button", { name: "Create campaign", exact: true }).isDisabled(), true);
+    await editor.screenshot({ path: join(output, `campaign-dialog-${width}.png`) });
+    await editor.getByRole("button", { name: "Cancel", exact: true }).click();
   }
   await navigate(page, "Competitors");
   const latest = runtime.store.job(currentId);
@@ -507,7 +549,7 @@ try {
     await page.setViewportSize({ width, height: 900 });
     await page.getByRole('button', { name: width === 1360 ? 'Website' : 'Mobile website', exact: true }).click();
     await page.getByRole('option', { name: /example.org/ }).click();
-    for (const view of ['Overview', 'Visibility', 'Responses', 'Sources', 'Competitors', 'Scans', 'Opportunities', 'Content', 'Reports']) {
+    for (const view of ['Overview', 'Visibility', 'Campaigns', 'Responses', 'Sources', 'Competitors', 'Scans', 'Opportunities', 'Content', 'Reports']) {
       await navigate(page, view);
       await page.getByRole('heading', { name: view, exact: true }).waitFor();
       await page.locator('.workspace-loading').waitFor({ state: 'hidden' });
@@ -519,12 +561,13 @@ try {
   console.log(
     JSON.stringify({
       output,
-      viewportChecks: 36,
+      viewportChecks: 39,
       populatedViewportChecks: 6,
-      emptyViewportChecks: 18,
+      emptyViewportChecks: 20,
+      campaignViewportChecks: 30,
       settingsTabChecks: 9,
       tests:
-        "all twelve screens, populated audit/opportunities/content, optional measurement details, outcome filters, comparison settings preservation, gaps, zero values, deduplication, source grouping/search/drill-down, question drill-down, keyboard answer drawer/chart, editable questions, empty history and unsaved-draft persistence",
+        "all thirteen screens, campaign list, tabs, lens and grouped prompts, populated audit/opportunities/content, optional measurement details, outcome filters, comparison settings preservation, gaps, zero values, deduplication, source grouping/search/drill-down, question drill-down, keyboard answer drawer/chart, editable questions, empty history and unsaved-draft persistence",
       providerRequests: 0,
       rendererErrors: failures.length,
     }),

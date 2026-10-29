@@ -140,6 +140,7 @@ const job = z
     spentUsd: z.number().nonnegative(),
     costBasis: z.enum(['reported', 'includes_estimates']).optional(),
     result: z.unknown().optional(),
+    campaignId: z.string().uuid().optional(),
   })
   .strict();
 export const migrationPackage = z

@@ -1,7 +1,7 @@
 import { Store } from "./storage.js";
 import type { PageEvidence, ManagedSourceEvidence } from "./contracts.js";
 import type { PortableContent } from "./import.js";
-import { portableJobResult, completedMeasurement, measurementTime } from "./portable-results.js";
+import { portableJobResult, completedBrandMeasurement, measurementTime } from "./portable-results.js";
 import { currentFindings } from "./presentation.js";
 export { escapeHtml } from "./markdown.js";
 export function exportProject(store: Store, id: string) {
@@ -25,6 +25,7 @@ export function exportProject(store: Store, id: string) {
           result,
           spentUsd,
           costBasis,
+          campaignId,
         }) => ({
           id,
           kind,
@@ -37,6 +38,7 @@ export function exportProject(store: Store, id: string) {
           result: portableJobResult({ kind, result }),
           spentUsd,
           costBasis,
+          campaignId,
         }),
       ),
     pages: store.portableArtifacts<PageEvidence>(id, "page"),
@@ -50,7 +52,7 @@ export function reportMarkdown(store: Store, id: string) {
   const p = store.project(id),
     jobs = store.jobs(id),
     findings = currentFindings(store.findings(id), jobs),
-    latest = jobs.find(completedMeasurement);
+    latest = jobs.find(completedBrandMeasurement);
   const metrics = (latest?.result as { metrics?: { requested: number; completed: number; missing: number; mentionRate: number | null; citationRate: number | null } } | null)?.metrics;
   const percent = (value: number | null) => value === null ? "No collected evidence" : value.toFixed(1) + "%";
   return (

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowRight, Check, Globe, LoaderCircle, MessagesSquare, Plus, Save, Search, Sparkles } from 'lucide-react';
-import type { Job, Project, Provider } from '../server/contracts';
+import type { Campaign, Job, Project, Provider } from '../server/contracts';
+import type { CampaignSummary } from '../server/campaigns';
 import { api } from './api';
 import { QuestionRows, type QuestionRow } from './QuestionRows';
 import { FormFeedback, useFormFeedback } from './FormFeedback';
@@ -8,19 +9,21 @@ import { Select } from './Select';
 import { providerOptions } from './provider-ui';
 import { EmptyState, Section, Tabs, Toolbar } from './ui/Primitives';
 import type { EditState } from './useCloseProtection';
+import { PromptGroups } from './Campaigns';
 
 type Suggestion = { text: string; sources?: { url: string; title: string }[] };
 
 /** The same durable discovery jobs power setup and later prompt selection. */
-export function PromptWorkspace({ project, jobs, connected, refresh, openConnections, runControls, onEditState }: {
+export function PromptWorkspace({ project, jobs, connected, refresh, openConnections, runControls, onEditState, campaigns, checkCampaign, editCampaign }: {
   project: Project; jobs: Job[]; connected: Record<string, boolean>; refresh: () => Promise<void>;
   openConnections: () => void; runControls: ReactNode;
   onEditState: (state: EditState) => void;
+  campaigns: CampaignSummary[]; checkCampaign: (id: string) => void; editCampaign: (campaign: Campaign | null, prompts?: string[]) => void;
 }) {
   const options = providerOptions(connected, ['chatgpt', 'console', 'openrouter']);
   const [provider, setProvider] = useState<Provider>(options[0]?.value as Provider ?? 'chatgpt');
   const [budget, setBudget] = useState(''), [busy, setBusy] = useState(false), [message, setMessage] = useState('');
-  const [editing, setEditing] = useState(!project.prompts.length), [query, setQuery] = useState('');
+  const [editing, setEditing] = useState(!project.prompts.length), [query, setQuery] = useState(''), [grouping, setGrouping] = useState<'campaign' | 'none'>('campaign');
   const [rows, setRows] = useState<QuestionRow[]>(project.prompts.map(text => ({ id: crypto.randomUUID(), text, selected: true })));
   const [selected, setSelected] = useState<string[]>([]);
   const [tab, setTab] = useState<'tracked' | 'suggested'>(project.prompts.length ? 'tracked' : 'suggested');
@@ -46,13 +49,14 @@ export function PromptWorkspace({ project, jobs, connected, refresh, openConnect
     <FormFeedback feedback={feedback} />{message && <p role="status" className="save-notice">{message}</p>}
     <div id="prompt-content" role="tabpanel" aria-label={tab === 'tracked' ? 'Tracked prompts' : 'Suggested for you'} tabIndex={0}>
     {tab === 'tracked' ? <Section className="prompt-panel">
-      <Toolbar actions={!editing && <button className="secondary" disabled={busy} onClick={() => { setRows(project.prompts.map(text => ({ id: crypto.randomUUID(), text, selected: true }))); setEditing(true); }}><Plus size={15} />Add or edit prompts</button>}>
+      <Toolbar actions={!editing && <>{project.campaigns.some(campaign => campaign.status === 'active') && <Select label="Group prompts" compact searchable={false} value={grouping} onChange={value => setGrouping(value as 'campaign' | 'none')} options={[{ value: 'campaign', label: 'Group by campaign' }, { value: 'none', label: 'No grouping' }]} />}<button className="secondary" disabled={busy} onClick={() => { setRows(project.prompts.map(text => ({ id: crypto.randomUUID(), text, selected: true }))); setEditing(true); }}><Plus size={15} />Add or edit prompts</button></>}>
         {!editing && project.prompts.length > 0 ? <label className="search"><Search size={16} /><input aria-label="Search tracked prompts" placeholder="Find a prompt..." value={query} onChange={event => setQuery(event.target.value)} /></label> : <h2>Your tracked prompts</h2>}
       </Toolbar>
       {editing ? <form onSubmit={event => { event.preventDefault(); void perform(async () => {
         await api('/projects/' + project.id, { prompts: [...new Set(rows.filter(row => row.selected).map(row => row.text.trim()).filter(Boolean))] }, 'PATCH');
         setEditing(false); setMessage('Prompts saved. Your next visibility check will use this list.');
       }); }}><QuestionRows rows={rows} onChange={setRows} disabled={busy} feedback={feedback} /><div className="button-row"><button className="primary" disabled={busy}><Save size={16} />Save prompts</button><button type="button" className="secondary" disabled={busy} onClick={() => setEditing(false)}>Cancel</button></div></form>
+      : project.prompts.length && grouping === 'campaign' && project.campaigns.some(campaign => campaign.status === 'active') ? filtered.length ? <PromptGroups project={project} campaigns={campaigns} prompts={filtered} check={checkCampaign} edit={editCampaign} create={prompts => editCampaign(null, prompts)} /> : <p>No prompts match your search.</p>
       : project.prompts.length ? <><div className="prompt-list-label"><span>Prompt</span><span>Status</span></div><ol className="tracked-prompt-list">{filtered.map((text, index) => <li key={index + ':' + text}><MessagesSquare size={17} /><span>{text}</span><span className="prompt-ready"><Check size={13} />Tracked</span></li>)}</ol>{!filtered.length && <p>No prompts match your search.</p>}</>
       : <EmptyState icon={MessagesSquare} title="Start with prompts your customers would ask" action={<button className="primary" onClick={() => setTab('suggested')}><Sparkles size={16} />Find suggestions</button>}>Let your connected AI read your website and suggest relevant questions, or add your own.</EmptyState>}
     </Section> : <Section className="prompt-panel" title="Discover your next prompts" description="Suggestions use your website and brand details. Nothing is tracked until you choose it.">

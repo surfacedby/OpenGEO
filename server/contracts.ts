@@ -6,6 +6,20 @@ export const providers = [
   "console",
 ] as const;
 export type Provider = (typeof providers)[number];
+export const campaignInput = z
+  .object({
+    id: z.string().uuid(),
+    name: z.string().trim().min(1).max(100),
+    goal: z.string().trim().max(300).default(""),
+    prompts: z.array(z.string().trim().min(3).max(500)).max(200).default([]),
+    targetUrls: z.array(z.string().url().max(2000)).max(20).default([]),
+    competitors: z.array(z.string().trim().min(2).max(253)).default([]),
+    reviewBy: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().default(null),
+    status: z.enum(["active", "closed"]).default("active"),
+    createdAt: z.string().datetime(),
+  })
+  .strict();
+export type Campaign = z.infer<typeof campaignInput>;
 export const projectInput = z
   .object({
     domain: z.string().max(253),
@@ -26,6 +40,8 @@ export const projectInput = z
       }, "Use a valid language tag")
       .default("en-US"),
     knowledge: z.string().max(50000).default(""),
+    campaigns: z.array(campaignInput).max(50).default([])
+      .refine((campaigns) => new Set(campaigns.map((campaign) => campaign.id)).size === campaigns.length, "Each campaign needs its own identifier"),
   })
   .strict();
 export type ProjectInput = z.infer<typeof projectInput>;
@@ -156,8 +172,10 @@ export const jobInput = z
     measurementJobId: z.string().uuid().optional(),
     auditJobId: z.string().uuid().optional(),
     maxPages: z.number().int().positive().max(100000).default(100),
+    campaignId: z.string().uuid().optional(),
   })
   .strict()
+  .refine((input) => !input.campaignId || ["measure", "recheck"].includes(input.kind), "Only visibility checks can be limited to a campaign")
   .refine((input) => input.kind !== 'revise' || (!!input.contentId && !!input.revisionInstructions), 'Choose a draft and describe the revision')
   .refine((input) => input.kind !== 'competitors' || !!input.measurementJobId, 'Choose a saved visibility check')
   .refine((input) => (input.kind === 'discover') === !!input.auditJobId, 'Question suggestions read one website audit')

@@ -45,14 +45,15 @@ export class Store {
     return this.db
       .prepare("SELECT body FROM projects ORDER BY rowid DESC")
       .all()
-      .map((r: any) => JSON.parse(r.body));
+      .map((r: any) => ({ campaigns: [], ...JSON.parse(r.body) }));
   }
+  /** Projects saved before campaigns existed read as having none. */
   project(id: string): Project {
     const r = this.db
       .prepare("SELECT body FROM projects WHERE id=?")
       .get(id) as any;
     if (!r) throw new Error("Project not found");
-    return JSON.parse(r.body);
+    return { campaigns: [], ...JSON.parse(r.body) };
   }
   createProject(input: ProjectInput) {
     const p = {

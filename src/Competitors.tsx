@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowRight, BookOpen, Check, ExternalLink, Globe, Plus, RefreshCw, Search, Users, X } from 'lucide-react';
 import type { DiscoveredWebsite, Job, Observation, Project } from '../server/contracts';
-import { completedMeasurement, measurementTime } from '../server/portable-results';
+import { completedBrandMeasurement, completedMeasurement, measurementTime } from '../server/portable-results';
 import { api } from './api';
 import { Select } from './Select';
 import { SiteIcon } from './SiteIcon';
@@ -16,30 +16,32 @@ function hostname(value: string) {
 }
 
 /** Comparison metrics and discovered roles always use the same saved check. */
-export function Competitors({ project, jobs, review, run, activity }: {
+export function Competitors({ project, jobs, review, run, activity, scope }: {
   project: Project; jobs: Job[]; review: (measurementId: string) => void;
   run: (action: () => Promise<unknown>) => Promise<void>;
   activity: (job: Job) => ReactNode;
+  /** A campaign lens reads only the campaign's questions, starting from its latest covering check. */
+  scope?: { prompts: string[]; checkId?: string };
 }) {
   const checks = jobs.filter(job => ['measure', 'recheck'].includes(job.kind) && ['completed', 'paused', 'failed'].includes(job.status));
-  const preferred = checks.find(completedMeasurement) ?? checks[0];
+  const preferred = checks.find(job => job.id === scope?.checkId) ?? checks.find(completedBrandMeasurement) ?? checks[0];
   const [checkId, setCheckId] = useState(preferred?.id ?? ''), [answers, setAnswers] = useState<Observation[]>([]);
   const [loading, setLoading] = useState(!!preferred), [error, setError] = useState(''), [query, setQuery] = useState(''), [tab, setTab] = useState('competitors'), [retry, setRetry] = useState(0);
   const [selected, setSelected] = useState<string[]>([]), [saving, setSaving] = useState(false), [newDomain, setNewDomain] = useState('');
   const [detail, setDetail] = useState<string | null>(null), [notice, setNotice] = useState('');
   const fullAnswers = useRef<HTMLDetailsElement>(null);
   const check = checks.find(job => job.id === checkId) ?? preferred;
-  useEffect(() => { setCheckId(preferred?.id ?? ''); setDetail(null); setSelected([]); }, [project.id]);
+  useEffect(() => { setCheckId(preferred?.id ?? ''); setDetail(null); setSelected([]); }, [project.id, scope?.checkId]);
   useEffect(() => {
     let current = true;
     setAnswers([]); setDetail(null); setSelected([]); setError('');
     if (!check) { setLoading(false); return; }
     setLoading(true);
     void api<Observation[]>('/projects/' + project.id + '/checks/' + check.id + '/answers').then(result => {
-      if (current) setAnswers(result);
+      if (current) setAnswers(scope ? result.filter(answer => scope.prompts.includes(answer.prompt)) : result);
     }).catch(error => { if (current) setError(error.message); }).finally(() => { if (current) setLoading(false); });
     return () => { current = false; };
-  }, [project.id, check?.id, retry]);
+  }, [project.id, check?.id, retry, scope?.prompts.join('\n')]);
   const analysis = jobs.find(job => job.kind === 'competitors' && job.measurementJobId === check?.id && job.status === 'completed');
   const pending = jobs.find(job => job.kind === 'competitors' && job.measurementJobId === check?.id && ['queued', 'running', 'paused'].includes(job.status));
   const result = (analysis ?? check)?.result as { competitors?: DiscoveredWebsite[]; references?: DiscoveredWebsite[] } | null;

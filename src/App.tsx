@@ -34,6 +34,7 @@ import {
   Menu,
   ExternalLink,
   Sparkles,
+  Flag,
 } from "lucide-react";
 import { percent, shortDate, relativeTime, dateTime, usd } from "./format";
 import { api } from "./api";
@@ -60,10 +61,14 @@ import { Competitors } from "./Competitors";
 import { PageHeader, EmptyState, emptyIcon, ActionCard, MetricCard as Metric } from './ui/Primitives';
 import { OverviewSummary } from './OverviewSummary';
 import { Dialog as Modal } from './ui/Dialog';
-import { completedMeasurement } from "../server/portable-results";
+import { completedBrandMeasurement, completedMeasurement } from "../server/portable-results";
+import type { CampaignSummary } from "../server/campaigns";
+import { CampaignLens, Campaigns, CampaignVisibility, useCampaignView } from "./Campaigns";
+import { CampaignDialog } from "./CampaignDialog";
 import type { Presentation } from "../server/presentation";
 import identity from "../brand/identity.json";
 import type {
+  Campaign,
   Project,
   Job,
   Observation,
@@ -101,11 +106,13 @@ type Workspace = {
     urls: string[];
     observationIds: string[];
   }[];
+  campaigns: CampaignSummary[];
 };
 const navigation = [
   ["Overview", LayoutDashboard],
   ["Scans", ScanSearch],
   ["Prompts", MessagesSquare],
+  ["Campaigns", Flag],
   ["Visibility", ChartNoAxesCombined],
   ["Responses", MessagesSquare],
   ["Sources", Link],
@@ -141,6 +148,10 @@ export function App() {
     [contentTopic, setContentTopic] = useState(""),
     [contentFinding, setContentFinding] = useState<Finding | null>(null),
     [competitorCheck, setCompetitorCheck] = useState<string | undefined>(),
+    [campaignPage, setCampaignPage] = useState<string | null>(null),
+    [scope, setScope] = useState<string | null>(null),
+    [campaignEditor, setCampaignEditor] = useState<{ campaign: Campaign | null; prompts?: string[] } | null>(null),
+    [jobCampaign, setJobCampaign] = useState<string | null>(null),
     [focusedFinding, setFocusedFinding] = useState<string | null>(null),
     [selectedContent, setSelectedContent] = useState(""),
     [pendingContent, setPendingContent] = useState<{ projectId: string; jobId: string } | null>(null),
@@ -222,7 +233,16 @@ export function App() {
   const auditIssueCount = findingGroups(auditIssues).length;
   const ownCitations = w?.presentation.outcomes.find((group) => group.kind === "cited");
   const ownWebsite = w ? { domain:w.project.domain, citationRate:w.metrics.citationRate, answersCiting:ownCitations?.count ?? 0, answersCollected:w.metrics.completed, observationIds:ownCitations?.observationIds ?? [] } : null;
-  const scopedAnswers = w?.observations.filter((answer) => (!evidenceFilter || evidenceFilter.ids.includes(answer.id)) && (answer.prompt + " " + answer.answer).toLowerCase().includes(query.trim().toLowerCase())) ?? [];
+  useEffect(() => { setScope(null); setCampaignPage(null); }, [selected]);
+  const lensPage = ["Visibility", "Responses", "Sources", "Competitors"].includes(page);
+  const scoped = p?.campaigns.some((campaign) => campaign.id === scope) ? scope : null;
+  const viewId = page === "Campaigns" ? campaignPage : lensPage ? scoped : null;
+  const viewCampaign = p?.campaigns.find((campaign) => campaign.id === viewId);
+  const { view: campaignView, error: campaignError } = useCampaignView(p?.id, viewCampaign ? viewId : null, JSON.stringify(viewCampaign ?? null));
+  const lens = lensPage && scoped ? campaignView : null, lensLoading = lensPage && !!scoped && !lens;
+  const showLens = !!w && lensPage && w.project.campaigns.some((campaign) => campaign.status === "active" || campaign.id === scoped);
+  const chooseScope = (id: string | null) => { setScope(id); setEvidenceFilter(null); };
+  const scopedAnswers = (lens ?? w)?.observations.filter((answer) => (!evidenceFilter || evidenceFilter.ids.includes(answer.id)) && (answer.prompt + " " + answer.answer).toLowerCase().includes(query.trim().toLowerCase())) ?? [];
   const answerMatches = (answer: Observation, status: typeof answerStatus) => status === 'all' || (status === 'cited' ? answer.cited : status === 'named' ? answer.mentioned && !answer.cited : !answer.mentioned && !answer.cited);
   const filteredAnswers = scopedAnswers.filter(answer => answerMatches(answer, answerStatus));
   useEffect(() => {
@@ -244,8 +264,8 @@ export function App() {
     else action();
   }
   const changePage = (label: string) => {
-    if (page === label) mainRef.current?.scrollTo(0, 0);
-    else navigate(() => { setPage(label); setQuery(""); setAnswerStatus('all'); setEvidenceFilter(null); if (label === 'Content') setSelectedContent(''); });
+    if (page === label) { mainRef.current?.scrollTo(0, 0); setCampaignPage(null); }
+    else navigate(() => { setPage(label); setQuery(""); setAnswerStatus('all'); setEvidenceFilter(null); setCampaignPage(null); if (label === 'Content') setSelectedContent(''); });
   };
   const openConnections = () => navigate(() => { setPage("Settings"); setQuery(""); setEvidenceFilter(null); setConnectionsRequest(value => value + 1); });
   const openEvidence = (ids: string[], label: string) => navigate(() => {
@@ -257,9 +277,9 @@ export function App() {
   if (!setupState) return <div className="startup-state" role="status"><img src="/logo.svg" width="40" height="40" alt="" /><h1>{identity.name}</h1>{error || refreshError ? <><p role="alert">{error || refreshError}</p><button className="secondary" disabled={refreshing} onClick={() => { setError(""); setRefreshError(""); void api("/session").then(() => { setSessionReady(true); return refresh(); }).catch((failure) => setError(failure.message)); }}>Try again</button></> : <p>Opening your workspace...</p>}</div>;
   if (page !== "Settings" && (!setupState.completed || !projects.length || newProject || setupState.draft)) return <Onboarding openSettings={openConnections} connected={connected} profiles={profiles} refresh={refresh} draft={setupState.draft} savedProject={projects.find((project) => project.id === setupState.draft?.projectId)} initialStep={setupState.completed && Object.values(connected).some(Boolean) ? 1 : 0} cancel={projects.length && setupState.completed ? () => setNewProject(false) : undefined} finish={async (project, startVisibility) => { if (startVisibility) setJobDialog("measure"); selectedRef.current = project.id; setSelected(project.id); setNewProject(false); changePage("Overview"); await refresh(); }} />;
   const audited = !!w?.pages.length, measured = !!w?.metrics.completed;
-  const comparison = w?.comparison?.status === "comparable" && w.jobs.find(completedMeasurement)?.id === w.measurement?.id ? w.comparison as { previousAt: string; mentionPoints: number | null; citationPoints: number | null } : null;
-  const analysisMeasurement = w?.jobs.find(completedMeasurement);
-  const activeMeasurement = w?.jobs.find(job => ['measure', 'recheck'].includes(job.kind) && ['queued', 'running', 'paused'].includes(job.status) && !completedMeasurement(job));
+  const comparison = w?.comparison?.status === "comparable" && w.jobs.find(completedBrandMeasurement)?.id === w.measurement?.id ? w.comparison as { previousAt: string; mentionPoints: number | null; citationPoints: number | null } : null;
+  const analysisMeasurement = w?.jobs.find(completedBrandMeasurement);
+  const activeMeasurement = w?.jobs.find(job => ['measure', 'recheck'].includes(job.kind) && !job.campaignId && ['queued', 'running', 'paused'].includes(job.status) && !completedMeasurement(job));
   const completedAnalysis = analysisMeasurement && w!.jobs.find(job => job.kind === 'diagnose' && job.status === 'completed' && ((job.result as { measurementJobId?: string } | null)?.measurementJobId ? (job.result as { measurementJobId: string }).measurementJobId === analysisMeasurement.id : job.createdAt >= analysisMeasurement.createdAt));
   const analyzed = !!completedAnalysis;
   const omittedSuggestions = (completedAnalysis?.result as { omittedSuggestions?: number } | null)?.omittedSuggestions ?? 0;
@@ -271,7 +291,15 @@ export function App() {
   const measurementAction = canMeasure
     ? { label: "Check visibility", action: () => editState.dirty || editState.busy ? setError('Save your prompt changes before starting a check.') : setJobDialog("measure") }
     : { label: "Connect for AI checks", action: openConnections };
-  const headingAction = page === "Prompts" ? measurementAction
+  const checkCampaign = (id: string) => {
+    if (!canMeasure) openConnections();
+    else if (editState.dirty || editState.busy) setError('Save your prompt changes before starting a check.');
+    else { setJobCampaign(id); setJobDialog("measure"); }
+  };
+  const openCampaign = page === "Campaigns" && campaignPage ? p?.campaigns.find((campaign) => campaign.id === campaignPage) : undefined;
+  const headingAction = page === "Campaigns" ? openCampaign ? openCampaign.prompts.length ? { label: "Check this campaign", action: () => checkCampaign(openCampaign.id) } : null : { label: "New campaign", action: () => setCampaignEditor({ campaign: null }) }
+    : lens ? lens.campaign.prompts.length && !(lens.measurement && !completedMeasurement(lens.measurement) && ['queued', 'running', 'paused'].includes(lens.measurement.status)) ? { label: "Check these " + lens.campaign.prompts.length + " questions", action: () => checkCampaign(lens.campaign.id) } : null
+    : page === "Prompts" ? measurementAction
     : page === "Visibility" ? activeMeasurement ? null : measurementAction
     : page === "Overview" ? activeMeasurement ? { label: "View current check", action: () => changePage('Visibility') } : !measured ? measurementAction : activeAnalysis ? null : pausedAnalysis ? { label: "Review paused analysis", action: () => changePage('Opportunities') } : !analyzed && canAnalyze ? { label: "Find opportunities", action: () => setJobDialog('diagnose') } : { label: "Review opportunities", action: () => changePage("Opportunities") }
     : page === "Opportunities" && audited && measured && !activeAnalysis && !pausedAnalysis ? { label: "Find opportunities", action: () => setJobDialog("diagnose") }
@@ -299,7 +327,7 @@ export function App() {
           </button>
         </div>
         <nav aria-label="Main navigation">
-          {[{ label: "Workspace", items: [...navigation.slice(0, 2), navigation[10]] }, { label: "AI visibility", items: navigation.slice(2, 6) }, { label: "Improve", items: navigation.slice(6, 10) }].map(group => <div className="nav-group" key={group.label}>
+          {[{ label: "Workspace", items: [...navigation.slice(0, 2), navigation[11]] }, { label: "AI visibility", items: navigation.slice(2, 7) }, { label: "Improve", items: navigation.slice(7, 11) }].map(group => <div className="nav-group" key={group.label}>
           {group.label && <p>{group.label}</p>}
           {group.items.map(([label, Icon]) => (
             <button
@@ -324,6 +352,7 @@ export function App() {
           <button className="icon-button mobile-navigation-trigger" aria-label="Open navigation" aria-haspopup="dialog" onClick={() => setMobileNavigation(true)}><Menu size={20} /></button>
           <div className={"mobile-project-switch" + (page === "Settings" ? " global-hidden" : "")}><Select label="Mobile website" compact value={selected} onChange={(id) => { if (id !== selected) navigate(() => setSelected(id)); }} options={projects.map((project) => ({ value: project.id, label: project.domain, detail: project.brand, icon: <SiteIcon projectId={project.id} domain={project.domain} size={22} /> }))} /><button className="icon-button" aria-label="Add website on mobile" onClick={() => navigate(() => setNewProject(true))}><Plus size={17} /></button></div>
           <div className="workspace-identity">{page === 'Settings' ? <><Settings size={26} /><div><strong>OpenGEO settings</strong><span>Applies to every brand on this device</span></div></> : <>{p && <SiteIcon projectId={p.id} domain={p.domain} size={30} />}<div><strong>{p?.brand ?? "Your workspace"}</strong>{p && <a href={"https://" + p.domain} target="_blank" rel="noreferrer">{p.domain}<ExternalLink size={11} /></a>}</div></>}</div>
+          {showLens && <CampaignLens campaigns={w!.campaigns} total={p!.prompts.length} value={scoped} onChange={chooseScope} onNew={() => setCampaignEditor({ campaign: null })} />}
           <div className="topbar-actions"><button className="connection-shortcut" onClick={openConnections} aria-label="Manage connections"><span className={"connection-dot" + (connectedProviders.length ? "" : " off")} aria-hidden="true" />{connectedProviders.slice(0, 3).map((provider) => <ProviderIcon key={provider} provider={provider} size={16} />)}<span>{connectedProviders.length === 1 ? providerLabels[connectedProviders[0]] : connectedProviders.length ? connectedProviders.length + " connections" : "Connect a provider"}</span><ChevronDown size={13} /></button>
           <button
             className="icon-button"
@@ -338,18 +367,20 @@ export function App() {
         <DesktopUpdates compact />
         <main ref={mainRef} id="main-content" tabIndex={-1}>
           {profiles.welcome && page === 'Overview' && <section className="plan-welcome" aria-label="ChatGPT plan usage"><ProviderIcon provider="chatgpt" size={20} /><div><h2>Your ChatGPT plan is connected</h2><p>Your plan limits apply.</p></div><a href="https://chatgpt.com/settings/usage" target="_blank" rel="noreferrer">Manage usage <ArrowUpRight size={14} /></a><button className="icon-button" aria-label="Dismiss ChatGPT connection notice" onClick={() => void run(() => api("/connections/chatgpt/acknowledge-plan", {}))}><X size={16} /></button></section>}
-          <PageHeader title={page} description={page === 'Overview' ? identity.tagline : descriptions[page]} icon={navigation.find(([label]) => label === page)?.[1] ?? LayoutDashboard}>
-            {p && headingAction && (
+          <PageHeader title={openCampaign?.name ?? page} description={openCampaign ? openCampaign.goal || "Questions checked together toward one goal." : page === 'Overview' ? identity.tagline : descriptions[page]} icon={navigation.find(([label]) => label === page)?.[1] ?? LayoutDashboard}>
+            {openCampaign ? <div className="button-row page-heading-actions"><button className="secondary" onClick={() => setCampaignEditor({ campaign: openCampaign })}>Edit campaign</button>{headingAction && <button className="primary" disabled={busy} onClick={headingAction.action}><Play size={14} />{headingAction.label}</button>}</div>
+            : p && headingAction && (
               <button
                 className="primary"
                 disabled={busy}
                 onClick={headingAction.action}
               >
-                {headingAction.label === "Connect for AI checks" ? <Link size={15} /> : headingAction.label.startsWith('Review') || headingAction.label.startsWith('View') ? <ArrowRight size={15} /> : headingAction.label === 'Create content' ? <Plus size={15} /> : page === 'Scans' ? <ScanSearch size={15} /> : <Play size={14} />}
+                {headingAction.label === "Connect for AI checks" ? <Link size={15} /> : headingAction.label.startsWith('Review') || headingAction.label.startsWith('View') ? <ArrowRight size={15} /> : headingAction.label === 'Create content' || headingAction.label === 'New campaign' ? <Plus size={15} /> : page === 'Scans' ? <ScanSearch size={15} /> : <Play size={14} />}
                 {headingAction.label}
               </button>
             )}
           </PageHeader>
+          {showLens && <CampaignLens mobile campaigns={w!.campaigns} total={p!.prompts.length} value={scoped} onChange={chooseScope} onNew={() => setCampaignEditor({ campaign: null })} />}
           {error && (
             <div role="alert" className="alert">
               {error}
@@ -369,7 +400,9 @@ export function App() {
             </div>
           ) : (
             <>
-              {w.measurement && ["Overview", "Visibility", "Responses", "Sources"].includes(page) && <MeasurementScope measurement={w.measurement} observations={w.observations} missing={w.metrics.missing} />}
+              {lensLoading ? <div className="workspace-loading" role="status">{campaignError ? <p role="alert">{campaignError}</p> : <><span className="visually-hidden">Loading this campaign</span><div className="panel skeleton tall" aria-hidden="true" /></>}</div>
+              : lens?.measurement && ["Visibility", "Responses", "Sources"].includes(page) ? <MeasurementScope measurement={lens.measurement} observations={lens.observations} missing={lens.metrics.missing} />
+              : !lens && w.measurement && ["Overview", "Visibility", "Responses", "Sources"].includes(page) && <MeasurementScope measurement={w.measurement} observations={w.observations} missing={w.metrics.missing} />}
               {page === "Overview" && (
                 <>
                   <OverviewSummary brand={p!.brand} presentation={w.presentation} collected={w.metrics.completed} audited={w.pages.length} missing={w.metrics.missing} onAnswers={() => changePage('Responses')} onAudit={() => changePage('Scans')} onCheck={measurementAction.action} />
@@ -491,7 +524,8 @@ export function App() {
                   )}
                 </section></>
               )}
-              {page === "Visibility" && (
+              {page === "Visibility" && lens && <CampaignVisibility view={lens} total={p!.prompts.length} evidence={openEvidence} open={() => navigate(() => { setPage("Campaigns"); setCampaignPage(lens.campaign.id); })} />}
+              {page === "Visibility" && !lens && !lensLoading && (
                 <>
                   {!w.measurement && <section className="panel"><Empty title="Find out how AI answers your customers">
                     Your saved questions define the check. Collect answers to measure brand mentions and website citations, then repeat the same questions to compare results.<br /><button className="primary" onClick={() => canMeasure ? setJobDialog('measure') : openConnections()}>{canMeasure ? 'Start visibility check' : 'Connect an answer provider'}</button>
@@ -518,14 +552,17 @@ export function App() {
                       detail={activeMeasurement && activeMeasurement.id !== w.measurement?.id ? activeMeasurement.status === "paused" ? "Previous results shown. Resume the new check below." : "Previous results shown until answers arrive" : activeMeasurement ? "Saved as they arrive" : w.metrics.missing ? `${w.metrics.completed} of ${w.metrics.requested} requested. Missing answers are not counted as absent mentions.` : `All ${w.metrics.requested} requested answers`}
                     />
                   </div>}
-                  {w.measurement && <><VisibilityChart presentation={w.presentation} /><PromptTable rows={w.presentation.prompts} collecting={activeMeasurement?.id === w.measurement.id} evidence={openEvidence} /></>}
+                  {w.measurement && <><VisibilityChart presentation={w.presentation} /><PromptTable rows={w.presentation.prompts} collecting={activeMeasurement?.id === w.measurement.id} evidence={openEvidence} groups={p!.campaigns.some((campaign) => campaign.status === "active") ? p!.campaigns.filter((campaign) => campaign.status === "active").map((campaign) => ({ name: campaign.name, prompts: campaign.prompts })) : undefined} /></>}
                   <RunsPanel jobs={runsNeedingAttention(w.jobs, ["measure", "recheck"])} run={run} />
-                  <CheckHistory jobs={w.jobs} currentId={w.measurement?.id} recheck={measured ? { disabled: !!activeMeasurement, start: () => setJobDialog("recheck") } : undefined} note={!comparison && w.jobs.find(completedMeasurement)?.id === w.measurement?.id ? w.comparison?.message : undefined} />
+                  <CheckHistory jobs={w.jobs} currentId={w.measurement?.id} recheck={measured ? { disabled: !!activeMeasurement, start: () => setJobDialog("recheck") } : undefined} note={!comparison && w.jobs.find(completedBrandMeasurement)?.id === w.measurement?.id ? w.comparison?.message : undefined} campaigns={Object.fromEntries(p!.campaigns.map((campaign) => [campaign.id, campaign.name]))} />
                 </>
               )}
               {page === 'Brand' && <BrandSettings key={p!.id} project={p!} refresh={refresh} onEditState={setEditState} />}
-              {page === "Prompts" && <PromptWorkspace key={p!.id} project={p!} jobs={w.jobs} connected={connected} refresh={refresh} openConnections={openConnections} onEditState={setEditState} runControls={<RunsPanel jobs={runsNeedingAttention(w.jobs, ['discover'])} run={run} />} />}
-              {page === "Responses" && (
+              {page === "Prompts" && <PromptWorkspace key={p!.id} project={p!} jobs={w.jobs} connected={connected} refresh={refresh} openConnections={openConnections} onEditState={setEditState} runControls={<RunsPanel jobs={runsNeedingAttention(w.jobs, ['discover'])} run={run} />} campaigns={w.campaigns} checkCampaign={checkCampaign} editCampaign={(campaign, prompts) => setCampaignEditor({ campaign, prompts })} />}
+              {page === "Campaigns" && <Campaigns project={p!} campaigns={w.campaigns} openId={campaignPage} view={campaignView} error={campaignError} open={setCampaignPage} edit={(campaign) => setCampaignEditor({ campaign })}
+                evidence={(campaign) => (ids, label) => navigate(() => { setScope(campaign.id); setPage("Responses"); setQuery(""); setAnswerStatus('all'); setEvidenceFilter({ ids, label }); })}
+                openPrompts={() => changePage("Prompts")} openCompetitors={() => navigate(() => { setScope(campaignPage); setPage("Competitors"); setCampaignPage(null); })} />}
+              {page === "Responses" && !lensLoading && (
                 <section className="panel">
                   <div className="panel-heading">
                     <h2>Collected answers</h2>
@@ -540,18 +577,18 @@ export function App() {
                     </label>
                   </div>
                   {evidenceFilter && <div className="evidence-filter"><span>Answers for: {evidenceFilter.label}</span><button className="text-button" onClick={() => setEvidenceFilter(null)}>Show all answers <X size={14} /></button></div>}
-                  {w.observations.length > 0 && <div className="response-toolbar"><div className="filter-chips" role="group" aria-label="Filter answers by outcome">{([{ value: 'all', label: 'All answers' }, { value: 'cited', label: 'Cited' }, { value: 'named', label: 'Named only' }, { value: 'absent', label: 'Not mentioned' }] as const).map(option => <button key={option.value} type="button" aria-pressed={answerStatus === option.value} onClick={() => setAnswerStatus(option.value)}>{option.label}<span>{scopedAnswers.filter(answer => answerMatches(answer, option.value)).length}</span></button>)}</div><span className="small" role="status">{filteredAnswers.length} {filteredAnswers.length === 1 ? 'answer' : 'answers'} shown</span></div>}
+                  {(lens ?? w).observations.length > 0 && <div className="response-toolbar"><div className="filter-chips" role="group" aria-label="Filter answers by outcome">{([{ value: 'all', label: 'All answers' }, { value: 'cited', label: 'Cited' }, { value: 'named', label: 'Named only' }, { value: 'absent', label: 'Not mentioned' }] as const).map(option => <button key={option.value} type="button" aria-pressed={answerStatus === option.value} onClick={() => setAnswerStatus(option.value)}>{option.label}<span>{scopedAnswers.filter(answer => answerMatches(answer, option.value)).length}</span></button>)}</div><span className="small" role="status">{filteredAnswers.length} {filteredAnswers.length === 1 ? 'answer' : 'answers'} shown</span></div>}
                   {filteredAnswers.length ? (
                     filteredAnswers.map((o) => <AnswerCard observation={o} key={o.id} />)
                   ) : (
-                    <Empty title={w.observations.length ? "No matching answers" : "No collected answers"}>
-                      {w.observations.length ? <>Try another search or clear your filters.<br /><button className="text-button" onClick={() => { setQuery(''); setAnswerStatus('all'); setEvidenceFilter(null); }}>Clear filters</button></> : activeMeasurement ? 'Answers are being collected. Follow progress in Visibility; saved answers will appear here.' : <>Read the exact answers, compare how your brand appears and inspect every source link.<br /><button className="primary" onClick={() => canMeasure ? setJobDialog('measure') : openConnections()}>{canMeasure ? 'Start visibility check' : 'Connect an answer provider'}</button></>}
+                    <Empty title={(lens ?? w).observations.length ? "No matching answers" : "No collected answers"}>
+                      {(lens ?? w).observations.length ? <>Try another search or clear your filters.<br /><button className="text-button" onClick={() => { setQuery(''); setAnswerStatus('all'); setEvidenceFilter(null); }}>Clear filters</button></> : activeMeasurement ? 'Answers are being collected. Follow progress in Visibility; saved answers will appear here.' : <>Read the exact answers, compare how your brand appears and inspect every source link.<br /><button className="primary" onClick={() => canMeasure ? setJobDialog('measure') : openConnections()}>{canMeasure ? 'Start visibility check' : 'Connect an answer provider'}</button></>}
                     </Empty>
                   )}
                 </section>
               )}
-              {page === "Sources" && (
-                <SourcesTable presentation={w.presentation} collected={w.metrics.completed} evidence={openEvidence} projectId={p!.id} ownDomain={p!.domain} startCheck={() => changePage('Visibility')} />
+              {page === "Sources" && !lensLoading && (
+                <SourcesTable presentation={(lens ?? w).presentation} collected={(lens ?? w).metrics.completed} evidence={openEvidence} projectId={p!.id} ownDomain={p!.domain} startCheck={() => changePage('Visibility')} />
               )}
               {page === "Opportunities" && <>
                 {(analysisMeasurement || omittedSuggestions > 0) && <div className="opportunity-context">
@@ -576,7 +613,7 @@ export function App() {
                   revise={draft => { setRevision(draft); setJobDialog('revise'); }}
                   onDraftChange={edit => setUnsavedDraft(edit === null ? null : { projectId: p!.id, ...edit })} />
               </>}
-              {page === "Competitors" && <Competitors project={p!} jobs={w.jobs} run={run} activity={job => <Jobs jobs={[job]} run={run} />} review={measurementId => { setCompetitorCheck(measurementId); setJobDialog('competitors'); }} />}
+              {page === "Competitors" && !lensLoading && <Competitors project={p!} jobs={w.jobs} scope={lens ? { prompts: lens.campaign.prompts, checkId: lens.measurement?.id } : undefined} run={run} activity={job => <Jobs jobs={[job]} run={run} />} review={measurementId => { setCompetitorCheck(measurementId); setJobDialog('competitors'); }} />}
               {page === "Reports" && (
                 <section className="panel">
                   <div className="panel-heading">
@@ -665,12 +702,19 @@ export function App() {
           initialTopic={contentTopic}
           finding={contentFinding}
           measurementJobId={jobDialog === 'competitors' ? competitorCheck : w?.measurement?.id}
-          previousMeasurement={w?.jobs.find(completedMeasurement) ?? null}
+          previousMeasurement={w?.jobs.find(completedBrandMeasurement) ?? null}
+          campaign={jobDialog === "measure" && jobCampaign ? p.campaigns.find((campaign) => campaign.id === jobCampaign) ?? null : null}
           run={run}
           onStarted={job => { if (['content', 'revise'].includes(job.kind)) { setPage('Content'); setPendingContent({ projectId: p.id, jobId: job.id }); } }}
-          close={() => { setJobDialog(null); setRevision(null); setContentFinding(null); }}
+          close={() => { setJobDialog(null); setRevision(null); setContentFinding(null); setJobCampaign(null); }}
         />
       )}
+      {campaignEditor && p && w && <CampaignDialog project={p} pages={w.pages} campaign={campaignEditor.campaign} initialPrompts={campaignEditor.prompts} close={() => setCampaignEditor(null)} saved={async (id) => {
+        await refresh(); setCampaignEditor(null);
+        if (!id) setCampaignPage(null);
+        else if (!campaignEditor.campaign && lensPage) setScope(id);
+        else if (!campaignEditor.campaign && page === "Campaigns") setCampaignPage(id);
+      }} />}
       {mobileNavigation && <Modal title="Navigate workspace" close={() => setMobileNavigation(false)}><div className="mobile-navigation-menu">{navigation.map(([label, Icon]) => <button key={label} aria-current={page === label ? "page" : undefined} onClick={() => { setMobileNavigation(false); changePage(label); }}><Icon size={20} /><span>{label}</span><ArrowRight size={15} /></button>)}</div></Modal>}
     </div>
   );
@@ -685,6 +729,7 @@ const descriptions: Record<string, string> = {
   Content: "Create useful content with research, source links and a review before publishing.",
   Competitors: "Keep a clear view of relevant competing brands.",
   Reports: "Keep, share and move your work.",
+  Campaigns: "Group questions toward one goal and follow their mentions, citations and target pages.",
   Brand: "Manage this website's identity, audience and comparison list.",
   Settings: "Connections, schedules, privacy and updates for all your brands.",
 };
@@ -800,6 +845,7 @@ function JobDialog({
   openConnections,
   openPrompts,
   onStarted,
+  campaign,
 }: {
   kind: Job["kind"];
   project: Project;
@@ -814,6 +860,7 @@ function JobDialog({
   openConnections: () => void;
   openPrompts: () => void;
   onStarted: (job: Job) => void;
+  campaign: Campaign | null;
 }) {
   const choices: Provider[] =
     ["diagnose", "content", "revise", "competitors"].includes(kind)
@@ -910,7 +957,7 @@ function JobDialog({
               ? "Review competitor evidence"
             : kind === "diagnose"
               ? "Find opportunities to improve"
-              : kind === 'recheck' ? 'Recheck AI visibility' : "Measure AI visibility"
+              : kind === 'recheck' ? 'Recheck AI visibility' : campaign ? 'Check ' + campaign.name : "Measure AI visibility"
       }
       close={close}
       dismissible={!submitting}
@@ -934,6 +981,7 @@ function JobDialog({
               ...(kind === 'content' ? { contentMode, ...(finding ? { findingId: finding.id } : {}) } : {}),
               ...(kind === 'revise' ? { contentId: revision.id, revisionInstructions: d.get('instructions') } : {}),
               ...(kind === 'competitors' ? { measurementJobId } : {}),
+              ...(campaign ? { campaignId: campaign.id } : {}),
               render: d.get("render") === "on",
               webSearch: true,
               maxPages: kind === "audit" ? Number(d.get("maxPages")) : 100,
@@ -992,6 +1040,7 @@ function JobDialog({
                     ? "Collect visibility evidence for local analysis. Provider charges apply."
                     : "Checks answers from your chosen model. OpenRouter usage charges apply."}
             </p>
+            {campaign && <p className="small" role="note">Asks this campaign's {campaign.prompts.length} {campaign.prompts.length === 1 ? 'question' : 'questions'}. Your other {project.prompts.length - campaign.prompts.length} are not asked. The answers count in this campaign and in your brand's check history, where this check shows as a partial check.</p>}
             {provider === 'console' && ['measure', 'recheck'].includes(kind) && !loading && !discoveryError && <p className="small">
               {selectedQuestionPlatforms.includes(platform === 'chat_gpt' ? 'chatgpt' : platform)
                 ? 'Checks your selected questions with fresh answers. Review the estimate before any paid work starts.'

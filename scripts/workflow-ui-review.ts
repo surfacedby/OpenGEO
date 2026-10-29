@@ -146,6 +146,27 @@ try {
     await page.setViewportSize({ width, height: 780 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'Content history at ' + width + 'px');
   }
+  // A campaign check asks only the campaign's questions and says so before any paid work starts.
+  runtime.store.updateProject(project.id, projectInput.parse({ domain: "example.com", brand: "Example", prompts: ["What is an example domain?", "Which sites can documentation use?"] }));
+  const queued = runtime.store.jobs().length;
+  await navigate(page, "Campaigns");
+  await page.getByRole("button", { name: "New campaign", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "New campaign" });
+  await editor.getByLabel("Campaign name").fill("Example questions");
+  await editor.getByRole("checkbox", { name: "What is an example domain?", exact: true }).check();
+  await editor.getByRole("button", { name: "Create campaign", exact: true }).click();
+  await page.getByRole("heading", { name: "Example questions", exact: true }).waitFor();
+  const [campaign] = runtime.store.project(project.id).campaigns;
+  assert.deepEqual(campaign.prompts, ["What is an example domain?"]);
+  await page.getByRole("button", { name: "Check this campaign", exact: true }).click();
+  const scoped = page.getByRole("dialog", { name: "Check Example questions" });
+  await scoped.getByText("Asks this campaign's 1 question. Your other 1 are not asked.", { exact: false }).waitFor();
+  await scoped.getByLabel("Approved run budget (USD)").fill("0.20");
+  await scoped.getByRole("button", { name: "Start visibility check", exact: true }).click();
+  await scoped.waitFor({ state: "hidden" });
+  assert.equal(runtime.store.jobs().length, queued + 1);
+  assert.equal(runtime.store.jobs().find(job => job.campaignId)?.campaignId, campaign.id);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, "Campaign page at 390px");
   await navigate(page, "Settings");
   await page.getByRole("tab", { name: "Schedules", exact: true }).click();
   await page.getByRole("button", { name: "Add schedule", exact: true }).click();
@@ -167,7 +188,7 @@ try {
   assert.equal(runtime.scheduler.list()[0].monthlyBudgetUsd, 1);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   assert.deepEqual(failures, []);
-  console.log("Actual browser verified: linked validation, availability retry, pending-run close protection, retained inputs, one queued job after a lost reply, connected-provider schedules and keyboard content navigation. No paid provider requests.");
+  console.log("Actual browser verified: linked validation, availability retry, pending-run close protection, retained inputs, one queued job after a lost reply, a campaign check limited to its questions, connected-provider schedules and keyboard content navigation. No paid provider requests.");
 } finally {
   release?.(); globalThis.fetch = original; await browser.close(); await runtime.app.close(); rmSync(directory, { recursive: true, force: true });
 }

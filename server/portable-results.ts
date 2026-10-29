@@ -27,6 +27,11 @@ export function completedMeasurement(job: Job) {
   return !!result && result.metrics.missing === 0 && !!result.collectionCompletedAt;
 }
 
+/** Brand-wide readings skip campaign checks, which ask only part of the brand's questions. */
+export function completedBrandMeasurement(job: Job) {
+  return !job.campaignId && completedMeasurement(job);
+}
+
 /**
  * The measurement the workspace presents. A run still collecting replaces the last completed
  * check only once it has saved answers, and a run that failed for good never replaces one:

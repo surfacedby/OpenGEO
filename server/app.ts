@@ -22,7 +22,8 @@ import {
   ProviderError,
   auditCoverage,
 } from "./contracts.js";
-import { publicUrl } from "./network.js";
+import { publicUrl, sameSiteHost } from "./network.js";
+import { campaignScope, campaignSummaries, campaignView, normalizeCampaigns, withCampaignChecks } from "./campaigns.js";
 import { workspacePresentation, currentFindings } from "./presentation.js";
 import { auditFindingPresentation } from './audit.js';
 import { SiteIcons } from "./site-icons.js";
@@ -287,6 +288,14 @@ export async function createApp(
       try { publicUrl(competitor); }
       catch { throw new z.ZodError([{ code: "custom", path: ["competitors", index], message: "Enter a public competitor website without embedded credentials." }]); }
     }
+    const site = publicUrl(input.domain);
+    for (const [index, campaign] of input.campaigns.entries())
+      for (const [position, url] of campaign.targetUrls.entries()) {
+        let page: URL | undefined;
+        try { page = publicUrl(url); } catch {}
+        if (!page || !sameSiteHost(page, site)) throw new z.ZodError([{ code: "custom", path: ["campaigns", index, "targetUrls", position], message: "Choose a page on this website." }]);
+      }
+    input.campaigns = normalizeCampaigns(input);
     return input;
   };
   app.post("/api/projects", (req) =>
@@ -310,11 +319,12 @@ export async function createApp(
   app.get("/api/projects/:id/workspace", (req) => {
     const id = (req.params as any).id;
     const project = store.project(id),
-      jobs = store.jobs(id);
+      jobs = store.jobs(id),
+      brandJobs = jobs.filter((job) => !job.campaignId);
     const audit = jobs.find(
         (j) => j.kind === "audit" && j.status === "completed",
       ),
-      measure = displayedMeasurement(jobs, (job) => store.answerCount(id, job.id));
+      measure = displayedMeasurement(brandJobs, (job) => store.answerCount(id, job.id));
     const observations = measure ? store.observations(id, measure.id) : [];
     const snapshot = measure ? store.step(measure.id, "project") : undefined;
     const prompts = snapshot?.body
@@ -324,11 +334,13 @@ export async function createApp(
     const pages = audit ? store.pages(id, audit.id) : [];
     const savedPages = new Map(store.pages(id).map(page => [page.id, page]));
     const auditJobs = new Set(jobs.filter(job => job.kind === 'audit').map(job => job.id));
-    const findings = currentFindings(store.findings(id), jobs).map(finding => {
+    const findings = currentFindings(store.findings(id), brandJobs).map(finding => {
       const page = finding.evidenceIds.map(id => savedPages.get(id)).find(Boolean);
       return page && auditJobs.has(finding.jobId) ? auditFindingPresentation(project, finding, page) : finding;
     });
     const metrics = measurementMetrics(measure, observations, measure ? prompts.length : 0);
+    const presentation = workspacePresentation(brandJobs, measure, observations,
+      snapshot?.body ? prompts : measure ? null : project.prompts, metrics.requested, pages);
     return {
       project,
       jobs,
@@ -338,12 +350,18 @@ export async function createApp(
       findings,
       content: store.artifacts(id, "content"),
       metrics,
-      presentation: workspacePresentation(jobs, measure, observations,
-        snapshot?.body ? prompts : measure ? null : project.prompts, metrics.requested, pages),
+      presentation: { ...presentation, history: withCampaignChecks(presentation.history, jobs, project) },
       measurement: measure ?? null,
-      comparison: recheckComparison(jobs),
+      comparison: recheckComparison(brandJobs),
       competitors: competitorEvidence(project, observations),
+      campaigns: campaignSummaries(store, project, jobs),
     };
+  });
+  app.get("/api/projects/:id/campaigns/:campaign", (req) => {
+    const { id, campaign } = req.params as { id: string; campaign: string };
+    const project = store.project(id), found = project.campaigns.find((item) => item.id === campaign);
+    if (!found) throw new Error("Campaign not found");
+    return campaignView(store, project, found);
   });
   app.get("/api/projects/:id/site-icon", async (req, res) => {
     const id = (req.params as any).id;
@@ -394,6 +412,7 @@ export async function createApp(
   });
   app.post("/api/jobs", (req) => {
     const input = jobInput.parse(req.body);
+    if (input.campaignId) campaignScope(store.project(input.projectId), input.campaignId);
     const key = z
       .string()
       .min(8)

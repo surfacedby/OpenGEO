@@ -27,6 +27,8 @@ export type HistoryPoint = {
   missing: number;
   mentionRate: number | null;
   citationRate: number | null;
+  /** Set on a campaign check, which asks only part of the brand's questions. */
+  campaign?: string;
 };
 export type Presentation = {
   domains: SourceRow[];

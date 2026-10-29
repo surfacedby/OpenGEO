@@ -33,8 +33,9 @@ Put the main action in `PageHeader`. Do not repeat the page introduction in a bo
 | Area | Pattern |
 | --- | --- |
 | Overview | Evidence summary, citation coverage, comparable history and next action |
-| Prompts | Tracked questions, grounded suggestions and prompt editing |
-| Visibility | Trends, readable chart data and check history |
+| Prompts | Tracked questions, grounded suggestions, prompt editing and grouping by campaign |
+| Campaigns | Questions grouped toward one goal, each with results, target pages, competitors and the checks that read it |
+| Visibility | Trends, readable chart data, question coverage grouped by campaign and check history |
 | Responses | Search and mutually exclusive outcome filters, then a full-answer drawer |
 | Sources | Domain/page views with citation counts and supporting answers |
 | Competitors | Saved comparison websites, citation comparison and supporting evidence |
@@ -54,6 +55,6 @@ Traffic attribution, market-wide rankings, outreach and sentiment scores require
 
 ## Local verification
 
-Build before browser checks. `scripts/analytics-ui-review.ts` covers all twelve screens at desktop, tablet and mobile widths, then checks header clipping, chart labels, evidence navigation, filters, answer drawers and saved draft navigation. `scripts/workflow-ui-review.ts` checks task dialogs, dropdowns, keyboard isolation and submission safety. Connection and recheck review scripts cover provider availability and retained run settings.
+Build before browser checks. `scripts/analytics-ui-review.ts` covers all thirteen screens at desktop, tablet and mobile widths, each campaign tab, the campaign selector over Visibility, Responses, Sources and Competitors, and grouped prompts, then checks header clipping, chart labels, evidence navigation, filters, answer drawers and saved draft navigation. `scripts/workflow-ui-review.ts` checks task dialogs, dropdowns, keyboard isolation, submission safety and a check limited to one campaign. Connection and recheck review scripts cover provider availability and retained run settings.
 
 These scripts use isolated local test records and keep paid work stopped. Their labelled screenshots are regression evidence, not public product claims. Public screenshots follow `SCREENSHOT_PROFILE.md`.

@@ -330,7 +330,7 @@ export function VisibilityChart({
                 <tbody>
                   {history.map((point) => (
                     <tr key={point.jobId}>
-                      <td>{dateTime(point.at)}</td>
+                      <td>{dateTime(point.at)}{point.campaign && <small>Campaign check: {point.campaign}</small>}</td>
                       <td>{percent(point.mentionRate)}</td>
                       <td>{percent(point.citationRate)}</td>
                       <td>
@@ -543,14 +543,54 @@ export function PromptTable({
   rows,
   evidence,
   collecting = false,
+  groups,
 }: {
   rows: PromptRow[];
   evidence: Evidence;
   collecting?: boolean;
+  /** Campaign groups; a question may appear under several, and questions in none close the list. */
+  groups?: { name: string; prompts: string[] }[];
 }) {
   const [search, setSearch] = useState("");
   const shown = rows.filter((row) =>
     row.prompt.toLowerCase().includes(search.toLowerCase()),
+  );
+  const sections = groups && [...groups.map((group) => ({ name: group.name, rows: shown.filter((row) => group.prompts.includes(row.prompt)) })),
+    { name: "No campaign", rows: shown.filter((row) => !groups.some((group) => group.prompts.includes(row.prompt))) }].filter((section) => section.rows.length);
+  const subtotal = (items: PromptRow[], rate: "mentionRate" | "citationRate") => {
+    const collected = items.reduce((sum, row) => sum + row.collected, 0);
+    return collected ? items.reduce((sum, row) => sum + (row[rate] ?? 0) * row.collected, 0) / collected : null;
+  };
+  const line = (row: PromptRow) => (
+    <tr key={row.prompt}>
+      <td>{row.prompt}</td>
+      <td data-label="Mentions">
+        <RateBar value={row.mentionRate} measure="mention" />
+      </td>
+      <td data-label="Citations">
+        <RateBar value={row.citationRate} measure="citation" />
+      </td>
+      <td data-label="Collected">
+        {row.collected}
+        {row.requested !== null ? " / " + row.requested : ""}
+        {row.missing !== null && row.missing > 0 && (
+          <small className={collecting ? '' : 'scope-missing'}>
+            {row.missing} {collecting ? 'remaining' : 'missing'}
+          </small>
+        )}
+      </td>
+      <td>
+        <button
+          className="text-button evidence-button"
+          disabled={!row.collected}
+          onClick={() => evidence(row.observationIds, row.prompt)}
+          aria-label={"View answers for " + row.prompt}
+        >
+          <span>Answers</span>
+          <ArrowRight size={14} />
+        </button>
+      </td>
+    </tr>
   );
   return (
     <section className="panel analytics-panel">
@@ -583,39 +623,18 @@ export function PromptTable({
                 </th>
               </tr>
             </thead>
-            <tbody>
-              {shown.map((row) => (
-                <tr key={row.prompt}>
-                  <td>{row.prompt}</td>
-                  <td data-label="Mentions">
-                    <RateBar value={row.mentionRate} measure="mention" />
-                  </td>
-                  <td data-label="Citations">
-                    <RateBar value={row.citationRate} measure="citation" />
-                  </td>
-                  <td data-label="Collected">
-                    {row.collected}
-                    {row.requested !== null ? " / " + row.requested : ""}
-                    {row.missing !== null && row.missing > 0 && (
-                      <small className={collecting ? '' : 'scope-missing'}>
-                        {row.missing} {collecting ? 'remaining' : 'missing'}
-                      </small>
-                    )}
-                  </td>
-                  <td>
-                    <button
-                      className="text-button evidence-button"
-                      disabled={!row.collected}
-                      onClick={() => evidence(row.observationIds, row.prompt)}
-                      aria-label={"View answers for " + row.prompt}
-                    >
-                      <span>Answers</span>
-                      <ArrowRight size={14} />
-                    </button>
-                  </td>
+            {sections ? sections.map((section) => (
+              <tbody key={section.name}>
+                <tr className="prompt-group">
+                  <th scope="rowgroup">{section.name}</th>
+                  <td data-label="Mentions"><RateBar value={subtotal(section.rows, "mentionRate")} measure="mention" /></td>
+                  <td data-label="Citations"><RateBar value={subtotal(section.rows, "citationRate")} measure="citation" /></td>
+                  <td data-label="Collected">{section.rows.reduce((sum, row) => sum + row.collected, 0)}{section.rows.every((row) => row.requested !== null) ? " / " + section.rows.reduce((sum, row) => sum + (row.requested ?? 0), 0) : ""}</td>
+                  <td />
                 </tr>
-              ))}
-            </tbody>
+                {section.rows.map(line)}
+              </tbody>
+            )) : <tbody>{shown.map(line)}</tbody>}
           </table>
         </div>
       ) : (
@@ -635,11 +654,13 @@ export function PromptTable({
  * Every saved check with its own results, newest first. Checks with different questions or answer
  * settings are labelled so a reader does not compare them as a trend.
  */
-export function CheckHistory({ jobs, currentId, recheck, note }: {
+export function CheckHistory({ jobs, currentId, recheck, note, campaigns = {} }: {
   jobs: Job[];
   currentId?: string;
   recheck?: { disabled: boolean; start: () => void };
   note?: string;
+  /** Campaign names by id, for checks that asked only one campaign's questions. */
+  campaigns?: Record<string, string>;
 }) {
   const checks = jobs.flatMap((job) => {
     const result = ["measure", "recheck"].includes(job.kind) ? portableJobResult(job) : null;
@@ -662,7 +683,7 @@ export function CheckHistory({ jobs, currentId, recheck, note }: {
                 <tr key={job.id} className={job.id === currentId ? "current" : undefined}>
                   <td>
                     <span className="check-date"><ProviderIcon provider={job.platform ?? "chat_gpt"} size={14} />{dateTime(measurementTime(job))}</span>
-                    {job.id === currentId ? <small>Shown above</small> : current && result.comparisonKey !== current ? <small>Different questions or settings</small> : null}
+                    {job.id === currentId ? <small>Shown above</small> : job.campaignId ? <small>Campaign: {campaigns[job.campaignId] ?? "Removed campaign"}</small> : current && result.comparisonKey !== current ? <small>Different questions or settings</small> : null}
                   </td>
                   <td data-label="Brand mentions"><RateBar value={result.metrics.mentionRate} measure="mention" /></td>
                   <td data-label="Website citations"><RateBar value={result.metrics.citationRate} measure="citation" /></td>

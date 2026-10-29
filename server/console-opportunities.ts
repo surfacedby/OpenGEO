@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { ProviderError, type Finding, type Job, type ManagedSourceEvidence, type Project } from "./contracts.js";
 import { publicUrl } from "./network.js";
-import { completedMeasurement } from "./portable-results.js";
+import { completedBrandMeasurement, completedMeasurement } from "./portable-results.js";
 import { consoleAnswerInput } from "./console-competitors.js";
 import { consoleManaged, managedJob } from "./console-managed.js";
 import type { Runner } from "./workflows.js";
@@ -23,7 +23,7 @@ const result = z.object({ job: managedJob, review_complete: z.literal(true), loc
 export async function consoleOpportunities(runner: Runner, job: Job, project: Project, signal: AbortSignal) {
   const { output, input } = await consoleManaged(runner, job, project, signal, () => {
     const measurement = job.measurementJobId ? runner.store.job(job.measurementJobId)
-      : runner.store.jobs(project.id).find(completedMeasurement);
+      : runner.store.jobs(project.id).find(completedBrandMeasurement);
     if (!measurement || measurement.projectId !== project.id || !completedMeasurement(measurement))
       throw new ProviderError("evidence", "Complete a visibility check before looking for improvements.");
     runner.store.setStep(job.id, "opportunity-measurement", "done", measurement.id);
