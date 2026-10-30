@@ -250,6 +250,33 @@ test("ChatGPT API measurements preserve citations and progress when plan usage s
   } finally { await runner.stop(); globalThis.fetch = original; f.close(); }
 });
 
+test("ChatGPT searches from completed calls are kept with the answer and survive export, while older exports import without them", async () => {
+  const f = fixture(), original = globalThis.fetch;
+  const saved = f.vault.get("chatgpt"); saved.profiles[0].expiresAt = Date.now() + 3600000; f.vault.set("chatgpt", saved);
+  globalThis.fetch = (async (url) => {
+    if (String(url).endsWith("/models")) return json({ models: [{ slug: "fixture-model", display_name: "Fixture model", visibility: "list", context_window: 32768 }] });
+    return new Response('data: ' + JSON.stringify({ type: "response.completed", response: { status: "completed", output: [
+      { type: "web_search_call", status: "completed", action: { type: "search", query: "best  example tools 2026" } },
+      { type: "web_search_call", status: "completed", action: { type: "search", queries: ["Best example tools 2026", "example tools comparison"] } },
+      { type: "web_search_call", status: "completed", action: { type: "open_page", url: "https://example.org/list" } },
+      { type: "web_search_call", status: "in_progress", action: { type: "search", query: "unfinished example search" } },
+      { type: "message", content: [{ type: "output_text", text: "Example Brand is one option.", annotations: [{ type: "url_citation", url: "https://example.org/list", title: "Example list" }] }] },
+    ] } }) + '\n\n', { headers: { "Content-Type": "text/event-stream" } });
+  }) as typeof fetch;
+  const runner = new Runner(f.store, f.providers);
+  try {
+    const project = f.store.createProject(projectInput.parse({ domain: "example.com", brand: "Example Brand", prompts: ["Which example tools are best?"] }));
+    const job = f.store.enqueue(jobInput.parse({ projectId: project.id, kind: "measure", provider: "chatgpt", model: "fixture-model" }), "api-measure-searches");
+    await runner.tick(); assert.equal(f.store.job(job.id).status, "completed");
+    const [observation] = f.store.observations(project.id, job.id);
+    assert.deepEqual(observation.searchQueries, ["best example tools 2026", "example tools comparison"]); assert.equal(observation.webSearchConfirmed, true);
+    const portable = exportProject(f.store, project.id), imported = importProject(f.store, portable);
+    assert.deepEqual(f.store.observations(imported.project.id)[0].searchQueries, ["best example tools 2026", "example tools comparison"]);
+    const older = JSON.parse(JSON.stringify(portable)); for (const entry of older.observations) delete entry.searchQueries;
+    assert.equal(f.store.observations(importProject(f.store, older).project.id)[0].searchQueries, undefined);
+  } finally { await runner.stop(); globalThis.fetch = original; f.close(); }
+});
+
 test("content carries the requested language through every pass and portable export", async () => {
   const f = fixture(), original = globalThis.fetch;
   const saved = f.vault.get("chatgpt"); saved.profiles[0].expiresAt = Date.now() + 3600000; f.vault.set("chatgpt", saved);

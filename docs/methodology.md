@@ -24,7 +24,7 @@ Local matching uses brand names and aliases with Unicode word boundaries. A cita
 
 API answers can differ from a logged-in consumer chat app. Each observation records its prompt, provider, platform, returned model identity, locale, collection time, answer, citations and retrieval mode.
 
-Citations come from provider annotations, not guessed links in answer text. Requesting search does not prove it ran: ChatGPT confirms search only when the final response contains a completed `web_search_call`. The interface marks other cases, including older records without that flag, as unconfirmed. See the [web search response contract](https://developers.openai.com/api/docs/guides/tools-web-search).
+Citations come from provider annotations, not guessed links in answer text. Requesting search does not prove it ran: ChatGPT confirms search only when the final response contains a completed `web_search_call`. The interface marks other cases, including older records without that flag, as unconfirmed. The searches a completed call reports (its `action.query`) are saved with the answer as given, up to 20 per answer, and older records simply have none. See the [web search response contract](https://developers.openai.com/api/docs/guides/tools-web-search).
 
 Supported SurfacedBy selected-question checks preserve the approved question IDs, locale, original answers, citations and collection dates, then use local presence matching. They do not automatically purchase analysis. Failed or cancelled checks can retain answers already collected; full checks keep their separate pricing and analysis workflow.
 

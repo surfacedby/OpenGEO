@@ -29,6 +29,7 @@ export type Completion = {
   citations: Citation[];
   model: string;
   webSearchConfirmed?: boolean;
+  searchQueries?: string[];
 };
 function reportedCost(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
@@ -267,7 +268,7 @@ export class Providers {
     let buffer = "",
       text = "",
       completed = false, webSearchConfirmed = false;
-    let citations: Citation[] = [];
+    let citations: Citation[] = [], searchQueries: string[] = [];
     const finishedItems = new Map<number, any>();
     const decoder = new TextDecoder();
     responseStream: for await (const chunk of r.body) {
@@ -301,6 +302,7 @@ export class Providers {
           // Plan sharing may omit output in the terminal event. Completed stream items still carry the actual tool and citation evidence.
           const output = event.response?.output?.length ? event.response.output : [...finishedItems.entries()].sort(([a], [b]) => a - b).map(([, item]) => item);
           webSearchConfirmed = output.some((item: any) => item.type === "web_search_call" && item.status === "completed");
+          searchQueries = reportedSearches(output);
           const parts = output.flatMap((item: any) => item.content ?? []).filter((part: any) => part.type === "output_text");
           const finalText = parts.map((part: any) => part.text ?? "").join("\n");
           if (finalText.trim()) text = finalText;
@@ -328,7 +330,7 @@ export class Providers {
         "ChatGPT did not confirm completion. Review usage before retrying.",
         true,
       );
-    return { text, costUsd: 0, citations, model, webSearchConfirmed };
+    return { text, costUsd: 0, citations, model, webSearchConfirmed, searchQueries };
     });
   }
   async measure(
@@ -380,6 +382,21 @@ export class Providers {
   }
 }
 
+/** Searches are kept as the provider reported them for completed search calls, so a reader can see which queries led to the cited pages. */
+export function reportedSearches(output: unknown): string[] {
+  const seen = new Set<string>(), queries: string[] = [];
+  if (!Array.isArray(output)) return queries;
+  for (const item of output) {
+    if (item?.type !== "web_search_call" || item.status !== "completed" || !item.action || typeof item.action !== "object") continue;
+    for (const query of [item.action.query, ...(Array.isArray(item.action.queries) ? item.action.queries : [])]) {
+      if (typeof query !== "string") continue;
+      const text = query.replace(/\s+/g, " ").trim().slice(0, 300);
+      if (!text || seen.has(text.toLowerCase()) || queries.length >= 20) continue;
+      seen.add(text.toLowerCase()); queries.push(text);
+    }
+  }
+  return queries;
+}
 /** Citation metadata is projected explicitly, without supplier tracking fields or invented links. */
 export function safeCitations(annotations: unknown): Citation[] {
   const seen = new Set<string>(), citations: Citation[] = [];

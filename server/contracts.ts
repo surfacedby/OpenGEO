@@ -61,6 +61,7 @@ export type Observation = {
   surface: "api" | "consumer_interface" | "unknown";
   retrieval?: "web_search" | "model_only" | "provider_managed";
   webSearchConfirmed?: boolean;
+  searchQueries?: string[];
   mentioned: boolean;
   cited: boolean;
   costUsd: number | null;

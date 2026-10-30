@@ -737,6 +737,7 @@ export class Runner {
           observedAt: new Date().toISOString(), answer: completion.text, citations: completion.citations, surface: "api",
           retrieval: provider === "chatgpt" && job.webSearch !== false ? "web_search" : "model_only",
           ...(provider === "chatgpt" ? { webSearchConfirmed: completion.webSearchConfirmed === true } : {}),
+          ...(completion.searchQueries?.length ? { searchQueries: completion.searchQueries } : {}),
           ...presence(project, completion.text, completion.citations.map((citation) => citation.url)), costUsd: completion.costUsd,
         };
         this.store.db.transaction(() => {
