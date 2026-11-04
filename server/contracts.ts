@@ -79,6 +79,8 @@ export type PageEvidence = {
   schemaTypes: string[];
   links: string[];
 };
+/** The workspace is polled every few seconds, so its pages leave out the text and links that only evidence views read. */
+export type PageSummary = Omit<PageEvidence, "text" | "links">;
 export type ManagedSourceEvidence = {
   id: string;
   jobId: string;

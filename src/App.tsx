@@ -67,7 +67,7 @@ import type {
   Project,
   Job,
   Observation,
-  PageEvidence,
+  PageSummary,
   Finding,
   Model,
   Provider,
@@ -77,7 +77,7 @@ import type {
 type Workspace = {
   project: Project;
   jobs: Job[];
-  pages: PageEvidence[];
+  pages: PageSummary[];
   auditCoverage: AuditCoverage | null;
   observations: Observation[];
   findings: Finding[];
@@ -153,11 +153,13 @@ export function App() {
   const selectedRef = useRef(selected);
   const mainRef = useRef<HTMLElement>(null);
   const refreshSequence = useRef(0);
+  const refreshesInFlight = useRef(0);
   selectedRef.current = selected;
   useCloseProtection(editState.dirty || editState.busy);
   async function refresh() {
     // A slower poll must not replace a newer mutation or another website's view.
     const sequence = ++refreshSequence.current;
+    refreshesInFlight.current++;
     setRefreshing(true);
     try {
       const [ps, connection, setup] = await Promise.all([
@@ -179,6 +181,7 @@ export function App() {
     } catch (failure) {
       if (sequence === refreshSequence.current) setRefreshError((failure as Error).message);
     } finally {
+      refreshesInFlight.current--;
       if (sequence === refreshSequence.current) setRefreshing(false);
     }
   }
@@ -207,8 +210,9 @@ export function App() {
     if (!sessionReady) return;
     if (selected) setWorkspace(null);
     void refresh();
+    // A poll waits for the one before it, so a response slower than the interval still lands.
     const timer = setInterval(() => {
-      void refresh();
+      if (!refreshesInFlight.current) void refresh();
     }, 3000);
     return () => { clearInterval(timer); refreshSequence.current++; };
   }, [selected, sessionReady]);

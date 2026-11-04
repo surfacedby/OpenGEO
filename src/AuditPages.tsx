@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { ArrowUpRight, Search } from 'lucide-react';
-import type { PageEvidence } from '../server/contracts';
+import type { PageSummary } from '../server/contracts';
 import { shortDate } from './format';
 import { EmptyState } from './ui/Primitives';
 import { targetLabel } from './finding-groups';
 
 /** Page checks remain observations, not a synthetic aggregate readiness score. */
-export function AuditPages({ pages }: { pages: PageEvidence[] }) {
+export function AuditPages({ pages }: { pages: PageSummary[] }) {
   const [query, setQuery] = useState(''), [unavailable, setUnavailable] = useState(false);
   const shown = pages.filter(page => (!unavailable || page.status >= 400) && (page.title + ' ' + page.url).toLowerCase().includes(query.trim().toLowerCase()));
   return <>
