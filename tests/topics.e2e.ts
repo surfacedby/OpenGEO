@@ -176,6 +176,45 @@ test('topics, actual searches, persistent progress and safe outside dismissal', 
     await expect(articles.getByRole('button', { name: 'Next Articles pages', exact: true })).toBeDisabled();
     await page.getByRole('textbox', { name: 'Search audited pages', exact: true }).fill('article 22');
     await expect(page.locator('.page-inventory-table tbody tr')).toHaveCount(1);
+    // Delay only the HTTP boundary: a completed older search must not replace the user's newer filter.
+    let releaseOldSearch!: () => void;
+    const heldSearch = new Promise<void>(resolve => { releaseOldSearch = resolve; });
+    const pageEndpoint = /\/api\/projects\/[^/]+\/checks\/[^/]+\/pages\?/;
+    let failSearch = true, heldSearchRequests = 0;
+    await page.route(pageEndpoint, async route => {
+      const query = new URL(route.request().url()).searchParams.get('query');
+      if (query === 'article 21') {
+        heldSearchRequests++;
+        const response = await route.fetch();
+        await heldSearch; await route.fulfill({ response });
+      } else if (query === 'broken-request' && failSearch) {
+        failSearch = false;
+        await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Synthetic unavailable response' }) });
+      } else await route.fallback();
+    });
+    await page.getByRole('textbox', { name: 'Search audited pages', exact: true }).fill('article 21');
+    await expect.poll(() => heldSearchRequests).toBe(1);
+    // Real workspace writes must not launch overlapping reads while the page response is held.
+    for (let revision = 1; revision <= 2; revision++) {
+      const workspaceRefresh = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/workspace') && response.status() === 200);
+      store.set('pageRequestReview', revision);
+      await workspaceRefresh;
+    }
+    const nextPoll = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/workspace'));
+    await nextPoll;
+    assert.equal(heldSearchRequests, 1);
+    await page.getByRole('textbox', { name: 'Search audited pages', exact: true }).fill('article 22');
+    await expect(page.locator('.page-title-button')).toHaveText(['Example article 22']);
+    const oldResponse = page.waitForResponse(response => new URL(response.url()).searchParams.get('query') === 'article 21');
+    releaseOldSearch(); await (await oldResponse).finished();
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await expect(page.locator('.page-title-button')).toHaveText(['Example article 22']);
+    await page.getByRole('textbox', { name: 'Search audited pages', exact: true }).fill('broken-request');
+    const pageError = page.getByRole('alert').filter({ hasText: 'Could not load these pages.' });
+    await expect(pageError).toBeVisible();
+    await pageError.getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'No matching pages', exact: true })).toBeVisible();
+    await page.unroute(pageEndpoint);
     await page.getByRole('textbox', { name: 'Search audited pages', exact: true }).fill('');
     await expect(articles.getByRole('navigation')).toContainText('1-10 of 23 pages');
     await page.locator('.pages-navigation').evaluate(element => element.scrollIntoView({ block: 'start' }));
