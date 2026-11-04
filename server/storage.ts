@@ -4,6 +4,7 @@ import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { ProviderError, contentTask } from "./contracts.js";
 import { topicNames } from "./topic-migration.js";
+import { PageCatalog } from './page-catalog.js';
 import { completedBrandMeasurement, completedMeasurement, analysisInProgress } from './portable-results.js';
 import type {
   Project,
@@ -17,6 +18,7 @@ import type {
 } from "./contracts.js";
 export class Store {
   readonly db: Database.Database;
+  readonly pageCatalog: PageCatalog;
   private readonly instanceId = randomUUID();
   onJobCompleted?: (kind: Job["kind"], provider: Job["provider"]) => void;
   onImprovementCompleted?: () => void;
@@ -60,6 +62,7 @@ export class Store {
       }
       this.db.prepare('INSERT INTO migrations VALUES(3)').run();
     })();
+    this.pageCatalog = new PageCatalog(this.db);
     } catch (error) {
       // A refused migration must release the file so the original backup can be inspected or restored.
       this.db.close();
@@ -250,9 +253,13 @@ export class Store {
     return job.dismissedAt ? job : this.updateJob(id, { dismissedAt: new Date().toISOString() });
   }
   put(kind: string, projectId: string, jobId: string, value: any) {
-    this.db
-      .prepare("INSERT INTO artifacts VALUES(?,?,?,?,?)")
+    const insert = () => this.db.prepare("INSERT INTO artifacts VALUES(?,?,?,?,?)")
       .run(value.id, projectId, jobId, kind, JSON.stringify(value));
+    if (kind !== 'page') { insert(); return; }
+    this.db.transaction(() => {
+      const result = insert();
+      this.pageCatalog.insert(projectId, jobId, value, Number(result.lastInsertRowid));
+    })();
   }
   artifacts<T = unknown>(projectId: string, kind: string, jobId?: string): T[] {
     return this.db

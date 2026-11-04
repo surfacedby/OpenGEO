@@ -380,6 +380,21 @@ export async function createApp(
       topics: topicSummaries(store, project, jobs),
     };
   });
+  app.get('/api/projects/:id/checks/:check/pages', (req, res) => {
+    const { id, check } = z.object({ id: z.string().uuid(), check: z.string().uuid() }).parse(req.params);
+    store.project(id);
+    const job = store.job(check);
+    if (job.projectId !== id || job.kind !== 'audit') return res.code(404).send({ error: 'Website check not found' });
+    const input = z.object({
+      query: z.string().max(300).default(''),
+      tab: z.enum(['all', 'attention', 'unavailable', 'excluded']).default('all'),
+      grouping: z.enum(['type', 'folder', 'none']).default('type'), group: z.string().max(500).optional(),
+      offset: z.coerce.number().int().min(0).max(1000000).default(0),
+      limit: z.coerce.number().int().min(1).max(50).default(10),
+      groupOffset: z.coerce.number().int().min(0).max(1000000).default(0),
+    }).strict().parse(req.query);
+    return { checkId: check, ...store.pageCatalog.list(id, check, input) };
+  });
   app.get("/api/projects/:id/topics/:topic", (req) => {
     const { id, topic } = req.params as { id: string; topic: string };
     const project = store.project(id), found = project.topics.find((item) => item.id === topic);
