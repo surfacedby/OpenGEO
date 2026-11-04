@@ -21,8 +21,8 @@
 .opportunity-expand { display: inline-flex; align-items: center; gap: 5px; color: var(--primary-text); font-size: 13px; font-weight: 500; white-space: nowrap; padding-top: 6px; }
 .opportunity-expand svg { transition: transform .15s; }
 .improvement-group[open] > summary .opportunity-expand svg { transform: rotate(180deg); }
-.improvement-items { padding: 4px 20px 18px 68px; background: var(--surface-2); display: grid; gap: 10px; }
-.improvement-item { padding: 16px 18px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow-xs); }
+.improvement-items { padding: 4px 24px 20px 68px; display: grid; gap: 24px; }
+.improvement-item { padding: 20px 0 0; border-top: 1px solid var(--border); min-width: 0; }
 .improvement-item-heading { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 10px; }
 .improvement-item-heading > div:first-child { display: grid; gap: 2px; min-width: 0; }
 .improvement-item-heading > div:first-child > span { color: var(--ink); font-weight: 600; overflow-wrap: anywhere; }
@@ -39,22 +39,24 @@
 .improvement-detail ol li + li { margin-top: 4px; }
 .improvement-detail > a { display: inline-flex; align-items: center; gap: 5px; font-weight: 500; }
 .improvement-detail > small { display: flex; align-items: center; gap: 6px; }
-.improvement-detail > details { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
-.improvement-detail > details summary { color: var(--primary-text); cursor: pointer; font-weight: 500; }
-.improvement-detail > details[open] summary { margin-bottom: 8px; }
+.improvement-detail > details { width: 100%; border-top: 1px solid var(--border); padding-top: 4px; }
 .improvement-detail > details article { margin-top: 10px; }
 .improvement-detail > details article h3 { font-size: 13px; }
 .evidence-source-link { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
 .evidence-source-link > span:last-child { overflow-wrap: anywhere; }
 .answer-text { white-space: pre-wrap; font-size: 13px; line-height: 1.6; margin: 6px 0 12px; max-height: 320px; overflow: auto; color: var(--text); }
 .finding-reason p { font-size: 13px; line-height: 1.65; max-width: 880px; margin: 0 0 6px; color: var(--text); }
-.opportunity-preview > button { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 20px; text-align: left; border-bottom: 1px solid var(--divider); }
+.opportunity-preview > button { width: 100%; display: flex; align-items: flex-start; gap: var(--space-4); padding: var(--space-5) var(--panel-space); text-align: left; border-bottom: 1px solid var(--divider); }
 .opportunity-preview > button:last-child { border-bottom: 0; }
 .opportunity-preview > button:hover { background: var(--surface-2); }
-.opportunity-preview > button > span:nth-child(2) { display: grid; gap: 1px; flex: 1; min-width: 0; }
+.opportunity-preview-copy { display: grid; gap: var(--space-2); flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .opportunity-preview > button > svg { color: var(--faint); }
-.opportunity-preview strong { color: var(--ink); font-weight: 600; font-size: 13px; }
+.opportunity-preview strong { color: var(--ink); font-weight: 600; font-size: var(--text-body); }
 .opportunity-preview small { font-size: 12px; }
+.opportunity-preview-benefit { color: var(--muted); font-size: var(--text-body); line-height: 1.6; }
+.opportunity-preview-step { display: flex; align-items: baseline; gap: var(--space-2); color: var(--ink); font-size: var(--text-caption); line-height: 1.6; }
+.opportunity-preview-step > svg { flex-shrink: 0; align-self: flex-start; margin-top: 3px; color: var(--faint); }
+.opportunity-preview-step b { font-weight: 600; }
 .opportunity-context { display: grid; gap: 2px; margin: -6px 0 14px; }
 @media (max-width: 700px) {
   .opportunity-expand { display: none; }
@@ -65,7 +67,7 @@
   .improvement-toolbar > .choice, .improvement-toolbar .search { width: 100%; margin: 0; }
   .improvement-group > summary { padding: 14px; gap: 10px; }
   .improvement-items { padding: 4px 10px 12px; }
-  .improvement-item { padding: 14px; }
+  .improvement-item { padding: 16px 4px 0; }
   .improvement-item-heading { flex-wrap: wrap; }
   .improvement-item-heading > .choice { width: 100%; }
 }

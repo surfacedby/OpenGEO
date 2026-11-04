@@ -34,6 +34,7 @@ export async function renderedFetch(
         await route.fulfill({
           status: response.status,
           contentType: response.contentType,
+          ...(response.robotsHeader ? { headers: { 'x-robots-tag': response.robotsHeader } } : {}),
           body: response.text,
         });
       } catch {
@@ -57,6 +58,7 @@ export async function renderedFetch(
         url: publicUrl(page.url()).href,
         status: response?.status() ?? 200,
         contentType: "text/html",
+        ...(response?.headers()['x-robots-tag'] ? { robotsHeader: response.headers()['x-robots-tag'] } : {}),
         text: await page.content(),
       };
     } finally {

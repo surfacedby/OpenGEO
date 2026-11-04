@@ -2,7 +2,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { MockAgent } from "undici";
 import { renderedFetch } from "../server/render.js";
-import { publicAgent } from "../server/network.js";
+import { CrawlBackoff, publicAgent } from "../server/network.js";
+
+test('rendered crawling respects a busy navigation response before launching the browser', async () => {
+  const mock = new MockAgent(); mock.disableNetConnect();
+  mock.get('https://example.com').intercept({ path: '/' }).reply(503, '<h1>Busy</h1>', { headers: { 'content-type': 'text/html', 'retry-after': '60' } });
+  const original = publicAgent.dispatch; publicAgent.dispatch = mock.dispatch.bind(mock);
+  try {
+    await assert.rejects(renderedFetch('https://example.com/'), CrawlBackoff);
+    mock.assertNoPendingInterceptors();
+  } finally { publicAgent.dispatch = original; await mock.close(); }
+});
 
 test("rendered crawling retains non-HTML response types without initiating a browser download", async () => {
   const mock = new MockAgent(); mock.disableNetConnect();

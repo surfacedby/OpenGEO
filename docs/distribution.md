@@ -4,13 +4,13 @@ The easiest way to try OpenGEO is the desktop app. It includes the runtime and b
 
 ## Desktop downloads
 
-Download from the [official GitHub release](https://github.com/surfacedby/OpenGEO/releases/tag/v0.1.0-beta.4).
+Download from the [official GitHub release](https://github.com/surfacedby/OpenGEO/releases/tag/v0.1.0-beta.5).
 
 | Computer | File |
 | --- | --- |
-| Windows x64 | `OpenGEO-0.1.0-beta.4-windows-x64.exe` |
-| Mac with an Apple M-series chip | `OpenGEO-0.1.0-beta.4-macos-arm64.dmg` |
-| Mac with an Intel processor | `OpenGEO-0.1.0-beta.4-macos-x64.dmg` |
+| Windows x64 | `OpenGEO-0.1.0-beta.5-windows-x64.exe` |
+| Mac with an Apple M-series chip | `OpenGEO-0.1.0-beta.5-macos-arm64.dmg` |
+| Mac with an Intel processor | `OpenGEO-0.1.0-beta.5-macos-x64.dmg` |
 
 This beta has no Linux desktop download. Use [Docker](#docker) or [run from source](development.md#run-from-source) instead. Store listings are optional future distribution channels.
 
@@ -21,20 +21,20 @@ Download `SHA256SUMS.txt` and `release-manifest.json` from the same release. The
 On Windows, run this in PowerShell from your Downloads folder:
 
 ```powershell
-Get-FileHash .\OpenGEO-0.1.0-beta.4-windows-x64.exe -Algorithm SHA256
+Get-FileHash .\OpenGEO-0.1.0-beta.5-windows-x64.exe -Algorithm SHA256
 ```
 
 On a Mac, run this in Terminal, using `x64` instead of `arm64` for Intel:
 
 ```sh
-shasum -a 256 ~/Downloads/OpenGEO-0.1.0-beta.4-macos-arm64.dmg
+shasum -a 256 ~/Downloads/OpenGEO-0.1.0-beta.5-macos-arm64.dmg
 ```
 
 Compare the complete result with `SHA256SUMS.txt`. A matching hash confirms you received the published file. It is not a publisher certificate or a guarantee that software is safe.
 
 ## Install on Windows
 
-Run the installer, then open OpenGEO from the Start menu. It installs for your current user and does not launch automatically when installation finishes.
+Run the installer. On the Finish screen, choose whether to open OpenGEO and create a desktop shortcut, then click **Finish**. It installs for your current user; you can also open it later from the Start menu.
 
 **The Windows beta is unsigned.** Windows may show an unknown-publisher or SmartScreen warning. Some managed computers will block it. `Get-AuthenticodeSignature` is expected to report `NotSigned`. Do not disable antivirus or SmartScreen globally, or install a self-signed root certificate for OpenGEO.
 

@@ -46,3 +46,33 @@ test('reports use the current plan while project exports preserve its history', 
     assert.equal(exportProject(store, project.id).findings.length, 2);
   } finally { store.close(); rmSync(directory, {recursive:true,force:true}); }
 });
+
+test('scan recommendations and separate analysis replace each other without discarding accepted work', () => {
+  const measurementId = randomUUID(), separateId = randomUUID();
+  const receipt = { findings: 1, measurementJobId: measurementId, pagesReviewed: 1 };
+  const scan = { id: measurementId, kind: 'measure', status: 'completed', prepareRecommendations: true, result: { analysis: receipt } } as Job;
+  const separate = { id: separateId, kind: 'diagnose', status: 'completed', result: receipt } as Job;
+  const findings = [
+    { id: 'scan-advice', jobId: scan.id, kind: 'analysis', status: 'open' },
+    { id: 'accepted', jobId: scan.id, kind: 'analysis', status: 'doing' },
+    { id: 'separate-advice', jobId: separate.id, kind: 'analysis', status: 'open' },
+  ] as Finding[];
+  assert.deepEqual(currentFindings(findings, [separate, scan]).map(item => item.id), ['accepted', 'separate-advice']);
+  assert.deepEqual(currentFindings(findings, [scan, separate]).map(item => item.id), ['scan-advice', 'accepted']);
+});
+
+test('Topic checks and their pinned analyses replace advice only within the same measurement scope', () => {
+  const scan = (id: string, topicId?: string) => ({ id, topicId, kind: 'measure', status: 'completed', createdAt: '2026-11-04T00:00:00Z' }) as Job;
+  const analysis = (id: string, measurementJobId: string) => ({ id, kind: 'diagnose', status: 'completed', measurementJobId, result: { measurementJobId }, createdAt: '2026-11-04T00:01:00Z' }) as Job;
+  const brand = scan('brand'), firstTopic = scan('topic-a', 'a'), secondTopic = scan('topic-b', 'b');
+  const brandAdvice = analysis('brand-advice', brand.id), firstAdvice = analysis('a-advice', firstTopic.id), secondAdvice = analysis('b-advice', secondTopic.id);
+  const advice = (job: Job, status = 'open') => ({ id: job.id, jobId: job.id, kind: 'analysis', status }) as Finding;
+  const findings = [advice(brandAdvice), advice(firstAdvice), advice(secondAdvice), { ...advice(firstAdvice, 'doing'), id: 'accepted' }];
+  const original = [secondAdvice, secondTopic, firstAdvice, firstTopic, brandAdvice, brand];
+  assert.deepEqual(currentFindings(findings, original).map(row => row.id), ['brand-advice', 'a-advice', 'b-advice', 'accepted']);
+  const next = scan('a-next', 'a');
+  assert.deepEqual(currentFindings(findings, [next, ...original]).map(row => row.id), ['brand-advice', 'b-advice', 'accepted']);
+  const replacement = analysis('a-replacement', next.id);
+  assert.deepEqual(currentFindings([...findings, advice(replacement)], [replacement, next, ...original]).map(row => row.id), ['brand-advice', 'b-advice', 'accepted', 'a-replacement']);
+  assert.deepEqual(currentFindings(findings, [scan('brand-next'), ...original]).map(row => row.id), ['a-advice', 'b-advice', 'accepted']);
+});

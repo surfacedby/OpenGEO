@@ -1,15 +1,26 @@
 import { load } from "cheerio";
 import { randomUUID } from "node:crypto";
-import { crawlFetch, publicUrl, sameSiteHost } from "./network.js";
+import { setTimeout as delay } from "node:timers/promises";
+import { CrawlBackoff, crawlFetch, publicUrl, sameSiteHost } from "./network.js";
 import { loadRobots } from "./robots.js";
 import { sitemapPages } from "./sitemap.js";
+import { structuredTypes } from './structured-data.js';
 import type { PageEvidence, Finding, Project, AuditCoverage } from "./contracts.js";
+export type CrawlCheckpoint = {
+  base: string; maxPages: number; queue: string[]; seen: string[]; visited: string[];
+  fetched: number; errors: { url: string; reason: string }[]; excluded: string[]; skippedNonHtml: string[];
+};
+export type CrawlPolicies = Map<string, { expiresAt: number; policy: ReturnType<typeof loadRobots> }>;
 export function parsePage(
   url: string,
   status: number,
   html: string,
+  robotsHeader = '',
 ): PageEvidence {
   const $ = load(html);
+  const structured = structuredTypes($('script[type]').toArray()
+    .filter(element => $(element).attr('type')?.trim().toLowerCase() === 'application/ld+json')
+    .map(element => $(element).text()));
   // Navigation links belong to crawl discovery even when navigation text is
   // excluded from the page's content evidence.
   const links = [
@@ -27,41 +38,40 @@ export function parsePage(
     ),
   ];
   $(
-    'script:not([type="application/ld+json"]),style,nav,footer,noscript',
+    'script,style,nav,footer,aside,noscript,template,form,button,input,select,textarea,iframe,svg,dialog,[hidden]',
   ).remove();
-  const schemaTypes: string[] = [];
-  $('script[type="application/ld+json"]').each((_, el) => {
-    try {
-      const visit = (v: any) => {
-        if (Array.isArray(v)) v.forEach(visit);
-        else if (v && typeof v === "object") {
-          if (v["@type"])
-            schemaTypes.push(
-              ...[v["@type"]].flat().filter((x) => typeof x === "string"),
-            );
-          if (v["@graph"]) visit(v["@graph"]);
-        }
-      };
-      visit(JSON.parse($(el).text()));
-    } catch {
-      /* Invalid structured data is not evidence of valid schema. */
-    }
+  $('[role], [aria-hidden]').each((_, element) => {
+    const roles = ($(element).attr('role') ?? '').toLowerCase().split(/\s+/);
+    if (roles.some(role => ['banner', 'navigation', 'complementary', 'contentinfo', 'dialog', 'alertdialog', 'menu', 'menubar'].includes(role))
+      || $(element).attr('aria-hidden')?.toLowerCase() === 'true') $(element).remove();
   });
-  $("script").remove();
+  $('[style]').each((_, element) => {
+    if (/(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden)\s*(?:!important\s*)?(?:;|$)/i.test($(element).attr('style') ?? '')) $(element).remove();
+  });
+  // Use the page's declared main region when present. Menus and shared banners
+  // must not become evidence that the page itself answers a customer's question.
+  const mains = $('main, [role="main"]').filter((_, element) => !$(element).parents('main, [role="main"]').length);
+  const articles = $('article').filter((_, element) => !$(element).parents('article').length);
+  const content = mains.length ? mains : articles.length === 1 ? articles : $('body');
+  // Article headers can carry the actual page heading; generic site headers cannot.
+  content.find('header').filter((_, element) => !$(element).find('h1').length).remove();
+  // Block boundaries need spaces, while inline words (e.g. "Woo<strong>Commerce</strong>") stay intact.
+  content.find('p,div,section,article,header,h1,h2,h3,h4,h5,h6,li,td,th,br,dt,dd,summary,details,blockquote,pre,figcaption').append(' ');
   return {
     id: randomUUID(),
     url,
     fetchedAt: new Date().toISOString(),
     status,
-    title: $("title").text().trim(),
+    title: $('head > title').first().text().trim(),
     description: $('meta[name="description"]').attr("content")?.trim() ?? "",
-    h1: $("h1")
+    h1: content.find('h1')
       .map((_, e) => $(e).text().trim())
       .get(),
     canonical: $('link[rel="canonical"]').attr("href") ?? "",
-    noindex: /noindex/i.test($('meta[name="robots"]').attr("content") ?? ""),
-    schemaTypes: [...new Set(schemaTypes)],
-    text: $("body").text().replace(/\s+/g, " ").trim().slice(0, 30000),
+    noindex: /(?:^|[\s,:])(?:noindex|none)(?:$|[\s,])/i.test(robotsHeader) || $('meta[name]').toArray().some(element => /^(robots|googlebot)$/i.test($(element).attr('name') ?? '') && /(?:^|[\s,])(?:noindex|none)(?:$|[\s,])/i.test($(element).attr('content') ?? '')),
+    schemaTypes: structured.types,
+    structuredDataLimitations: structured.limitations,
+    text: content.text().replace(/\s+/g, " ").trim().slice(0, 30000),
     links,
   };
 }
@@ -73,12 +83,16 @@ export async function crawl(
   fetcher = crawlFetch,
   maxPages = 100,
   metadataFetcher = fetcher,
+  recovery?: { initial?: CrawlCheckpoint; batchSize?: number; policies?: CrawlPolicies; commit: (state: CrawlCheckpoint, page?: PageEvidence) => void },
 ): Promise<AuditCoverage> {
   const base = publicUrl(domain);
-  const policies = new Map<string, ReturnType<typeof loadRobots>>();
+  const policies = recovery?.policies ?? new Map<string, { expiresAt: number; policy: ReturnType<typeof loadRobots> }>();
   const policy = (url: URL) => {
-    let pending = policies.get(url.origin);
-    if (!pending) { pending = loadRobots(url, signal, metadataFetcher); policies.set(url.origin, pending); }
+    const cached = policies.get(url.origin);
+    if (cached && cached.expiresAt > Date.now()) return cached.policy;
+    const pending = loadRobots(url, signal, metadataFetcher).catch(error => { policies.delete(url.origin); throw error; });
+    // Short background batches share a one-hour policy read, rather than requesting robots.txt every few pages.
+    policies.set(url.origin, { expiresAt: Date.now() + 3600000, policy: pending });
     return pending;
   };
   const basePolicy = await policy(base);
@@ -87,51 +101,65 @@ export async function crawl(
     return sameSiteHost(url, base) && (await policy(url))(url.href);
   };
   progress("Discovering your website pages");
-  const discovered = await sitemapPages(base, basePolicy.sitemaps, allowed, signal, maxPages * 4, metadataFetcher);
-  const queue = [...new Set([base.href, ...discovered])],
-    seen = new Set<string>();
-  const queued = new Set(queue),
-    errors: { url: string; reason: string }[] = [];
-  const visited = new Set<string>();
-  let fetched = 0;
-  const excluded: string[] = [], skippedNonHtml: string[] = [];
-  while (queue.length && seen.size < maxPages) {
+  const initial = recovery?.initial;
+  if (initial && (initial.base !== base.href || initial.maxPages !== maxPages)) throw new Error('The saved crawl belongs to a different scope');
+  const discovered = initial ? [] : await sitemapPages(base, basePolicy.sitemaps, allowed, signal, maxPages * 4, metadataFetcher);
+  const queue = initial ? [...initial.queue] : [...new Set([base.href, ...discovered])],
+    seen = new Set<string>(initial?.seen);
+  const queued = new Set([...queue, ...seen]),
+    errors = [...(initial?.errors ?? [])];
+  const visited = new Set<string>(initial?.visited);
+  let fetched = initial?.fetched ?? 0;
+  const excluded = [...(initial?.excluded ?? [])], skippedNonHtml = [...(initial?.skippedNonHtml ?? [])];
+  // The frontier and its page evidence are committed together; a restart never discards discovery or duplicates saved pages.
+  const checkpoint = (page?: PageEvidence) => {
+    if (recovery) recovery.commit({ base: base.href, maxPages, queue: [...queue], seen: [...seen], visited: [...visited], fetched, errors: [...errors], excluded: [...excluded], skippedNonHtml: [...skippedNonHtml] }, page);
+    else if (page) save(page);
+  };
+  checkpoint();
+  const batchEnd = seen.size + (recovery?.batchSize ?? maxPages);
+  while (queue.length && seen.size < maxPages && seen.size < batchEnd) {
     signal.throwIfAborted();
-    const url = queue.shift()!;
-    if (visited.has(url)) continue;
+    const url = queue[0];
+    if (visited.has(url)) { queue.shift(); checkpoint(); continue; }
+    // A small, cancellable gap between reads keeps the local crawler from hammering a website.
+    if (seen.size) await delay(500, undefined, { signal });
     visited.add(url);
     seen.add(url);
     if (!await allowed(url)) {
-      excluded.push(url);
+      excluded.push(url); queue.shift(); checkpoint();
       continue;
     }
-    progress("Auditing " + new URL(url).pathname);
+    progress("Checking page " + seen.size + ": " + new URL(url).pathname);
+    let page: PageEvidence | undefined;
     try {
       const r = await fetcher(url, signal, allowed);
       if (!await allowed(r.url)) throw new Error("The response is outside the website's permitted crawl scope");
       visited.add(r.url);
-      if (!r.contentType.includes("text/html")) { skippedNonHtml.push(url); continue; }
-      const p = parsePage(r.url, r.status, r.text);
-      save(p);
-      fetched++;
-      for (const link of p.links)
-        if (
-          sameSiteHost(new URL(link), base) &&
-          !visited.has(link) &&
-          !queued.has(link) &&
-          queue.length < maxPages * 4
-        ) {
-          queue.push(link);
-          queued.add(link);
-        }
+      if (!r.contentType.includes("text/html") && !r.contentType.includes("application/xhtml+xml")) skippedNonHtml.push(url);
+      else {
+        page = parsePage(r.url, r.status, r.text, r.robotsHeader);
+        fetched++;
+        for (const link of page.links)
+          if (
+            sameSiteHost(new URL(link), base) &&
+            !visited.has(link) &&
+            !queued.has(link) &&
+            queue.length < maxPages * 4
+          ) {
+            queue.push(link);
+            queued.add(link);
+          }
+      }
     } catch (e) {
-      if (signal.aborted) throw e;
+      if (signal.aborted || e instanceof CrawlBackoff) throw e;
       if (url === base.href) throw e;
       errors.push({
         url,
         reason: "The page could not be retrieved. This is missing evidence.",
       });
     }
+    queue.shift(); checkpoint(page);
   }
   return {
     attempted: seen.size,
@@ -239,12 +267,12 @@ export function auditFindings(
     if (p.text.split(/\s+/).length < 100)
       add(
         "content",
-        "Check whether this page explains enough",
-        "We could read fewer than 100 words on this page. It may need more detail, or it may load its content with JavaScript.",
+        "Check what readers can see on this page",
+        "This check retrieved fewer than 100 words of page content. That does not mean the page needs more words: a contact page, tool or short answer may already serve its purpose.",
         "medium",
         [
           "Open the page and check whether its main content is visible. If it loads with JavaScript, enable rendering in a website health check before editing it.",
-          "If the page is genuinely brief, explain what you offer, who it helps and how it works. Add useful examples or answers to customer questions, not words just to reach a count.",
+          "Check whether a visitor can complete the purpose of this page. Add an explanation or example only where something they need is missing; leave a useful short page short.",
         ],
       );
   }

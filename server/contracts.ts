@@ -6,7 +6,7 @@ export const providers = [
   "console",
 ] as const;
 export type Provider = (typeof providers)[number];
-export const campaignInput = z
+export const topicInput = z
   .object({
     id: z.string().uuid(),
     name: z.string().trim().min(1).max(100),
@@ -19,7 +19,7 @@ export const campaignInput = z
     createdAt: z.string().datetime(),
   })
   .strict();
-export type Campaign = z.infer<typeof campaignInput>;
+export type Topic = z.infer<typeof topicInput>;
 export const projectInput = z
   .object({
     domain: z.string().max(253),
@@ -40,8 +40,8 @@ export const projectInput = z
       }, "Use a valid language tag")
       .default("en-US"),
     knowledge: z.string().max(50000).default(""),
-    campaigns: z.array(campaignInput).max(50).default([])
-      .refine((campaigns) => new Set(campaigns.map((campaign) => campaign.id)).size === campaigns.length, "Each campaign needs its own identifier"),
+    topics: z.array(topicInput).max(50).default([])
+      .refine((topics) => new Set(topics.map((topic) => topic.id)).size === topics.length, "Each topic needs its own identifier"),
   })
   .strict();
 export type ProjectInput = z.infer<typeof projectInput>;
@@ -57,10 +57,14 @@ export const setupDraft = z.object({
 }).strict();
 export type SetupDraft = z.infer<typeof setupDraft>;
 export type Citation = { url: string; title?: string };
+export const websiteCategories = ['organization', 'product', 'publisher', 'directory', 'marketplace', 'platform', 'community'] as const;
+export type WebsiteCategory = typeof websiteCategories[number];
 export type DiscoveredWebsite = {
   name: string; domain: string; observationIds: string[];
   role?: 'competitor' | 'reference' | 'both';
   reason?: string;
+  category?: WebsiteCategory;
+  categoryEvidence?: { observationId: string; quote: string; source: 'answer' | 'citation'; url?: string };
 };
 export type Observation = {
   id: string;
@@ -94,6 +98,7 @@ export type PageEvidence = {
   canonical: string;
   noindex: boolean;
   schemaTypes: string[];
+  structuredDataLimitations?: string[];
   links: string[];
 };
 /** The workspace is polled every few seconds, so its pages leave out the text and links that only evidence views read. */
@@ -172,13 +177,17 @@ export const jobInput = z
     render: z.boolean().default(false),
     webSearch: z.boolean().default(true),
     discoverCompetitors: z.boolean().optional(),
+    prepareRecommendations: z.boolean().optional(),
     measurementJobId: z.string().uuid().optional(),
     auditJobId: z.string().uuid().optional(),
     maxPages: z.number().int().positive().max(100000).default(100),
-    campaignId: z.string().uuid().optional(),
+    background: z.boolean().optional(),
+    topicId: z.string().uuid().optional(),
   })
   .strict()
-  .refine((input) => !input.campaignId || ["measure", "recheck"].includes(input.kind), "Only visibility checks can be limited to a campaign")
+  .refine(input => !input.prepareRecommendations || ['measure', 'recheck'].includes(input.kind) && ['chatgpt', 'openrouter'].includes(input.provider ?? ''), 'Automatic recommendations require a ChatGPT or OpenRouter visibility check')
+  .refine(input => !input.background || input.kind === 'audit', 'Only website checks run in paced background batches')
+  .refine((input) => !input.topicId || ["measure", "recheck"].includes(input.kind), "Only visibility checks can be limited to a topic")
   .refine((input) => input.kind !== 'revise' || (!!input.contentId && !!input.revisionInstructions), 'Choose a draft and describe the revision')
   .refine((input) => input.kind !== 'competitors' || !!input.measurementJobId, 'Choose a saved visibility check')
   .refine((input) => (input.kind === 'discover') === !!input.auditJobId, 'Question suggestions read one website audit')
@@ -200,6 +209,8 @@ export type Job = JobInput & {
   requestedAnswers?: number;
   /** Set when the user acknowledges a run that did not finish, so it stops asking for attention. */
   dismissedAt?: string;
+  /** Local crawl batches yield the worker to interactive work until this time. */
+  availableAt?: string;
 };
 export type Model = {
   id: string;

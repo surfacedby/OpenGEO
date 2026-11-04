@@ -1,9 +1,39 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { MockAgent } from "undici";
-import { auditFindingPresentation, auditFindings, crawl, parsePage } from "../server/audit.js";
+import { auditFindingPresentation, auditFindings, crawl, parsePage, type CrawlCheckpoint } from "../server/audit.js";
 import { crawlFetch, publicAgent, type CrawlPermission } from "../server/network.js";
 import { projectInput, type PageEvidence } from "../server/contracts.js";
+
+test('an interrupted crawl resumes its saved frontier without repeating saved page reads', async () => {
+  const requests: string[] = [], pages: PageEvidence[] = [];
+  let checkpoint: CrawlCheckpoint | undefined;
+  const stopped = new AbortController();
+  const fetcher = async (url: string) => {
+    requests.push(url);
+    return { url, status: url.endsWith('.xml') ? 404 : 200, contentType: url.endsWith('/robots.txt') ? 'text/plain' : 'text/html', text: url.endsWith('/robots.txt') ? 'User-agent: *\nAllow: /' : '<h1>Example</h1><a href="/next">Next</a>' };
+  };
+  await assert.rejects(crawl('example.com', stopped.signal, () => assert.fail('durable commit owns page persistence'), () => {}, fetcher, 100, fetcher, {
+    commit: (state, page) => { checkpoint = structuredClone(state); if (page) { pages.push(page); stopped.abort(); } },
+  }), /abort/i);
+  assert.equal(pages.length, 1);
+  assert.deepEqual(checkpoint!.queue, ['https://example.com/next']);
+  const coverage = await crawl('example.com', new AbortController().signal, () => assert.fail('durable commit owns page persistence'), () => {}, fetcher, 100, fetcher, {
+    initial: checkpoint, commit: (state, page) => { checkpoint = structuredClone(state); if (page) pages.push(page); },
+  });
+  assert.equal(coverage.fetched, 2);
+  assert.equal(coverage.truncated, false);
+  assert.equal(requests.filter(url => url === 'https://example.com/').length, 1);
+  assert.equal(new Set(pages.map(page => page.url)).size, 2);
+  assert.deepEqual(checkpoint!.queue, []);
+});
+
+test('a storage failure stops a crawl rather than being recorded as a missing page', async () => {
+  const fetcher = async (url: string) => ({ url, status: 200, contentType: url.endsWith('/robots.txt') ? 'text/plain' : 'text/html', text: '<h1>Example</h1>' });
+  await assert.rejects(crawl('example.com', new AbortController().signal, () => {}, () => {}, fetcher, 100, fetcher, {
+    commit: (_state, page) => { if (page) throw new Error('Disk unavailable'); },
+  }), /Disk unavailable/);
+});
 
 test('updated website advice preserves saved finding identity and progress', () => {
   const project = { ...projectInput.parse({ domain: 'example.com', brand: 'Example' }), id: 'project', createdAt: '2026-10-01T00:00:00Z' };

@@ -89,6 +89,23 @@ export async function readLimited(
   }
   return Buffer.concat(chunks).toString("utf8");
 }
+/** Busy responses defer the crawl; their HTML is not evidence about the site's content. */
+export class CrawlBackoff extends Error {
+  constructor(readonly url: string, readonly retryAt?: number) {
+    super('The website is busy. Saved pages are preserved while discovery waits.');
+  }
+}
+
+/** Waiting on another crawl's response does not consume a network retry. */
+export class CrawlDeferred extends CrawlBackoff {}
+
+export function crawlRetryAt(value: string | null, now = Date.now()): number | undefined {
+  if (!value?.trim()) return undefined;
+  const text = value.trim();
+  const at = /^\d+$/.test(text) ? now + Number(text) * 1000 : Date.parse(text);
+  return Number.isFinite(at) && at >= 0 && at <= 8.64e15 ? Math.max(now, at) : undefined;
+}
+
 export async function crawlFetch(value: string, signal?: AbortSignal, allowed?: CrawlPermission) {
   let u = publicUrl(value);
   for (let i = 0; i < 6; i++) {
@@ -101,6 +118,11 @@ export async function crawlFetch(value: string, signal?: AbortSignal, allowed?: 
         : AbortSignal.timeout(20000),
       headers: { "User-Agent": identity.slug + "/0.1 (+local website audit)" },
     });
+    if (r.status === 429 || r.status === 503) {
+      const retryAt = crawlRetryAt(r.headers.get('retry-after'));
+      await r.body?.cancel();
+      throw new CrawlBackoff(u.href, retryAt);
+    }
     if ([301, 302, 303, 307, 308].includes(r.status)) {
       const target = r.headers.get("location");
       await r.body?.cancel();
@@ -112,6 +134,7 @@ export async function crawlFetch(value: string, signal?: AbortSignal, allowed?: 
       url: u.href,
       status: r.status,
       contentType: r.headers.get("content-type") ?? "",
+      ...(r.headers.has('x-robots-tag') ? { robotsHeader: r.headers.get('x-robots-tag')! } : {}),
       text: await readLimited(r),
     };
   }

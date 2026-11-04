@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Job, Model, Project, DiscoveredWebsite, Observation } from "./contracts.js";
-import { ProviderError } from "./contracts.js";
+import { ProviderError, websiteCategories } from "./contracts.js";
 import type { Runner } from "./workflows.js";
 import { publicUrl, sameSiteHost } from "./network.js";
 import { prompts } from "./prompts.js";
@@ -21,6 +21,8 @@ const reviewedQuestions = z.object({ questions: z.array(z.object({ index: z.numb
 const suggestedCompetitors = z.object({
   competitors: z.array(z.object({ name: z.string().trim().min(2).max(100), domain: z.string().max(253), observationIds: z.array(z.string()).min(1),
     role: z.enum(['competitor', 'reference', 'both']).optional(), reason: z.string().trim().min(1).max(600).optional(),
+    category: z.enum(websiteCategories).optional(),
+    categoryEvidence: z.object({ observationId: z.string(), source: z.enum(['answer', 'citation']), quote: z.string().trim().min(3).max(600), url: z.string().optional() }).strict().optional(),
   }).strict()).max(50),
 }).strict();
 
@@ -108,22 +110,26 @@ export async function discoverCompetitors(runner: Runner, job: Job, project: Pro
     // The homepage already travels as the site overview, so the website context spends its room on other pages.
     const website = others.length ? contentSources(others, observations.map(answer => answer.prompt), Math.min(12000, Math.max(0, model.contextLength - 14000)), [], 2000) : { sources: [], coverage: { pagesAvailable: 0, pagesUsed: 0, excerpts: true } };
     const home = pages.find(page => page.status >= 200 && page.status < 300 && new URL(page.url).pathname === '/');
-    inputs = { observations, context: { brand: project.brand, domain: project.domain, locale: project.locale, businessNotes: project.knowledge.slice(0, 4000), website,
+    inputs = { version: 3, observations, context: { brand: project.brand, domain: project.domain, locale: project.locale, businessNotes: project.knowledge.slice(0, 4000), website,
       siteOverview: home ? { id: home.id, url: home.url, title: home.title, headings: home.h1, text: home.text.slice(0, 3500) } : null } };
     runner.store.setStep(job.id, "competitor-inputs", "done", inputs);
   }
   const { observations, context } = inputs as { observations: ReturnType<typeof runner.store.observations>; context: Record<string, unknown> };
   const legacy = runner.store.step(job.id, "competitors");
+  const prompt = !legacy && inputs.version >= 3 ? 'competitorsClassified' : 'competitors';
   const batches: { id: string; question: string; text: string; citations: typeof observations[number]["citations"] }[][] = [];
-  if (legacy) {
+  const savedBatches = runner.store.step(job.id, 'competitor-batches');
+  if (savedBatches?.body) batches.push(...JSON.parse(savedBatches.body));
+  else if (legacy) {
     // An existing receipt retains its request identity, including uncertain completion.
     batches.push(observations.map(answer => ({ id: answer.id, question: answer.prompt, text: answer.answer.slice(0, 12000), citations: answer.citations })));
   } else {
-    const ceiling = Math.min(18000, model.contextLength - 6000 - Buffer.byteLength(JSON.stringify(context) + prompts.competitors, "utf8"));
+    const room = model.contextLength - 6000 - Buffer.byteLength(JSON.stringify(context) + prompts[prompt], "utf8");
+    const ceiling = Math.min(18000, room);
     let batch: typeof batches[number] = [];
     for (const answer of observations.filter(answer => answer.citations.length > 0)) {
-      const source = { id: answer.id, question: answer.prompt, text: answer.answer.slice(0, 12000), citations: answer.citations };
-      if (Buffer.byteLength(JSON.stringify([source]), "utf8") > ceiling)
+      const source = { id: answer.id, question: answer.prompt, text: inputs.version >= 2 ? answer.answer : answer.answer.slice(0, 12000), citations: answer.citations };
+      if (Buffer.byteLength(JSON.stringify([source]), "utf8") > (inputs.version >= 2 ? room : ceiling))
         throw new ProviderError("context", "Choose a model with more room to review competitor evidence. Your answers are saved.");
       if (batch.length && Buffer.byteLength(JSON.stringify([...batch, source]), "utf8") > ceiling) {
         batches.push(batch); batch = [];
@@ -132,10 +138,11 @@ export async function discoverCompetitors(runner: Runner, job: Job, project: Pro
     }
     if (batch.length) batches.push(batch);
   }
+  if (!savedBatches) runner.store.setStep(job.id, 'competitor-batches', 'done', batches);
   const candidates: z.infer<typeof suggestedCompetitors>["competitors"] = [];
   for (const [index, answers] of batches.entries()) {
     signal.throwIfAborted();
-    const data = await runner.structuredPass(suggestedCompetitors, job, model, "competitors", { ...context, answers }, signal, legacy ? "competitors" : "competitors:" + index);
+    const data = await runner.structuredPass(suggestedCompetitors, job, model, prompt, { ...context, answers }, signal, legacy ? "competitors" : "competitors:" + index);
     candidates.push(...data.competitors);
   }
   return confirmedWebsites(project, observations, candidates);
@@ -144,6 +151,7 @@ export async function discoverCompetitors(runner: Runner, job: Job, project: Pro
 /** Cited evidence determines eligible roles; a reference cannot erase a competing-offering explanation. */
 export function confirmedWebsites(project: Pick<Project, 'domain'>, observations: Observation[], candidates: z.infer<typeof suggestedCompetitors>['competitors']) {
   const confirmed = new Map<string, DiscoveredWebsite>();
+  const categories: { domain: string; category: NonNullable<DiscoveredWebsite['category']>; evidence: NonNullable<DiscoveredWebsite['categoryEvidence']> }[] = [];
   const nameText = (value: string) => value.normalize('NFKC').toLocaleLowerCase().replace(/[\u2018\u2019\u02bc]/g, "'").replace(/\s+/g, ' ').trim();
   for (const candidate of candidates) {
     let domain: string;
@@ -158,6 +166,17 @@ export function confirmedWebsites(project: Pick<Project, 'domain'>, observations
       try { const host = publicUrl(citation.url).hostname.replace(/^www\./, ""); return host === domain || host.endsWith("." + domain); } catch { return false; }
     }));
     if (!evidence.length) continue;
+    const proof = candidate.categoryEvidence;
+    const supportingAnswer = proof && evidence.find(answer => answer.id === proof.observationId);
+    if (candidate.category && proof && supportingAnswer) {
+      const supported = proof.source === 'answer' ? supportingAnswer.answer.includes(proof.quote) : supportingAnswer.citations.some(citation => {
+        try {
+          const host = publicUrl(citation.url).hostname.replace(/^www\./, '');
+          return citation.url === proof.url && (host === domain || host.endsWith('.' + domain)) && !!citation.title?.includes(proof.quote);
+        } catch { return false; }
+      });
+      if (supported) categories.push({ domain, category: candidate.category, evidence: proof });
+    }
     const prior = confirmed.get(domain);
     const role = prior?.role && candidate.role && prior.role !== candidate.role ? 'both' : candidate.role ?? prior?.role;
     const reason = candidate.role === 'reference' && prior?.role && prior.role !== 'reference'
@@ -178,5 +197,10 @@ export function confirmedWebsites(project: Pick<Project, 'domain'>, observations
       observationIds: [...new Set([...merged.observationIds, ...site.observationIds])] });
     confirmed.delete(site.domain);
   }
-  return [...confirmed.values()];
+  return [...confirmed.values()].map(site => {
+    const claims = categories.filter(claim => claim.domain === site.domain || claim.domain.endsWith('.' + site.domain));
+    // Conflicting destination types stay unclassified, including across merged subdomains.
+    return new Set(claims.map(claim => claim.category)).size === 1
+      ? { ...site, category: claims[0].category, categoryEvidence: claims[0].evidence } : site;
+  });
 }

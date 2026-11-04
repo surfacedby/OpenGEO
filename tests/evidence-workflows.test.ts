@@ -36,6 +36,44 @@ function fixture() {
 const json = (value:unknown) => new Response(JSON.stringify(value), {headers:{'Content-Type':'application/json'}});
 const stream = (text:string) => new Response('data: ' + JSON.stringify({type:'response.completed',response:{status:'completed',output:[{content:[{type:'output_text',text}]}]}}) + '\n\n');
 
+test('large catalogs check every captured page before accepting a new resource and resume accepted coverage receipts', async () => {
+  const f = fixture(), original = globalThis.fetch, reviewed = new Set<string>();
+  let coverageCalls = 0, interrupted = false;
+  const sources = f.pages.map(page => ({ id: page.id, url: page.url, title: 'Support workspace '.repeat(25), h1: page.h1, text: page.text.slice(0, 8000) }));
+  const answer = f.store.observations(f.project.id, f.measurement.id)[0];
+  globalThis.fetch = (async (url, init) => {
+    if (String(url).endsWith('/models')) return json({ models: [{ slug: 'fixture', display_name: 'Fixture', visibility: 'list', context_window: 32768 }] });
+    const request = JSON.parse(init!.body as string), input = JSON.parse(request.input[0].content);
+    assert.ok(Buffer.byteLength(request.instructions + request.input[0].content, 'utf8') + 5096 <= 32768);
+    if (request.instructions === prompts.contentGaps) {
+      assert.deepEqual(input.catalog, []);
+      return stream(JSON.stringify({ recommendations: [{ title: 'Organizing customer questions', description: 'A resource explaining the shared support workflow.', priority: 'medium', targetPageId: sources[0].id,
+        evidenceIds: [sources[0].id, answer.id], steps: ['Check existing coverage before creating a guide.'], opportunity: { type: 'new_content', topic: 'Organizing customer questions', pageLabel: 'Guide', pageTitle: 'Support workspace', benefit: 'Help teams organize their questions.' } }], uncertainties: [] }));
+    }
+    assert.equal(request.instructions, prompts.contentCoverage);
+    coverageCalls++;
+    if (coverageCalls === 2 && !interrupted) { interrupted = true; return new Response('{}', { status: 429 }); }
+    for (const page of input.pages) { assert.ok(!reviewed.has(page.id), 'Accepted coverage must not replay'); reviewed.add(page.id); }
+    const existing = input.pages.find((page:any) => page.id === sources.at(-1)!.id);
+    return stream(JSON.stringify({ matches: existing ? [{ pageId: existing.id, quote: existing.title }] : [] }));
+  }) as typeof fetch;
+  try {
+    const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'diagnose', provider: 'chatgpt' }), 'large-catalog-review');
+    const observations = [answer], website = contentSources([f.pages[0]], answer.prompt, 12000);
+    f.store.setStep(job.id, 'diagnosis-inputs', 'done', { version: 4, sources, answerBatches: [observations], measurementJobId: f.measurement.id,
+      context: { brand: f.project.brand, aliases: [], locale: f.project.locale, website, siteOverview: null, observations } });
+    f.store.setStep(job.id, 'diagnosis-batches', 'done', [{ pages: [sources[0]], contextIndex: 0 }]);
+    f.store.setStep(job.id, 'diagnose:0', 'done', JSON.stringify({ recommendations: [], uncertainties: [] }));
+    await f.runner.tick();
+    assert.equal(f.store.job(job.id).status, 'paused', JSON.stringify(f.store.job(job.id)));
+    f.runner.resume(job.id, false);
+    await f.runner.tick();
+    assert.equal(f.store.job(job.id).status, 'completed', f.store.job(job.id).progress);
+    assert.equal(reviewed.size, sources.length);
+    assert.equal(f.store.findings(f.project.id).length, 0, 'A resource covered by the final page must not be suggested as new');
+  } finally { globalThis.fetch = original; await f.close(); }
+});
+
 test('reader explanations omit only a trailing list of their verified structured evidence references', () => {
   const page = randomUUID(), answer = randomUUID();
   assert.equal(withoutEvidenceList('Explain the supported workflow. Evidence: ' + page + ', ' + answer + '.', [page, answer]), 'Explain the supported workflow.');
@@ -106,6 +144,400 @@ test('large audits are fully analyzed in durable batches across quota and later 
     await f.runner.execute(f.store.job(job.id),f.project,new AbortController().signal);
     assert.equal(f.store.findings(f.project.id).length,count);
   } finally {globalThis.fetch=original;await f.close();}
+});
+
+test('large action plans resume bounded grouping without repeating accepted batches or losing tasks', async () => {
+  const f = fixture(), original = globalThis.fetch;
+  const grouped = new Set<number>();
+  let groupingCalls = 0, refuse = true;
+  globalThis.fetch = (async (url, init) => {
+    if (String(url).endsWith('/models')) return json({ models: [{ slug: 'fixture', display_name: 'Fixture', visibility: 'list', context_window: 32768 }] });
+    const request = JSON.parse(init!.body as string), input = JSON.parse(request.input[0].content);
+    assert.ok(Buffer.byteLength(request.instructions + request.input[0].content, 'utf8') + 5096 <= 32768);
+    if (request.instructions === prompts.consolidate) {
+      groupingCalls++;
+      if (groupingCalls === 2 && refuse) return new Response('{}', { status: 429 });
+      for (const candidate of input.candidates) { assert.ok(!grouped.has(candidate.index)); grouped.add(candidate.index); }
+      return stream(JSON.stringify({ groups: input.candidates.map((candidate: any) => ({ primaryIndex: candidate.index, indices: [candidate.index] })) }));
+    }
+    if (request.instructions === prompts.contentGaps) return stream(JSON.stringify({ recommendations: [], uncertainties: [] }));
+    if (request.instructions === prompts.opportunityReview) return stream(JSON.stringify({ accepted: input.candidates.map((item: any) => ({ index: item.index, targetPageId: item.targetPageId, evidenceIds: item.evidenceIds, title: item.title, description: item.description, steps: item.steps, opportunity: { type: 'page_update', pageLabel: 'Resource', pageTitle: 'Support workspace', benefit: 'Explain the supported workflow.' } })) }));
+    return stream(JSON.stringify({ recommendations: input.pages.map((page: any) => ({ title: 'Explain workflow ' + new URL(page.url).pathname, description: 'Describe the supported workflow in enough detail for a reader to decide whether it fits their current process. '.repeat(3), priority: 'medium', targetPageId: page.id, evidenceIds: [page.id, input.observations[0].id], steps: ['Review the saved page and add a supported example.'] })), uncertainties: [] }));
+  }) as typeof fetch;
+  try {
+    const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'diagnose', provider: 'chatgpt' }), 'large-grouping');
+    await f.runner.tick();
+    assert.equal(f.store.job(job.id).error, 'quota');
+    const plan = f.store.step(job.id, 'consolidation-batches')!.body!;
+    assert.ok(JSON.parse(plan).length > 1);
+    assert.ok(grouped.size > 0 && grouped.size < 100);
+    refuse = false;
+    f.runner.resume(job.id, false);
+    await f.runner.tick();
+    assert.equal(f.store.job(job.id).status, 'completed', f.store.job(job.id).progress);
+    assert.equal(f.store.step(job.id, 'consolidation-batches')!.body, plan);
+    assert.equal(grouped.size, 100);
+    assert.equal(f.store.findings(f.project.id).length, 100);
+    assert.equal(new Set(f.store.findings(f.project.id).flatMap(item => item.evidenceIds)).size, 101);
+  } finally { globalThis.fetch = original; await f.close(); }
+});
+
+test('homepage-only recommendations retain the complete saved answer, including its final qualification', async () => {
+  const f = fixture(), original = globalThis.fetch;
+  f.store.db.prepare("DELETE FROM artifacts WHERE job_id=? AND kind='page'").run(f.audit.id);
+  const home = parsePage('https://example.com/', 200, '<title>Support workspace</title><main><h1>Organize customer questions</h1><p>A shared workspace for customer support teams.</p></main>');
+  f.store.put('page', f.project.id, f.audit.id, home);
+  const observation = f.store.observations(f.project.id, f.measurement.id)[0];
+  const answer = 'Customer support teams compare their workflows. '.repeat(150) + 'The product does not support telephone routing.';
+  f.store.db.prepare('DELETE FROM artifacts WHERE id=?').run(observation.id);
+  f.store.put('observation', f.project.id, f.measurement.id, { ...observation, answer });
+  const passes = new Set<string>();
+  globalThis.fetch = (async (url, init) => {
+    if (String(url).endsWith('/models')) return json({ models: [{ slug: 'fixture', display_name: 'Fixture', visibility: 'list', context_window: 50000 }] });
+    const request = JSON.parse(init!.body as string), input = JSON.parse(request.input[0].content);
+    assert.ok([prompts.diagnose, prompts.contentGaps].includes(request.instructions));
+    assert.equal(input.observations[0].answer, answer);
+    const suppliedPages = request.instructions === prompts.diagnose ? input.website.sources : input.pages;
+    assert.equal(suppliedPages[0].id, home.id);
+    passes.add(request.instructions);
+    return stream(JSON.stringify({ recommendations: [], uncertainties: [] }));
+  }) as typeof fetch;
+  try {
+    const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'diagnose', provider: 'chatgpt' }), 'homepage-only');
+    await f.runner.tick();
+    assert.equal(f.store.job(job.id).status, 'completed');
+    assert.deepEqual(passes, new Set([prompts.diagnose, prompts.contentGaps]));
+    const saved = JSON.parse(f.store.step(job.id, 'diagnosis-inputs')!.body!);
+    assert.equal(saved.context.observations[0].answer, answer);
+    assert.equal(saved.sources.length, 1);
+  } finally { globalThis.fetch = original; await f.close(); }
+});
+
+test('large answer sets review every page-answer pair with complete text and resume a frozen plan', async () => {
+  const f = fixture(), original = globalThis.fetch;
+  f.store.db.prepare("DELETE FROM artifacts WHERE kind IN ('page','observation')").run();
+  const pages = Array.from({ length: 3 }, (_, index) => parsePage('https://example.com/guide/' + index, 200,
+    '<h1>Support guide</h1><p>Organize customer questions and explain the supported workflow.</p>'));
+  for (const page of pages) f.store.put('page', f.project.id, f.audit.id, page);
+  const answers = Array.from({ length: 8 }, (_, index) => ({ id: randomUUID(), projectId: f.project.id, jobId: f.measurement.id,
+    prompt: 'How does workflow ' + index + ' handle customer questions?', provider: 'chatgpt', platform: 'chat_gpt', model: 'fixture',
+    locale: 'en-US', observedAt: new Date().toISOString(), answer: 'Support workflow detail. '.repeat(400) + 'Final qualification for workflow ' + index + '.',
+    citations: [], surface: 'api', mentioned: false, cited: false, costUsd: 0 }));
+  for (const answer of answers) f.store.put('observation', f.project.id, f.measurement.id, answer);
+  const pairs = new Set<string>(), gapAnswers = new Set<string>();
+  let refused = false, calls = 0, contextLength = 32768;
+  globalThis.fetch = (async (url, init) => {
+    if (String(url).endsWith('/models')) return json({ models: [{ slug: 'fixture', display_name: 'Fixture', visibility: 'list', context_window: contextLength }] });
+    const request = JSON.parse(init!.body as string), input = JSON.parse(request.input[0].content);
+    assert.ok(Buffer.byteLength(request.instructions + request.input[0].content, 'utf8') + 5096 <= 32768);
+    calls++;
+    if (calls === 2 && !refused) { refused = true; return new Response('{}', { status: 429 }); }
+    for (const supplied of input.observations) assert.equal(supplied.answer, answers.find(answer => answer.id === supplied.id)!.answer);
+    if (request.instructions === prompts.contentGaps) {
+      assert.equal(input.catalog.length, pages.length);
+      for (const answer of input.observations) { assert.ok(!gapAnswers.has(answer.id)); gapAnswers.add(answer.id); }
+    } else {
+      assert.equal(request.instructions, prompts.diagnose);
+      for (const answer of input.observations) for (const page of input.pages) {
+        const pair = answer.id + ':' + page.id;
+        assert.ok(!pairs.has(pair), 'Completed page-answer review cannot replay');
+        pairs.add(pair);
+      }
+    }
+    return stream(JSON.stringify({ recommendations: [], uncertainties: [] }));
+  }) as typeof fetch;
+  try {
+    const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'diagnose', provider: 'chatgpt' }), 'large-answer-set');
+    await f.runner.tick();
+    assert.equal(f.store.job(job.id).status, 'paused');
+    const plan = f.store.step(job.id, 'diagnosis-batches')!.body;
+    assert.ok(JSON.parse(f.store.step(job.id, 'diagnosis-inputs')!.body!).answerBatches.length > 1);
+    contextLength = 65536;
+    f.store.updateJob(f.audit.id, { status: 'failed' });
+    f.runner.resume(job.id, true);
+    await f.runner.tick();
+    assert.equal(f.store.job(job.id).status, 'completed', f.store.job(job.id).progress);
+    assert.equal(f.store.step(job.id, 'diagnosis-batches')!.body, plan);
+    assert.equal(pairs.size, answers.length * pages.length);
+    assert.equal(gapAnswers.size, answers.length);
+    assert.equal((f.store.job(job.id).result as any).pagesReviewed, pages.length);
+    const completedCalls = calls;
+    await f.runner.execute(f.store.job(job.id), f.project, new AbortController().signal);
+    assert.equal(calls, completedCalls);
+  } finally { globalThis.fetch = original; await f.close(); }
+});
+
+test('saved version-two analysis keeps its original page batches and completed provider receipt', async () => {
+  const f = fixture(), original = globalThis.fetch;
+  const source = { id: f.pages[0].id, url: f.pages[0].url, title: f.pages[0].title, h1: f.pages[0].h1, text: f.pages[0].text.slice(0, 8000) };
+  const website = { sources: [{ id: source.id, url: source.url, title: source.title, text: source.text.slice(0, 2000) }],
+    coverage: { pagesAvailable: 1, pagesUsed: 1, excerpts: true } };
+  let calls = 0;
+  globalThis.fetch = (async (url, init) => {
+    if (String(url).endsWith('/models')) return json({ models: [{ slug: 'fixture', display_name: 'Fixture', visibility: 'list', context_window: 50000 }] });
+    const request = JSON.parse(init!.body as string);
+    assert.equal(request.instructions, prompts.contentGaps);
+    calls++;
+    return stream(JSON.stringify({ recommendations: [], uncertainties: [] }));
+  }) as typeof fetch;
+  try {
+    const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'diagnose', provider: 'chatgpt' }), 'saved-v2-analysis');
+    f.store.setStep(job.id, 'diagnosis-inputs', 'done', { version: 2, sources: [source], measurementJobId: f.measurement.id,
+      context: { brand: f.project.brand, aliases: [], locale: f.project.locale, website, siteOverview: null,
+        observations: f.store.observations(f.project.id, f.measurement.id) } });
+    f.store.setStep(job.id, 'diagnosis-batches', 'done', [[source]]);
+    f.store.setStep(job.id, 'diagnose:0', 'done', JSON.stringify({ recommendations: [], uncertainties: [] }));
+    const inputs = f.store.step(job.id, 'diagnosis-inputs')!.body, plan = f.store.step(job.id, 'diagnosis-batches')!.body;
+    await f.runner.tick();
+    assert.equal(f.store.job(job.id).status, 'completed', f.store.job(job.id).progress);
+    assert.equal(calls, 1);
+    assert.equal(f.store.step(job.id, 'diagnosis-inputs')!.body, inputs);
+    assert.equal(f.store.step(job.id, 'diagnosis-batches')!.body, plan);
+  } finally { globalThis.fetch = original; await f.close(); }
+});
+
+test('queued analysis stays bound to its selected check when a newer check finishes', async () => {
+  const f = fixture(), original = globalThis.fetch;
+  const initial = f.store.observations(f.project.id, f.measurement.id)[0];
+  globalThis.fetch = (async (url, init) => {
+    if (String(url).endsWith('/models')) return json({ models: [{ slug: 'fixture', display_name: 'Fixture', visibility: 'list', context_window: 50000 }] });
+    const request = JSON.parse(init!.body as string), input = JSON.parse(request.input[0].content);
+    assert.deepEqual(input.observations.map((answer: any) => answer.id), [initial.id]);
+    return stream(JSON.stringify({ recommendations: [], uncertainties: [] }));
+  }) as typeof fetch;
+  try {
+    const input = jobInput.parse({ projectId: f.project.id, kind: 'diagnose', provider: 'chatgpt' });
+    const analysis = f.store.enqueue(input, 'bound-analysis');
+    assert.equal(analysis.measurementJobId, f.measurement.id);
+    const newer = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'recheck', provider: 'chatgpt' }), 'newer-measurement');
+    f.store.put('observation', f.project.id, newer.id, { ...initial, id: randomUUID(), jobId: newer.id, answer: 'A different later answer.' });
+    f.store.updateJob(newer.id, { status: 'completed' });
+    assert.equal(f.store.enqueue(input, 'bound-analysis').measurementJobId, f.measurement.id);
+    await f.runner.tick();
+    assert.equal(f.store.job(analysis.id).status, 'completed');
+    assert.equal((f.store.job(analysis.id).result as { measurementJobId: string }).measurementJobId, f.measurement.id);
+    const other = f.store.createProject(projectInput.parse({ domain: 'example.org', brand: 'Other', prompts: ['Which service?'] }));
+    assert.throws(() => f.store.enqueue(jobInput.parse({ projectId: other.id, kind: 'diagnose', provider: 'chatgpt', measurementJobId: f.measurement.id }), 'foreign-analysis'), /completed visibility check for this brand/);
+    assert.equal(f.store.jobs(other.id).length, 0);
+  } finally { globalThis.fetch = original; await f.close(); }
+});
+
+test('automatic recommendations resume within the original scan without collecting its answers again', async () => {
+  const f = fixture(), original = globalThis.fetch;
+  let measured = 0, refuse = true, analysisCalls = 0;
+  globalThis.fetch = (async (url, init) => {
+    if (String(url).endsWith('/models')) return json({ models: [{ slug: 'fixture', display_name: 'Fixture', visibility: 'list', context_window: 50000 }] });
+    const request = JSON.parse(init!.body as string);
+    if (request.instructions.startsWith("Answer the user's question independently")) {
+      measured++;
+      return stream('A shared workspace can organize customer questions.');
+    }
+    analysisCalls++;
+    if (refuse) { refuse = false; return new Response('{}', { status: 429 }); }
+    const input = JSON.parse(request.input[0].content);
+    assert.equal(input.observations.length, 1);
+    assert.equal(input.observations[0].answer, 'A shared workspace can organize customer questions.');
+    return stream(JSON.stringify({ recommendations: [], uncertainties: [] }));
+  }) as typeof fetch;
+  try {
+    const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'measure', provider: 'chatgpt', prepareRecommendations: true }), 'complete-scan');
+    await f.runner.tick();
+    assert.equal(f.store.job(job.id).status, 'paused');
+    assert.equal(measured, 1);
+    assert.equal(f.store.observations(f.project.id, job.id).length, 1);
+    assert.equal(f.store.step(job.id, 'measurement-result')?.state, 'done');
+    assert.deepEqual((f.store.job(job.id).result as any).competitors, []);
+    assert.throws(() => f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'measure', provider: 'chatgpt' }), 'duplicate-follow-up'), /already in progress/);
+    f.runner.resume(job.id, true);
+    await f.runner.tick();
+    const finished = f.store.job(job.id);
+    assert.equal(finished.status, 'completed', finished.progress);
+    assert.equal(measured, 1);
+    assert.ok(analysisCalls > 1);
+    assert.equal((finished.result as any).analysis.measurementJobId, job.id);
+    assert.equal(finished.maxCostUsd, 0);
+    assert.equal(finished.spentUsd, 0);
+    assert.equal(f.store.jobs(f.project.id).filter(item => item.kind === 'diagnose').length, 0);
+    const restored = importProject(f.store, exportProject(f.store, f.project.id));
+    const importedScan = f.store.jobs(restored.project.id).find(item => (item.result as any)?.analysis);
+    assert.ok(importedScan);
+    assert.equal((importedScan.result as any).analysis.measurementJobId, importedScan.id);
+    assert.notEqual(importedScan.id, job.id);
+  } finally { globalThis.fetch = original; await f.close(); }
+});
+
+test('automatic Topic analysis uses only its frozen prompts and shares the original scan receipt', async () => {
+  const f = fixture(), original = globalThis.fetch, topicId = randomUUID();
+  const selected = f.project.prompts[0], unrelated = 'Which unrelated accounting software is cheapest?';
+  let answers = 0, analyses = 0;
+  globalThis.fetch = (async (url, init) => {
+    if (String(url).endsWith('/models')) return json({ models: [{ slug: 'fixture', display_name: 'Fixture', visibility: 'list', context_window: 50000 }] });
+    const request = JSON.parse(init!.body as string);
+    if (request.instructions.startsWith("Answer the user's question independently")) {
+      answers++;
+      assert.ok(JSON.stringify(request).includes(selected));
+      assert.ok(!JSON.stringify(request).includes(unrelated));
+      return stream('A shared workspace organizes customer questions.');
+    }
+    analyses++;
+    const input = JSON.parse(request.input[0].content);
+    assert.deepEqual(input.observations.map((answer: any) => answer.prompt), [selected]);
+    assert.ok(!JSON.stringify(input).includes(unrelated));
+    return stream(JSON.stringify({ recommendations: [], uncertainties: [] }));
+  }) as typeof fetch;
+  try {
+    const { id: _id, createdAt: _createdAt, ...editable } = f.project;
+    f.store.updateProject(f.project.id, projectInput.parse({ ...editable, prompts: [selected, unrelated], topics: [{ id: topicId, name: 'Support', prompts: [selected], createdAt: new Date().toISOString() }] }));
+    const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'measure', topicId, provider: 'chatgpt', prepareRecommendations: true }), 'topic-follow-up');
+    await f.runner.tick();
+    const finished = f.store.job(job.id);
+    assert.equal(finished.status, 'completed', finished.progress);
+    assert.equal(answers, 1);
+    assert.ok(analyses > 0);
+    assert.equal(finished.requestedAnswers, 1);
+    assert.deepEqual(JSON.parse(f.store.step(job.id, 'project')!.body!).prompts, [selected]);
+    assert.equal((finished.result as any).analysis.measurementJobId, job.id);
+    assert.equal(f.store.jobs(f.project.id).filter(item => item.kind === 'diagnose').length, 0);
+    assert.equal(f.store.project(f.project.id).prompts.length, 2);
+  } finally { globalThis.fetch = original; await f.close(); }
+});
+
+test('a scan waits for its website check and preserves answers when that check is cancelled', async () => {
+  const f = fixture(), original = globalThis.fetch;
+  f.store.db.prepare("DELETE FROM artifacts WHERE kind='page'").run();
+  let measured = 0;
+  globalThis.fetch = (async (url, init) => {
+    if (String(url).endsWith('/models')) return json({ models: [{ slug: 'fixture', display_name: 'Fixture', visibility: 'list', context_window: 50000 }] });
+    const request = JSON.parse(init!.body as string);
+    assert.ok(request.instructions.startsWith("Answer the user's question independently"));
+    measured++;
+    return stream('A shared workspace can organize customer questions.');
+  }) as typeof fetch;
+  try {
+    const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'measure', provider: 'chatgpt', prepareRecommendations: true }), 'scan-awaiting-pages');
+    await f.runner.tick();
+    assert.equal(f.store.job(job.id).status, 'queued');
+    assert.equal((f.store.job(job.id).result as any).waitingForWebsite, true);
+    const auditId = JSON.parse(f.store.step(job.id, 'analysis-audit')!.body!);
+    assert.notEqual(auditId, f.audit.id);
+    assert.equal(f.store.job(auditId).kind, 'audit');
+    assert.equal(f.store.job(auditId).maxCostUsd, 0);
+    await f.runner.cancel(auditId);
+    f.store.updateJob(job.id, { availableAt: new Date(0).toISOString() });
+    await f.runner.tick();
+    const paused = f.store.job(job.id);
+    assert.equal(paused.status, 'paused');
+    assert.equal(paused.error, 'evidence');
+    assert.equal(measured, 1);
+    assert.equal(f.store.observations(f.project.id, job.id).length, 1);
+    assert.equal(f.store.jobs(f.project.id).filter(item => item.kind === 'audit').length, 2);
+  } finally { globalThis.fetch = original; await f.close(); }
+});
+
+test('separate recommendations arrange one local website read and continue without another visibility check', async () => {
+  const f = fixture(), original = globalThis.fetch;
+  f.store.db.prepare("DELETE FROM artifacts WHERE kind='page'").run();
+  let analyses = 0;
+  globalThis.fetch = (async (url, init) => {
+    if (String(url).endsWith('/models')) return json({ models: [{ slug: 'fixture', display_name: 'Fixture', visibility: 'list', context_window: 50000 }] });
+    const request = JSON.parse(init!.body as string);
+    assert.ok([prompts.diagnose, prompts.contentGaps].includes(request.instructions));
+    analyses++;
+    return stream(JSON.stringify({ recommendations: [], uncertainties: [] }));
+  }) as typeof fetch;
+  try {
+    const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'diagnose', provider: 'chatgpt' }), 'analysis-needs-pages');
+    await f.runner.tick();
+    assert.equal(f.store.job(job.id).status, 'queued');
+    assert.equal(analyses, 0);
+    const auditId = JSON.parse(f.store.step(job.id, 'analysis-audit')!.body!);
+    assert.equal(f.store.job(auditId).maxPages, 6);
+    assert.equal(f.store.job(auditId).maxCostUsd, 0);
+    const page = parsePage('https://example.com/guide', 200, '<h1>Customer questions</h1><p>A guide to organizing customer questions.</p>');
+    f.store.put('page', f.project.id, auditId, page);
+    f.store.updateJob(auditId, { status: 'completed' });
+    f.store.updateJob(job.id, { availableAt: new Date(0).toISOString() });
+    await f.runner.tick();
+    assert.equal(f.store.job(job.id).status, 'completed', f.store.job(job.id).progress);
+    assert.equal((f.store.job(job.id).result as any).measurementJobId, f.measurement.id);
+    assert.equal(analyses, 2);
+    assert.equal(f.store.jobs(f.project.id).filter(item => item.kind === 'measure').length, 1);
+    assert.equal(f.store.jobs(f.project.id).filter(item => item.kind === 'audit').length, 2);
+  } finally { globalThis.fetch = original; await f.close(); }
+});
+
+test('cancelling analysis stops only its own prerequisite read and preserves independently requested crawling', async () => {
+  for (const shared of [false, true]) {
+    const f = fixture(), original = globalThis.fetch;
+    f.store.db.prepare("DELETE FROM artifacts WHERE kind='page'").run();
+    if (shared) f.store.updateJob(f.audit.id, { status: 'queued' });
+    globalThis.fetch = (async (url) => {
+      assert.ok(String(url).endsWith('/models'));
+      return json({ models: [{ slug: 'fixture', display_name: 'Fixture', visibility: 'list', context_window: 50000 }] });
+    }) as typeof fetch;
+    try {
+      const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'diagnose', provider: 'chatgpt' }), 'cancel-before-pages');
+      const result = await f.runner.execute(job, f.project, new AbortController().signal) as any;
+      assert.equal(result.waitingForWebsite, true);
+      const auditId = JSON.parse(f.store.step(job.id, 'analysis-audit')!.body!);
+      await f.runner.cancel(job.id);
+      assert.equal(f.store.job(job.id).status, 'cancelled');
+      assert.equal(f.store.job(auditId).status, shared ? 'queued' : 'cancelled');
+      assert.equal(f.store.observations(f.project.id, f.measurement.id).length, 1);
+    } finally { globalThis.fetch = original; await f.close(); }
+  }
+});
+
+test('the last cancelled analysis releases a shared prerequisite after its original requester cancels', async () => {
+  const f = fixture(), original = globalThis.fetch;
+  f.store.db.prepare("DELETE FROM artifacts WHERE kind='page'").run();
+  globalThis.fetch = (async (url) => {
+    assert.ok(String(url).endsWith('/models'));
+    return json({ models: [{ slug: 'fixture', display_name: 'Fixture', visibility: 'list', context_window: 50000 }] });
+  }) as typeof fetch;
+  try {
+    const first = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'diagnose', provider: 'chatgpt' }), 'first-analysis');
+    await f.runner.execute(first, f.project, new AbortController().signal);
+    f.store.updateJob(first.id, { status: 'paused' });
+    const second = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'diagnose', provider: 'chatgpt' }), 'second-analysis');
+    await f.runner.execute(second, f.project, new AbortController().signal);
+    const auditId = JSON.parse(f.store.step(first.id, 'analysis-audit')!.body!);
+    assert.equal(JSON.parse(f.store.step(second.id, 'analysis-audit')!.body!), auditId);
+    await f.runner.cancel(first.id);
+    assert.equal(f.store.job(auditId).status, 'queued');
+    await f.runner.cancel(second.id);
+    assert.equal(f.store.job(auditId).status, 'cancelled');
+    assert.equal(f.store.observations(f.project.id, f.measurement.id).length, 1);
+  } finally { globalThis.fetch = original; await f.close(); }
+});
+
+test('recommendations use readable public pages from this website, never private pages or error responses', async () => {
+  const f = fixture(), original = globalThis.fetch;
+  f.store.db.prepare("DELETE FROM artifacts WHERE kind='page'").run();
+  const pages = [
+    parsePage('https://example.com/guide', 200, '<h1>Customer questions</h1><p>A public guide to organizing customer questions.</p>'),
+    parsePage('https://example.com/private', 200, '<meta name="robots" content="noindex"><p>Private account information.</p>'),
+    parsePage('https://example.com/broken', 500, '<p>Internal error response.</p>'),
+    parsePage('https://example.com/account/login', 200, '<p>Sign in to continue.</p>'),
+    parsePage('https://other.example.com/guide', 200, '<p>Another website.</p>'),
+  ];
+  for (const page of pages) f.store.put('page', f.project.id, f.audit.id, page);
+  let analysisCalls = 0;
+  globalThis.fetch = (async (url, init) => {
+    if (String(url).endsWith('/models')) return json({ models: [{ slug: 'fixture', display_name: 'Fixture', visibility: 'list', context_window: 50000 }] });
+    const input = JSON.parse(JSON.parse(init!.body as string).input[0].content);
+    const sent = JSON.stringify(input);
+    for (const page of pages.slice(1)) assert.ok(!sent.includes(page.id) && !sent.includes(page.url));
+    analysisCalls++;
+    return stream(JSON.stringify({ recommendations: [], uncertainties: [] }));
+  }) as typeof fetch;
+  try {
+    const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'diagnose', provider: 'chatgpt' }), 'public-page-analysis');
+    await f.runner.tick();
+    assert.equal(f.store.job(job.id).status, 'completed', f.store.job(job.id).progress);
+    assert.equal((f.store.job(job.id).result as any).pagesReviewed, 1);
+    assert.ok(analysisCalls > 0);
+  } finally { globalThis.fetch = original; await f.close(); }
 });
 
 test('batch analysis can review a supplied context page but rejects a page absent from all supplied evidence', async () => {

@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import {
   ArrowRight,
   ChevronDown,
+  ChevronRight,
   ExternalLink,
   Globe,
   Link,
@@ -29,6 +30,7 @@ import {
 } from "./provider-ui";
 import "./analytics.css";
 import { Dialog } from './ui/Dialog';
+import { Pagination, Tabs } from './ui/Primitives';
 import { EmptyState } from './ui/Primitives';
 
 import { percent, shortDate as date, dateTime, usd } from "./format";
@@ -330,7 +332,7 @@ export function VisibilityChart({
                 <tbody>
                   {history.map((point) => (
                     <tr key={point.jobId}>
-                      <td>{dateTime(point.at)}{point.campaign && <small>Campaign check: {point.campaign}</small>}</td>
+                      <td>{dateTime(point.at)}{point.topic && <small>Topic check: {point.topic}</small>}</td>
                       <td>{percent(point.mentionRate)}</td>
                       <td>{percent(point.citationRate)}</td>
                       <td>
@@ -435,38 +437,7 @@ export function SourcesTable({
         </div>
       )}
       {shown.length ? (
-        <div className="table-wrap">
-          <table className={'analytics-table source-coverage-table responsive-evidence-table' + (compact ? ' compact-sources' : '')}>
-            <caption className="visually-hidden">
-              {mode === "domains" ? "Cited domains" : "Cited pages"}. Coverage
-              counts each collected answer once per source.
-            </caption>
-            <thead>
-              <tr>
-                <th>Source</th>
-                <th>Answer coverage</th>
-                {!compact && mode === "domains" && <th>Pages</th>}
-                <th>
-                  <span className="visually-hidden">Evidence</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {shown.map((row) => (
-                <SourceTableRow
-                  key={row.key}
-                  row={row}
-                  collected={collected}
-                  mode={mode}
-                  compact={compact}
-                  evidence={evidence}
-                  projectId={projectId}
-                  own={isOwnHost(new URL(row.url).hostname, ownDomain)}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <SourceRows rows={shown} collected={collected} mode={mode} compact={compact} evidence={evidence} projectId={projectId} ownDomain={ownDomain} />
       ) : (
         <EmptyState icon={Link} title={search ? 'No matching sources' : collected ? 'These answers did not include source links' : 'See which websites AI cites'} action={search ? <button className="secondary" onClick={() => setSearch('')}>Clear search</button> : !collected && startCheck ? <button className="primary" onClick={startCheck}>Set up a visibility check</button> : undefined}>{search ? 'Search by website name or page address.' : collected ? 'The collected answers are still available in Responses. An answer without links does not establish that a website was never used.' : 'Collect answers to your customer questions. This view groups their source links by website and page, with a route back to each answer.'}</EmptyState>
       )}
@@ -481,9 +452,20 @@ export function SourcesTable({
 }
 
 /** Subdomains of the tracked website are the user's own pages too. */
-function isOwnHost(host: string, ownDomain: string) {
+export function isOwnHost(host: string, ownDomain: string) {
   const own = ownDomain.replace(/^www\./, "").toLowerCase(), value = host.replace(/^www\./, "").toLowerCase();
   return value === own || value.endsWith("." + own);
+}
+
+/** The overview, Sources workspace and source drawer share one evidence table. */
+export function SourceRows({ rows, collected, mode, compact = false, evidence, projectId, ownDomain, open }: {
+  rows: SourceRow[]; collected: number; mode: 'domains' | 'pages'; compact?: boolean; evidence: Evidence; projectId: string; ownDomain: string; open?: (row: SourceRow) => void;
+}) {
+  return <div className="table-wrap"><table className={'analytics-table source-coverage-table responsive-evidence-table' + (compact ? ' compact-sources' : '')}>
+    <caption className="visually-hidden">{mode === 'domains' ? 'Cited domains' : 'Cited pages'}. Coverage counts each collected answer once per source.</caption>
+    <thead><tr><th>Source</th><th>Answer coverage</th>{!compact && mode === 'domains' && <th>Pages</th>}<th><span className="visually-hidden">Evidence</span></th></tr></thead>
+    <tbody>{rows.map(row => <SourceTableRow key={row.key} row={row} collected={collected} mode={mode} compact={compact} evidence={evidence} projectId={projectId} own={isOwnHost(new URL(row.url).hostname, ownDomain)} open={open} />)}</tbody>
+  </table></div>;
 }
 
 function SourceTableRow({
@@ -494,6 +476,7 @@ function SourceTableRow({
   evidence,
   projectId,
   own,
+  open,
 }: {
   row: SourceRow;
   collected: number;
@@ -502,15 +485,16 @@ function SourceTableRow({
   evidence: Evidence;
   projectId: string;
   own: boolean;
+  open?: (row: SourceRow) => void;
 }) {
   return (
     <tr>
       <td className="source-name">
-        <a href={row.url} target="_blank" rel="noreferrer" title={row.url}>
+        {open ? <button className="source-detail-link" onClick={() => open(row)}><SiteIcon projectId={projectId} domain={new URL(row.url).hostname} /><span>{row.label}</span><ChevronRight size={14} /></button> : <a href={row.url} target="_blank" rel="noreferrer" title={row.url}>
           <SiteIcon projectId={projectId} domain={new URL(row.url).hostname} />
           <span>{row.label}</span>
           <ExternalLink size={12} />
-        </a>
+        </a>}
         {own && <span className="own-site">Your site</span>}
         {mode === "pages" && <small>{row.url}</small>}
       </td>
@@ -548,7 +532,7 @@ export function PromptTable({
   rows: PromptRow[];
   evidence: Evidence;
   collecting?: boolean;
-  /** Campaign groups; a question may appear under several, and questions in none close the list. */
+  /** Topic groups; a question may appear under several, and questions in none close the list. */
   groups?: { name: string; prompts: string[] }[];
 }) {
   const [search, setSearch] = useState("");
@@ -556,7 +540,7 @@ export function PromptTable({
     row.prompt.toLowerCase().includes(search.toLowerCase()),
   );
   const sections = groups && [...groups.map((group) => ({ name: group.name, rows: shown.filter((row) => group.prompts.includes(row.prompt)) })),
-    { name: "No campaign", rows: shown.filter((row) => !groups.some((group) => group.prompts.includes(row.prompt))) }].filter((section) => section.rows.length);
+    { name: "No topic", rows: shown.filter((row) => !groups.some((group) => group.prompts.includes(row.prompt))) }].filter((section) => section.rows.length);
   const subtotal = (items: PromptRow[], rate: "mentionRate" | "citationRate") => {
     const collected = items.reduce((sum, row) => sum + row.collected, 0);
     return collected ? items.reduce((sum, row) => sum + (row[rate] ?? 0) * row.collected, 0) / collected : null;
@@ -654,13 +638,13 @@ export function PromptTable({
  * Every saved check with its own results, newest first. Checks with different questions or answer
  * settings are labelled so a reader does not compare them as a trend.
  */
-export function CheckHistory({ jobs, currentId, recheck, note, campaigns = {} }: {
+export function CheckHistory({ jobs, currentId, recheck, note, topics = {} }: {
   jobs: Job[];
   currentId?: string;
   recheck?: { disabled: boolean; start: () => void };
   note?: string;
-  /** Campaign names by id, for checks that asked only one campaign's questions. */
-  campaigns?: Record<string, string>;
+  /** Topic names by id, for checks that asked only one topic's questions. */
+  topics?: Record<string, string>;
 }) {
   const checks = jobs.flatMap((job) => {
     const result = ["measure", "recheck"].includes(job.kind) ? portableJobResult(job) : null;
@@ -683,7 +667,7 @@ export function CheckHistory({ jobs, currentId, recheck, note, campaigns = {} }:
                 <tr key={job.id} className={job.id === currentId ? "current" : undefined}>
                   <td>
                     <span className="check-date"><ProviderIcon provider={job.platform ?? "chat_gpt"} size={14} />{dateTime(measurementTime(job))}</span>
-                    {job.id === currentId ? <small>Shown above</small> : job.campaignId ? <small>Campaign: {campaigns[job.campaignId] ?? "Removed campaign"}</small> : current && result.comparisonKey !== current ? <small>Different questions or settings</small> : null}
+                    {job.id === currentId ? <small>Shown above</small> : job.topicId ? <small>Topic: {topics[job.topicId] ?? "Removed topic"}</small> : current && result.comparisonKey !== current ? <small>Different questions or settings</small> : null}
                   </td>
                   <td data-label="Brand mentions"><RateBar value={result.metrics.mentionRate} measure="mention" /></td>
                   <td data-label="Website citations"><RateBar value={result.metrics.citationRate} measure="citation" /></td>
@@ -701,9 +685,22 @@ export function CheckHistory({ jobs, currentId, recheck, note, campaigns = {} }:
   );
 }
 
+export function AnswerList({ observations }: { observations: Observation[] }) {
+  const [page, setPage] = useState(0);
+  const list = useRef<HTMLDivElement>(null);
+  const current = Math.min(page, Math.max(0, Math.ceil(observations.length / 10) - 1));
+  return <div ref={list}>
+    {observations.slice(current * 10, (current + 1) * 10).map(answer => <AnswerCard key={answer.id} observation={answer} />)}
+    <Pagination page={current} total={observations.length} pageSize={10} label="Collected" unit="answers" onChange={next => { setPage(next); list.current?.scrollIntoView({ block: 'start' }); }} />
+  </div>;
+}
+
 export function AnswerCard({ observation: o }: { observation: Observation }) {
   const [open, setOpen] = useState(false);
+  const [detailTab, setDetailTab] = useState<'answer' | 'sources' | 'searches'>('answer');
+  const detailId = useId();
   const sources = o.citations.filter((c) => targetDomain(c.url));
+  const searches = [...new Set(o.searchQueries ?? [])];
   const domains = [...new Set(sources.map((c) => targetDomain(c.url)!))];
   return (
     <article className="answer compact-answer">
@@ -722,11 +719,12 @@ export function AnswerCard({ observation: o }: { observation: Observation }) {
         {domains.length > 0 && <span className="source-stack" aria-label={sources.length + " source links"}>{domains.slice(0, 4).map((domain) => <SiteIcon key={domain} projectId={o.projectId} domain={domain} size={18} />)}<span>{sources.length} {sources.length === 1 ? "source" : "sources"}</span></span>}
         {!domains.length && <span>No source links</span>}
       </div>
-      <button className="text-button answer-open" onClick={() => setOpen(true)}>Read full answer and sources <ArrowRight size={14} /></button>
+      <button className="text-button answer-open" onClick={() => { setDetailTab('answer'); setOpen(true); }}>Read full answer and sources <ArrowRight size={14} /></button>
       {open && <Dialog title="Answer and sources" close={() => setOpen(false)} variant="drawer"><div className="answer-reader">
         <div className="answer-reader-heading"><span><ProviderIcon provider={o.platform} size={20} />{platformLabel(o.platform)}<time dateTime={o.observedAt}>{dateTime(o.observedAt)}</time></span><h3>{o.prompt}</h3><p>{o.cited ? 'This answer links to your website.' : o.mentioned ? 'This answer names your brand without linking to your website.' : 'Your brand was not detected in this answer.'}</p></div>
-        <div className="answer-reader-grid"><div className="document-preview answer-document" lang={o.locale} dir={['ar', 'fa', 'he', 'ur'].includes(o.locale.split('-')[0]) ? 'rtl' : 'ltr'} dangerouslySetInnerHTML={{ __html: markdownHtml(o.answer) }} />
-        <aside className="answer-source-rail" aria-label="Sources in this answer"><h4>Sources <span>{sources.length}</span></h4>
+        <Tabs label="Answer details" panelId={detailId} value={detailTab} onChange={setDetailTab} items={[{ value: 'answer', label: 'Answer', icon: FileText }, { value: 'sources', label: 'Sources', icon: Link, count: sources.length }, { value: 'searches', label: 'Searches', icon: Search, count: searches.length }]} />
+        <div className="answer-detail-panel" id={detailId} role="tabpanel" aria-label={detailTab === 'answer' ? 'Answer' : detailTab === 'sources' ? 'Sources' : 'Searches'}>
+        {detailTab === 'answer' ? <div className="document-preview answer-document" lang={o.locale} dir={['ar', 'fa', 'he', 'ur'].includes(o.locale.split('-')[0]) ? 'rtl' : 'ltr'} dangerouslySetInnerHTML={{ __html: markdownHtml(o.answer) }} /> : detailTab === 'sources' ? <>
         {!sources.length && <p>This answer contains no source links. Its claims still need independent verification.</p>}
         <ul className="answer-sources">
           {sources.map((c, index) => (
@@ -738,9 +736,8 @@ export function AnswerCard({ observation: o }: { observation: Observation }) {
               </a>
             </li>
           ))}
-        </ul></aside></div>
-        <p className="answer-provenance">{collectionLabel(o)}. {retrievalLabel(o)}. Model: {o.model}.</p>
-        {o.searchQueries?.length ? <p className="answer-provenance">Searched: {o.searchQueries.join("; ")}</p> : null}
+        </ul></> : <><p>Search queries reported by the AI provider for this answer.</p>{searches.length ? <ul className="answer-searches">{searches.map(query => <li key={query}><Search size={15} aria-hidden="true" /><span>{query}</span></li>)}</ul> : <p>No search queries were reported. This does not establish whether web search was used.</p>}</>}
+        </div>
       </div></Dialog>}
     </article>
   );

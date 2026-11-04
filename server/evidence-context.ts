@@ -4,12 +4,15 @@ import { ProviderError } from "./contracts.js";
 export function evidenceBatches<T>(items: T[], maximumBytes: number): T[][] {
   const batches: T[][] = [];
   let batch: T[] = [];
+  let batchBytes = 2;
   for (const item of items) {
-    if (Buffer.byteLength(JSON.stringify([item]), "utf8") > maximumBytes)
+    const itemBytes = Buffer.byteLength(JSON.stringify([item]), "utf8") - 2;
+    if (itemBytes + 2 > maximumBytes)
       throw new ProviderError("context", "Choose a model with more room for this evidence. No request was sent.");
-    if (batch.length && Buffer.byteLength(JSON.stringify([...batch, item]), "utf8") > maximumBytes) {
-      batches.push(batch); batch = [];
+    if (batch.length && batchBytes + 1 + itemBytes > maximumBytes) {
+      batches.push(batch); batch = []; batchBytes = 2;
     }
+    batchBytes += itemBytes + (batch.length ? 1 : 0);
     batch.push(item);
   }
   if (batch.length) batches.push(batch);
@@ -28,13 +31,14 @@ export function contentSources(pages: (PageEvidence | ManagedSourceEvidence)[], 
   const words = (text: string) => new Set([...segmenter.segment(text.normalize("NFKC").toLowerCase())]
     .filter(part => part.isWordLike).map(part => part.segment));
   const documents = readable.map(page => ({ page, heading: words(page.title + " " + ("h1" in page ? page.h1.join(" ") : "")), text: words(page.text) }));
+  const weights = new Map<string, number>();
   const rank = (topic: string) => {
     const terms = [...words(topic)];
     // Corpus frequency discounts repeated navigation and common query words without a niche or language blacklist.
-    const weights = new Map(terms.map(term => {
+    for (const term of terms) if (!weights.has(term)) {
       const frequency = documents.filter(doc => doc.heading.has(term) || doc.text.has(term)).length;
-      return [term, Math.log(1 + (documents.length - frequency + 0.5) / (frequency + 0.5))];
-    }));
+      weights.set(term, Math.log(1 + (documents.length - frequency + 0.5) / (frequency + 0.5)));
+    }
     return documents.map(doc => {
       const match = terms.reduce((total, term) => total + weights.get(term)! * ((doc.heading.has(term) ? 4 : 0) + (doc.text.has(term) ? 1 : 0)), 0);
       return { page: doc.page, match, score: match + (new URL(doc.page.url).pathname === "/" ? 0.5 : 0) };

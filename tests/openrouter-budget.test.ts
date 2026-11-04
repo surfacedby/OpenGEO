@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +10,44 @@ import { Connections } from "../server/oauth.js";
 import { Providers } from "../server/providers.js";
 import { Runner } from "../server/workflows.js";
 import { jobInput, projectInput } from "../server/contracts.js";
+import { parsePage } from "../server/audit.js";
+import { completedMeasurement } from "../server/portable-results.js";
+
+for (const topicScoped of [false, true]) test(`${topicScoped ? 'Topic' : 'Brand'} automatic recommendations stop at the scan's original budget after saving its answers`, async () => {
+  const directory = mkdtempSync(join(tmpdir(), "opengeo-scan-budget-")), store = new Store(directory);
+  const vault = new Vault(directory, { encrypt: text => Buffer.from(text), decrypt: bytes => bytes.toString() });
+  vault.set("openrouter", { key: "synthetic-openrouter-key" });
+  const connections = new Connections(store, vault), runner = new Runner(store, new Providers(vault, connections));
+  const original = globalThis.fetch;
+  let completions = 0;
+  globalThis.fetch = (async (url) => {
+    if (String(url).endsWith('/models')) return new Response(JSON.stringify({ data: [{ id: 'fixture', name: 'Fixture',
+      pricing: { prompt: '0.000001', completion: '0.000001' }, architecture: { output_modalities: ['text'] },
+      supported_parameters: ['max_tokens'], context_length: 100000 }] }), { headers: { 'Content-Type': 'application/json' } });
+    assert.equal(String(url), 'https://openrouter.ai/api/v1/chat/completions');
+    completions++;
+    return new Response(JSON.stringify({ model: 'fixture', choices: [{ finish_reason: 'stop', message: { content: 'A shared workspace helps.' } }], usage: { cost: 1 } }),
+      { headers: { 'Content-Type': 'application/json' } });
+  }) as typeof fetch;
+  try {
+    const question = 'How can a team organize questions?', topicId = randomUUID();
+    const project = store.createProject(projectInput.parse({ domain: 'example.com', brand: 'Example', prompts: [question], topics: topicScoped ? [{ id: topicId, name: 'Team workflow', prompts: [question], createdAt: new Date().toISOString() }] : [] }));
+    const audit = store.enqueue(jobInput.parse({ projectId: project.id, kind: 'audit' }), 'website');
+    store.put('page', project.id, audit.id, parsePage('https://example.com/', 200, '<h1>Shared workspace</h1><p>Organize customer questions.</p>'));
+    store.updateJob(audit.id, { status: 'completed' });
+    const job = store.enqueue(jobInput.parse({ projectId: project.id, kind: 'measure', provider: 'openrouter', model: 'fixture', maxCostUsd: 1, prepareRecommendations: true, ...(topicScoped ? { topicId } : {}) }), 'scan');
+    await runner.tick();
+    const paused = store.job(job.id);
+    assert.equal(paused.status, 'paused', paused.progress);
+    assert.equal(paused.error, 'budget');
+    assert.equal(paused.spentUsd, 1);
+    assert.equal(paused.maxCostUsd, 1);
+    assert.equal(completions, 1);
+    assert.equal(completedMeasurement(paused), true);
+    assert.equal(store.observations(project.id, job.id).length, 1);
+    assert.equal(store.jobs(project.id).length, 2);
+  } finally { globalThis.fetch = original; await runner.stop(); connections.close(); store.close(); rmSync(directory, { recursive: true, force: true }); }
+});
 
 test("OpenRouter dispatch binds endpoint prices to the approved estimate and stops on missing cost", async () => {
   const directory = mkdtempSync(join(tmpdir(), "opengeo-routing-budget-")), store = new Store(directory);

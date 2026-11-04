@@ -8,12 +8,14 @@ export function DesktopUpdates({ compact = false }: { compact?: boolean }) {
   useEffect(() => {
     const bridge = window.opengeoDesktop;
     if (!bridge) return;
-    const unsubscribe = bridge.onUpdate(setState);
-    void bridge.updates().then(setState).catch(() => setError('Update settings could not load. Reopen the app to try again.'));
-    return unsubscribe;
+    let live = true, receivedEvent = false;
+    const unsubscribe = bridge.onUpdate(next => { receivedEvent = true; if (live) setState(next); });
+    // A delayed initial snapshot must not replace newer download progress or a ready installer.
+    void bridge.updates().then(next => { if (live && !receivedEvent) setState(next); }).catch(() => { if (live && !receivedEvent) setError('Update settings could not load. Reopen the app to try again.'); });
+    return () => { live = false; unsubscribe(); };
   }, []);
   if (!window.opengeoDesktop) return null;
-  if (compact && !['available', 'downloading', 'ready'].includes(state?.status ?? '')) return null;
+  if (compact && !(['available', 'downloading', 'ready', 'installing'].includes(state?.status ?? '') || (state?.status === 'error' && state.availableVersion))) return null;
   async function command(action: 'check' | 'download' | 'install' | 'preference' | 'cancel', value?: boolean) {
     setError('');
     try { setState(await window.opengeoDesktop!.updates(action, value)); }

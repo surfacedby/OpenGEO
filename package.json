@@ -1,6 +1,6 @@
 {
   "name": "opengeo",
-  "version": "0.1.0-beta.4",
+  "version": "0.1.0-beta.5",
   "private": true,
   "type": "module",
   "description": "Open-source generative engine optimization (GEO) workspace: track AI visibility, mentions and citations, audit your site and create evidence-based content.",
@@ -20,7 +20,7 @@
     "build": "node scripts/sync-identity.mjs && tsc --noEmit && vite build && tsup server/main.ts server/cli.ts server/mcp.ts --format esm --platform node --out-dir dist-server --external better-sqlite3",
     "start": "node dist-server/main.js",
     "test": "tsx --test tests/*.test.ts tests/*.test.mjs",
-    "test:browser": "tsx --test tests/*.e2e.ts",
+    "test:browser": "tsx --test --test-concurrency=1 tests/*.e2e.ts",
     "desktop": "electron desktop/main.cjs",
     "package:desktop": "npm run build && node scripts/prepare-browser.mjs && node scripts/prepare-native.mjs && electron-builder --publish never",
     "cli": "tsx server/cli.ts",
@@ -32,7 +32,7 @@
     "audit:deps": "node scripts/dependency-audit.mjs"
   },
   "dependencies": {
-    "@fastify/static": "^10.1.5",
+    "@fastify/static": "^10.1.10",
     "@fontsource/inter": "^5.2.0",
     "@modelcontextprotocol/sdk": "^1.32.0",
     "better-sqlite3": "^12.4.1",
@@ -129,7 +129,8 @@
     }
   },
   "overrides": {
-    "esbuild": "^0.28.1"
+    "esbuild": "^0.28.1",
+    "minimatch@>=7 <11.0.4": "11.0.4"
   },
   "main": "desktop/main.cjs"
 }

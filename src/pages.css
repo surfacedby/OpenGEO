@@ -1,0 +1,32 @@
+.pages-navigation { padding: 0 var(--panel-space); }
+.pages-navigation .section-tabs { margin-bottom: 0; }
+.pages-hub { padding: var(--panel-space); }
+.pages-hub .content-toolbar { padding: 0 0 var(--space-4); }
+.pages-note { padding: var(--space-3) 0; color: var(--muted); font-size: 13px; }
+.page-group + .page-group { margin-top: var(--space-5); }
+.page-group-heading { display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px 0; text-align: left; border-bottom: 1px solid var(--divider); }
+.page-group-heading span { color: var(--muted); font-size: 12px; }
+.page-inventory-table td:first-child { width: 52%; }
+.page-title-button { font-weight: 500; text-align: left; line-height: 1.5; color: var(--ink); }
+.page-title-button:hover { color: var(--primary-text); text-decoration: underline; }
+.page-address { display: block; max-width: 48ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.page-reader { display: grid; gap: var(--space-5); }
+.page-reader-url { display: flex; align-items: baseline; gap: 8px; overflow-wrap: anywhere; }
+.page-reader-facts { display: flex; flex-wrap: wrap; gap: 8px 20px; color: var(--muted); font-size: 12px; }
+.page-reader section > h3 { margin-bottom: var(--space-3); }
+.page-detail-list { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 14px 24px; margin: 0; font-size: 13px; }
+.page-detail-list dt { color: var(--muted); }
+.page-detail-list dd { margin: 0; overflow-wrap: anywhere; }
+.page-detail-list ul { padding-left: 18px; margin: 0; }
+@media (max-width: 700px) {
+  .page-inventory-table td:first-child { grid-column: 1 / -1; width: auto; }
+  .page-inventory-table td:last-child { grid-column: 1 / -1; }
+  .page-address { max-width: 100%; }
+  .page-detail-list { grid-template-columns: minmax(0, 1fr); gap: 5px; }
+  .page-detail-list dd { margin-bottom: 10px; }
+}
+.website-discovery-controls { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-4); margin-bottom: var(--space-3); }
+.website-discovery-description { display: flex; align-items: flex-start; gap: var(--space-3); flex: 1 1 280px; }
+.website-discovery-description > svg { flex: none; color: var(--primary-text); margin-top: 3px; }
+.website-discovery-description p { color: var(--muted); margin: var(--space-1) 0 0; }
+.website-discovery-controls > .choice { width: 210px; }

@@ -1,7 +1,7 @@
 import { Store } from "./storage.js";
-import type { PageEvidence, ManagedSourceEvidence } from "./contracts.js";
+import type { Finding, PageEvidence, ManagedSourceEvidence } from "./contracts.js";
 import type { PortableContent } from "./import.js";
-import { portableJobResult, completedBrandMeasurement, measurementTime } from "./portable-results.js";
+import { portableJobResult, completedBrandMeasurement, measurementTime, analysisMeasurementId } from "./portable-results.js";
 import { currentFindings } from "./presentation.js";
 export { escapeHtml } from "./markdown.js";
 export function exportProject(store: Store, id: string) {
@@ -25,7 +25,7 @@ export function exportProject(store: Store, id: string) {
           result,
           spentUsd,
           costBasis,
-          campaignId,
+          topicId,
         }) => ({
           id,
           kind,
@@ -38,7 +38,7 @@ export function exportProject(store: Store, id: string) {
           result: portableJobResult({ kind, result }),
           spentUsd,
           costBasis,
-          campaignId,
+          topicId,
         }),
       ),
     pages: store.portableArtifacts<PageEvidence>(id, "page"),
@@ -55,6 +55,13 @@ export function reportMarkdown(store: Store, id: string) {
     latest = jobs.find(completedBrandMeasurement);
   const metrics = (latest?.result as { metrics?: { requested: number; completed: number; missing: number; mentionRate: number | null; citationRate: number | null } } | null)?.metrics;
   const percent = (value: number | null) => value === null ? "No collected evidence" : value.toFixed(1) + "%";
+  const scopeLabel = (finding: Finding) => {
+    const job = jobs.find(item => item.id === finding.jobId);
+    if (!job) return 'Historical evidence';
+    if (job.kind === 'audit') return 'Website check';
+    const topicId = job.topicId ?? jobs.find(item => item.id === analysisMeasurementId(job))?.topicId;
+    return topicId ? 'Topic: ' + (p.topics.find(topic => topic.id === topicId)?.name ?? 'Removed topic') : 'Brand-wide check';
+  };
   return (
     "# " +
     p.brand +
@@ -74,6 +81,7 @@ export function reportMarkdown(store: Store, id: string) {
           f.title +
           "\n\n" +
           f.description +
+          "\n\nScope: " + scopeLabel(f) +
           "\n\nPage: " +
           f.targetUrl +
           "\n\nStatus: " + f.status + " / Priority: " + f.priority +

@@ -3,12 +3,13 @@ import { z } from "zod";
 import { withoutEvidenceList } from './finding-text.js';
 import { Store } from "./storage.js";
 import { Providers, safeCitations } from "./providers.js";
-import { crawl, auditFindings } from "./audit.js";
+import { crawl, auditFindings, type CrawlPolicies } from "./audit.js";
 import { renderedFetch } from "./render.js";
-import { crawlFetch } from "./network.js";
+import { CrawlBackoff, CrawlDeferred, crawlFetch, publicUrl, sameSiteHost } from "./network.js";
+import { pageSearchExclusion } from './page-classification.js';
 import { scheduledBudgetCeiling } from "./scheduler.js";
 import { completedBrandMeasurement, completedMeasurement } from "./portable-results.js";
-import { campaignScope } from "./campaigns.js";
+import { topicScope } from "./topics.js";
 import { evidenceBatches, contentSources } from "./evidence-context.js";
 import {
   presence,
@@ -25,6 +26,7 @@ import { consoleCapabilities } from "./console-capabilities.js";
 import { cancelConsoleManaged, managedStep } from "./console-managed.js";
 import {
   ProviderError,
+  jobInput,
   contentTask,
   opportunityDetails,
   type Job,
@@ -88,6 +90,7 @@ export function mergePageTasks<T extends { targetPageId: string; title: string; 
   return [...tasks.values()];
 }
 export class Runner {
+  private crawlPolicies = new Map<string, CrawlPolicies>();
   private cancelling = new Set<string>();
   hasActiveProject(projectId: string) {
     return (this.active && this.store.job(this.active.id).projectId === projectId) || [...this.cancelling].some(id => this.store.job(id).projectId === projectId);
@@ -130,11 +133,21 @@ export class Runner {
     if (["completed", "failed"].includes(job.status) || (job.status === "cancelled" && job.error !== "cancel_remote")) return job;
     this.store.updateJob(id, {
       status: "cancelled",
-      progress: "Cancelled. Completed provider calls may still be billable.",
+      progress: job.kind === 'audit' && !job.provider ? 'Website check stopped. Pages already checked are saved.' : "Cancelled. Completed provider calls may still be billable.",
     });
     if (this.active?.id === id) {
       this.active.abort.abort();
       await this.active.done;
+    }
+    const associatedRead = this.store.step(id, 'analysis-audit');
+    if (associatedRead?.body) {
+      const auditId: string = JSON.parse(associatedRead.body);
+      const jobs = this.store.jobs(job.projectId);
+      // The last dependent owns cleanup even when the original requester cancelled first.
+      const createdForAnalysis = jobs.some(other => JSON.parse(this.store.step(other.id, 'analysis-audit-created')?.body ?? 'null') === auditId);
+      const shared = jobs.some(other => other.id !== id && ['queued', 'running', 'paused'].includes(other.status) &&
+        JSON.parse(this.store.step(other.id, 'analysis-audit')?.body ?? 'null') === auditId);
+      if (createdForAnalysis && !shared) await this.cancel(auditId);
     }
     if (job.provider === 'console') {
       if (await cancelConsoleManaged(this, job)) {
@@ -177,7 +190,9 @@ export class Runner {
   }
   resume(id: string, reviewed: boolean, maxCostUsd?: number) {
     const job = this.store.job(id);
-    if (job.status !== "paused") throw new Error("Only paused jobs can resume");
+    const stoppedDiscovery = job.status === 'cancelled' && job.kind === 'audit' && job.background && !job.provider;
+    if (job.status !== "paused" && !stoppedDiscovery) throw new Error("Only paused jobs or stopped website discovery can resume");
+    if (this.cancelling.has(id)) throw new ProviderError('in_progress', 'Wait for website discovery to finish stopping before resuming.');
     if (this.resumePreview(id).uncertainRequests && !reviewed)
       throw new ProviderError("review", "Review uncertain provider requests before resuming.");
     if (job.error === "approval" && !reviewed)
@@ -185,6 +200,9 @@ export class Runner {
     if (maxCostUsd !== undefined && (!Number.isFinite(maxCostUsd) || maxCostUsd < Math.max(job.maxCostUsd, job.spentUsd) || maxCostUsd > 10000))
       throw new ProviderError("budget", "The new budget must cover the current ceiling and completed work.");
     return this.store.db.transaction(() => {
+    if (job.kind === 'audit' && job.background && this.store.jobs(job.projectId).some(other =>
+      other.id !== id && other.kind === 'audit' && other.background && ['queued', 'running', 'paused'].includes(other.status)))
+      throw new ProviderError('in_progress', 'Another website discovery is saved for this brand. Follow it in Scans before resuming this one.');
     const scheduledCeiling = scheduledBudgetCeiling(this.store, job);
     if (scheduledCeiling !== undefined && Math.max(maxCostUsd ?? job.maxCostUsd, job.spentUsd) > scheduledCeiling + 1e-9)
       throw new ProviderError("budget", "This run would exceed its approved monthly schedule budget. Keep it paused or start a separately approved manual run.");
@@ -210,7 +228,9 @@ export class Runner {
     const job = this.store
       .jobs()
       .reverse()
-      .find((j) => j.status === "queued");
+      .filter((j) => j.status === "queued" && (!j.availableAt || Date.parse(j.availableAt) <= Date.now()))
+      // A yielded crawl rejoins at its next ready time, behind work already waiting.
+      .sort((a, b) => Date.parse(a.availableAt ?? a.createdAt) - Date.parse(b.availableAt ?? b.createdAt))[0];
     if (!job) return;
     const abort = new AbortController();
     let resolveDone!: () => void;
@@ -218,24 +238,56 @@ export class Runner {
       resolveDone = resolve;
     });
     this.active = { id: job.id, abort, done };
-    this.store.updateJob(job.id, { status: "running", progress: "Starting" });
+    this.store.updateJob(job.id, { status: "running", error: null, progress: "Starting" });
     try {
       const saved = this.store.step(job.id, "project");
       const project: Project = saved?.body
         ? JSON.parse(saved.body)
-        : campaignScope(this.store.project(job.projectId), job.campaignId);
+        : topicScope(this.store.project(job.projectId), job.topicId);
       if (!saved) this.store.setStep(job.id, "project", "done", project);
       if (["measure", "recheck"].includes(job.kind) && job.requestedAnswers === undefined)
         this.store.updateJob(job.id, { requestedAnswers: project.prompts.length });
       const result = await this.execute(job, project, abort.signal);
+      if ((result as { waitingForWebsite?: boolean } | null)?.waitingForWebsite && this.store.job(job.id).status !== 'cancelled') {
+        this.store.updateJob(job.id, { status: 'queued', result, availableAt: new Date(Date.now() + 10000).toISOString(), progress: 'Answers saved. Reading your website before preparing recommendations.' });
+        return;
+      }
+      if (job.kind === 'audit' && job.background && (result as { continueCrawl?: boolean }).continueCrawl && this.store.job(job.id).status !== 'cancelled') {
+        this.store.updateJob(job.id, { status: 'queued', result, availableAt: new Date(Date.now() + 10000).toISOString(), progress: 'Website check continues in the background. Saved pages are ready to review.' });
+        return;
+      }
       if (this.store.job(job.id).status !== "cancelled")
         this.store.updateJob(job.id, {
           status: "completed",
+          error: null,
           progress: "Complete",
           result,
         });
     } catch (e) {
       if (this.store.job(job.id).status !== "cancelled") {
+        if (e instanceof CrawlBackoff && job.kind === 'audit' && !abort.signal.aborted) {
+          if (e instanceof CrawlDeferred) {
+            this.store.updateJob(job.id, { status: job.background ? 'queued' : 'paused', error: 'website_busy', availableAt: new Date(e.retryAt!).toISOString(),
+              progress: 'Another website check was asked to slow down. This check will wait for the same cooling-off period.' });
+            return;
+          }
+          const prior = this.store.step(job.id, 'crawl-backoff');
+          const previous = prior?.body ? JSON.parse(prior.body) as { url: string; attempts: number } : undefined;
+          const attempts = previous?.url === e.url ? previous.attempts + 1 : 1;
+          const retryAt = Math.max(e.retryAt ?? 0, Date.now() + Math.min(900000, 30000 * 2 ** Math.min(attempts - 1, 5)));
+          const automatic = !!job.background && attempts <= 3 && retryAt - Date.now() <= 86400000;
+          this.store.db.transaction(() => {
+            this.store.deferCrawlHost(new URL(e.url).hostname.replace(/^www\./, ''), retryAt);
+            this.store.setStep(job.id, 'crawl-backoff', 'done', { url: e.url, attempts, retryAt });
+            this.store.updateJob(job.id, { status: automatic ? 'queued' : 'paused', error: 'website_busy', availableAt: new Date(retryAt).toISOString(),
+              progress: automatic ? 'The website is busy. Discovery will retry after a cooling-off period; saved pages are ready to review.' : 'The website is still busy. Saved pages are preserved. Resume later to continue discovery.' });
+          })();
+          return;
+        }
+        if (abort.signal.aborted && job.kind === 'audit' && job.background) {
+          this.store.updateJob(job.id, { status: 'queued', error: null, progress: 'Website check saved. It continues when OpenGEO is open.' });
+          return;
+        }
         const error = e instanceof ProviderError ? e.code : "workflow";
         this.store.updateJob(job.id, {
           status: e instanceof ProviderError ? "paused" : "failed",
@@ -247,6 +299,7 @@ export class Runner {
         });
       }
     } finally {
+      if (!['queued', 'running'].includes(this.store.job(job.id).status)) this.crawlPolicies.delete(job.id);
       this.active = undefined;
       resolveDone();
     }
@@ -293,6 +346,11 @@ export class Runner {
       return { measurementJobId: measurement.id, competitors: websites.filter(site => site.role !== 'reference'), references: websites.filter(site => ['reference', 'both'].includes(site.role ?? '')) };
     }
     if (job.kind === "audit") {
+      // New checks must respect a site's request to slow down, including after restart.
+      const retryAt = this.store.crawlRetryAt(publicUrl(project.domain).hostname.replace(/^www\./, ''));
+      if (retryAt) throw new CrawlDeferred(publicUrl(project.domain).href, retryAt);
+      if (!this.crawlPolicies.has(job.id)) this.crawlPolicies.set(job.id, new Map());
+      const priorCrawl = this.store.step(job.id, 'crawl-frontier');
       const coverage = await crawl(
         project.domain,
         signal,
@@ -301,16 +359,28 @@ export class Runner {
         job.render ? renderedFetch : undefined,
         job.maxPages ?? 100,
         crawlFetch,
+        { initial: priorCrawl?.body ? JSON.parse(priorCrawl.body) : undefined, batchSize: job.background ? 2 : undefined, policies: this.crawlPolicies.get(job.id), commit: (state, page) => this.store.db.transaction(() => {
+          if (page) {
+            this.store.put('page', project.id, job.id, page);
+            for (const finding of auditFindings(project, job.id, [page])) this.store.put('finding', project.id, job.id, finding);
+            this.store.setStep(job.id, 'audit-page:' + page.id, 'done');
+          }
+          this.store.setStep(job.id, 'crawl-frontier', 'done', state);
+        })() },
       );
-      const pages = this.store.pages(project.id, job.id);
-      for (const f of auditFindings(project, job.id, pages))
-        this.store.put("finding", project.id, job.id, f);
+      if (!this.store.step(job.id, 'audit-findings')) this.store.db.transaction(() => {
+        for (const id of this.store.unauditedPageIds(project.id, job.id)) {
+          const page = this.store.pageEvidence(project.id, id)!;
+          for (const f of auditFindings(project, job.id, [page])) this.store.put("finding", project.id, job.id, f);
+          this.store.setStep(job.id, 'audit-page:' + page.id, 'done');
+        }
+        this.store.setStep(job.id, 'audit-findings', 'done');
+      })();
       return {
-        pages: pages.length,
+        pages: this.store.pageCount(project.id, job.id),
         coverage,
-        findings: this.store
-          .findings(project.id)
-          .filter((f) => f.jobId === job.id).length,
+        continueCrawl: !!job.background && coverage.truncated && coverage.attempted < job.maxPages,
+        findings: this.store.findingCount(project.id, job.id),
       };
     }
     if (job.kind === "measure" || job.kind === "recheck") {
@@ -408,181 +478,7 @@ export class Runner {
         ),
       };
     }
-    if (job.kind === "diagnose") {
-      const completed = this.store.step(job.id, "diagnosis-result");
-      if (completed?.state === "done") return JSON.parse(completed.body!);
-      if (job.provider === "console") return consoleOpportunities(this, job, project, signal);
-      if (job.provider === "chatgpt" || job.provider === "openrouter") {
-        const model = await this.contentModel(job);
-        const priorEvidence = this.store.step(job.id, "diagnosis-inputs");
-        let evidence;
-        if (priorEvidence?.body) evidence = JSON.parse(priorEvidence.body);
-        else {
-          const latest = this.store.jobs(project.id).find(completedBrandMeasurement);
-          if (!latest) throw new ProviderError("evidence", "Collect visibility evidence first.");
-          const audit = this.store.jobs(project.id).find(item => item.kind === "audit" && item.status === "completed");
-          const pages = audit ? this.store.pages(project.id, audit.id) : [];
-          if (!pages.length) throw new ProviderError("evidence", "Complete a local audit to link recommendations to existing pages.");
-          const home = pages.find(page => page.status >= 200 && page.status < 300 && new URL(page.url).pathname === '/');
-          const shared = { brand: project.brand, aliases: project.aliases, locale: project.locale, businessNotes: project.knowledge.slice(0, 4000),
-            siteOverview: home ? { id: home.id, url: home.url, title: home.title, headings: home.h1, text: home.text.slice(0, 3500) } : null,
-            observations: this.store.observations(project.id, latest.id).map(answer => ({ ...answer, answer: answer.answer.slice(0, 6000) })) };
-          // Website context holds about one page excerpt per question, and at most a third of the room left beside the answers and the page catalog that new-topic review
-          // also carries, so page batches and that review keep the rest.
-          const catalog = pages.map(page => ({ id: page.id, url: page.url, title: page.title.slice(0, 500) }));
-          const instructions = Math.max(Buffer.byteLength(prompts.diagnose, "utf8"), Buffer.byteLength(prompts.contentGaps, "utf8"));
-          const available = model.contextLength - 7000 - instructions - Buffer.byteLength(JSON.stringify([shared, catalog]), "utf8");
-          // The homepage already travels as the site overview, so the website context spends its room on other pages.
-          const website = contentSources(pages.filter(page => new URL(page.url).pathname !== "/"), project.prompts, Math.min(Math.max(12000, 2100 * project.prompts.length), Math.max(0, Math.floor(available / 3))), [], 2000);
-          evidence = {
-            version: 2,
-            context: { ...shared, website },
-            sources: pages.map(page => ({ id: page.id, url: page.url, title: page.title.slice(0, 500), h1: page.h1.slice(0, 5).map(heading => heading.slice(0, 500)), text: page.text.slice(0, 8000) })),
-            measurementJobId: latest.id,
-          };
-        }
-        if (!priorEvidence) this.store.setStep(job.id, "diagnosis-inputs", "done", evidence);
-        const context: { brand: string; aliases: string[]; locale: string; observations: Observation[] } = evidence.context;
-        const sources: { id: string; url: string; title: string; h1: string[]; text: string }[] = evidence.sources;
-        const room = model.contextLength - 7000 - Buffer.byteLength(JSON.stringify(context) + prompts.diagnose, "utf8");
-        const maximumBytes = evidence.version === 2 ? Math.min(40000, Math.floor(room / 2)) : Math.min(65000, room);
-        const legacy = this.store.step(job.id, "diagnose");
-        const savedPlan = this.store.step(job.id, "diagnosis-batches");
-        const batches: typeof sources[] = savedPlan?.body ? JSON.parse(savedPlan.body) : legacy ? [sources] : evidenceBatches(sources, maximumBytes);
-        if (!savedPlan) this.store.setStep(job.id, "diagnosis-batches", "done", batches);
-        const result: z.infer<typeof diagnosisSchema> = { recommendations: [], uncertainties: [] };
-        for (const [index, batch] of batches.entries()) {
-          const reviewed = await this.structuredPass(diagnosisSchema, job, model, "diagnose", {
-            ...context, pages: batch, coverage: { pagesAvailable: sources.length, pagesInThisBatch: batch.length, excerpts: true },
-          }, signal, legacy ? "diagnose" : "diagnose:" + index,
-          "Preparing recommendations (" + (index + 1) + " of " + batches.length + ")");
-          const contextPages = evidence.version === 2 ? (evidence.context.website as ReturnType<typeof contentSources>).sources : [];
-          const pageIds = new Set([...batch, ...contextPages].map(page => page.id));
-          if (evidence.version === 2 && evidence.context.siteOverview?.id) pageIds.add(evidence.context.siteOverview.id);
-          if (reviewed.recommendations.some(recommendation => !pageIds.has(recommendation.targetPageId)))
-            this.rejectResponse(job, [legacy ? "diagnose" : "diagnose:" + index], "Analysis referenced a page outside its reviewed evidence.");
-          if (evidence.version === 2 && reviewed.recommendations.length) {
-            const review = await this.structuredPass(z.object({ accepted: z.array(z.object({
-              index: z.number().int().nonnegative(), title: z.string().min(1).max(200),
-              description: z.string().min(1).max(3000), steps: z.array(z.string().min(1).max(2000)).min(1),
-              opportunity: opportunityDetails,
-              // Reviewers often repeat the candidate's target and evidence; they are read from the candidate, never from the review.
-              targetPageId: z.string().optional(), evidenceIds: z.array(z.string()).optional(),
-            }).strict()) }).strict(), job, model, 'opportunityReview', {
-              ...context, pages: [...new Map([...batch, ...sources.filter(page => reviewed.recommendations.some(candidate => candidate.targetPageId === page.id))].map(page => [page.id, page])).values()], candidates: reviewed.recommendations.map((candidate, index) => ({ ...candidate, index })),
-            }, signal, 'opportunity-review:' + index, 'Checking which improvements are useful');
-            const seen = new Set<number>();
-            for (const accepted of review.accepted) {
-              const candidate = reviewed.recommendations[accepted.index];
-              if (!candidate || seen.has(accepted.index) || accepted.opportunity.type === 'new_content' ||
-                (accepted.targetPageId !== undefined && accepted.targetPageId !== candidate.targetPageId) ||
-                (accepted.evidenceIds !== undefined && JSON.stringify([...accepted.evidenceIds].sort()) !== JSON.stringify([...candidate.evidenceIds].sort())))
-                this.rejectResponse(job, ['opportunity-review:' + index], 'The review referenced an unknown, repeated or changed improvement.');
-              seen.add(accepted.index);
-              const { index: candidateIndex, targetPageId, evidenceIds, ...wording } = accepted;
-              result.recommendations.push({ ...candidate, ...wording });
-            }
-          } else result.recommendations.push(...reviewed.recommendations);
-          result.uncertainties.push(...reviewed.uncertainties);
-        }
-        if (evidence.version === 2) {
-          const { website: suppliedWebsite, ...gapContext } = evidence.context;
-          const website = suppliedWebsite as ReturnType<typeof contentSources>;
-          const catalog = sources.map(page => ({ id: page.id, url: page.url, title: page.title }));
-          const gaps = await this.structuredPass(diagnosisSchema, job, model, 'contentGaps', {
-            ...gapContext, pages: website.sources, coverage: website.coverage, catalog,
-            existingImprovements: result.recommendations.map(item => ({ title: item.title, targetPageId: item.targetPageId })),
-          }, signal, 'content-gaps', 'Finding new topics from your saved answers');
-          // The homepage travels as the site overview, so it is supplied context alongside the website pages.
-          const supplied = new Set([...website.sources.map(page => page.id), ...(evidence.context.siteOverview?.id ? [evidence.context.siteOverview.id] : [])]);
-          for (const gap of gaps.recommendations) {
-            if (!supplied.has(gap.targetPageId) || gap.opportunity?.type !== 'new_content' || !gap.opportunity.topic ||
-              !gap.evidenceIds.some(id => supplied.has(id)) || !gap.evidenceIds.some(id => context.observations.some(answer => answer.id === id)))
-              this.rejectResponse(job, ['content-gaps'], 'A new topic needs website context and a supporting saved answer.');
-          }
-          result.recommendations.push(...gaps.recommendations);
-          result.uncertainties.push(...gaps.uncertainties);
-        }
-        result.uncertainties = [...new Set(result.uncertainties)];
-        const allowed = new Set([
-          ...sources.map((p) => p.id),
-          ...context.observations.map((o) => o.id),
-        ]);
-        let omittedSuggestions = 0;
-        result.recommendations = result.recommendations.filter(recommendation => {
-          const page = sources.find((p) => p.id === recommendation.targetPageId);
-          if (
-            !page || !withoutEvidenceList(recommendation.description, recommendation.evidenceIds).trim() ||
-            recommendation.evidenceIds.some((id) => !allowed.has(id)) ||
-            (evidence.version === 2 && (!recommendation.evidenceIds.includes(page.id) ||
-              !recommendation.evidenceIds.some(id => context.observations.some(answer => answer.id === id))))
-          ) { omittedSuggestions++; return false; }
-          return true;
-        });
-        if (omittedSuggestions) result.uncertainties.push(omittedSuggestions + ' suggestions were left out because their supporting evidence could not be verified.');
-        result.recommendations = mergePageTasks(result.recommendations);
-        if (result.recommendations.length > 1) {
-          const candidates = result.recommendations.map((item, index) => ({
-            index, title: item.title, summary: item.description.slice(0, 200), type: item.opportunity?.type,
-            target: sources.find(page => page.id === item.targetPageId)!.url,
-          }));
-          const plan = await this.structuredPass(z.object({ groups: z.array(z.object({
-            primaryIndex: z.number().int().nonnegative(), indices: z.array(z.number().int().nonnegative()).min(1),
-          }).strict()) }).strict(), job, model, 'consolidate', { candidates }, signal);
-          const seen = new Set<number>();
-          for (const group of plan.groups) {
-            if (!group.indices.includes(group.primaryIndex))
-              this.rejectResponse(job, ['consolidate'], 'The action plan referenced an unrelated primary task.');
-            if (new Set(group.indices.map(index => result.recommendations[index]?.opportunity?.type)).size > 1)
-              this.rejectResponse(job, ['consolidate'], 'The action plan combined different kinds of work.');
-            for (const index of group.indices) {
-              if (!result.recommendations[index] || seen.has(index))
-                this.rejectResponse(job, ['consolidate'], 'The action plan repeated or referenced an unknown task.');
-              seen.add(index);
-            }
-          }
-          if (seen.size !== result.recommendations.length)
-            this.rejectResponse(job, ['consolidate'], 'The action plan omitted a supported task.');
-          // Related tasks share a heading while preserving each page's instructions and evidence.
-          result.recommendations = plan.groups.flatMap(group => {
-            const primary = result.recommendations[group.primaryIndex];
-            return [group.primaryIndex, ...group.indices.filter(index => index !== group.primaryIndex)]
-              .map(index => ({ ...result.recommendations[index], title: primary.title }));
-          });
-        }
-        result.recommendations = mergePageTasks(result.recommendations);
-        const receipt = {
-          findings: result.recommendations.length,
-          omittedSuggestions,
-          uncertainties: result.uncertainties,
-          pagesReviewed: sources.length,
-          measurementJobId: evidence.measurementJobId,
-          model: model.id,
-        };
-        this.store.db.transaction(() => {
-          for (const r of result.recommendations) {
-            this.store.put("finding", project.id, job.id, {
-              id: randomUUID(),
-              projectId: project.id,
-              jobId: job.id,
-              title: r.title,
-              description: withoutEvidenceList(r.description, r.evidenceIds),
-              priority: r.priority,
-              targetUrl: sources.find((p) => p.id === r.targetPageId)!.url,
-              evidenceIds: r.evidenceIds,
-              steps: r.steps,
-              confidence: "inferred",
-              status: "open",
-              kind: "analysis",
-              ...(r.opportunity ? { opportunity: r.opportunity } : {}),
-            });
-          }
-          this.store.setStep(job.id, "diagnosis-result", "done", receipt);
-        })();
-        return receipt;
-      }
-      throw new ProviderError("capability", "Connect ChatGPT or OpenRouter to analyze your collected evidence.");
-    }
+    if (job.kind === "diagnose") return this.diagnose(job, project, signal);
     if (job.provider === "console")
       return this.consoleJob(job, project, signal);
     const completed = this.store.step(job.id, 'content-result');
@@ -705,6 +601,296 @@ export class Runner {
     const task = contentTask.parse(original?.task ?? (taskSnapshot?.body ? JSON.parse(taskSnapshot.body) : { mode: 'article' }));
     return { original, task };
   }
+  /** Recommendations must not turn login screens, error responses or deliberately private pages into content tasks. */
+  analysisPages(project: Project) {
+    const audit = this.store.jobs(project.id).find(item => item.kind === 'audit' &&
+      ['completed', 'queued', 'running', 'paused'].includes(item.status) && this.store.pageCount(project.id, item.id) > 0);
+    const base = publicUrl(project.domain);
+    const pages = audit ? this.store.pages(project.id, audit.id).filter(page => {
+      try { return page.status >= 200 && page.status < 300 && !pageSearchExclusion(page) && !!page.text.trim() && sameSiteHost(publicUrl(page.url), base); }
+      catch { return false; }
+    }) : [];
+    return { audit, pages };
+  }
+  /** Website reading is a local prerequisite, not another paid workflow or a separate setup task for the user. */
+  ensureAnalysisWebsite(job: Job, project: Project) {
+    const website = this.analysisPages(project);
+    if (website.pages.length) return true;
+    if (website.audit && !['queued', 'running'].includes(website.audit.status))
+      throw new ProviderError('evidence', 'Your answers are saved. The website check found no readable public pages; review it in Scans before continuing recommendations.');
+    if (this.store.project(project.id).domain !== project.domain)
+      throw new ProviderError('evidence', 'Your answers are saved. The website address changed during this scan; start a check for the new address.');
+    const audit = this.store.db.transaction(() => {
+      const existing = this.store.step(job.id, 'analysis-audit');
+      if (existing?.body) return this.store.job(JSON.parse(existing.body));
+      const shared = this.store.jobs(project.id).find(item => item.kind === 'audit' && ['queued', 'running'].includes(item.status));
+      const read = shared ?? this.store.enqueue(jobInput.parse({ projectId: project.id, kind: 'audit', maxPages: 6 }), 'analysis-audit:' + job.id);
+      if (!shared) this.store.setStep(job.id, 'analysis-audit-created', 'done', read.id);
+      this.store.setStep(job.id, 'analysis-audit', 'done', read.id);
+      return read;
+    })();
+    if (!['queued', 'running'].includes(audit.status)) throw new ProviderError('evidence', 'Your answers are saved. The website check could not supply readable pages; review it in Scans before continuing recommendations.');
+    return false;
+  }
+  /** Recommendation phases share the calling job's budget and durable provider receipts. */
+  async diagnose(job: Job, project: Project, signal: AbortSignal, measurementJobId = job.measurementJobId) {
+    const completed = this.store.step(job.id, "diagnosis-result");
+    if (completed?.state === "done") return JSON.parse(completed.body!);
+    if (job.provider === "console") return consoleOpportunities(this, job, project, signal);
+    if (job.provider === "chatgpt" || job.provider === "openrouter") {
+      const model = await this.contentModel(job);
+      const priorEvidence = this.store.step(job.id, "diagnosis-inputs");
+      let evidence;
+      if (priorEvidence?.body) evidence = JSON.parse(priorEvidence.body);
+      else {
+        const latest = measurementJobId ? this.store.job(measurementJobId) : this.store.jobs(project.id).find(completedBrandMeasurement);
+        if (!latest || latest.projectId !== project.id || !completedMeasurement(latest)) throw new ProviderError("evidence", "Choose a completed visibility check for this brand.");
+        if (!this.ensureAnalysisWebsite(job, project)) return { waitingForWebsite: true, measurementJobId: latest.id };
+        const { pages } = this.analysisPages(project);
+        if (!pages.length) throw new ProviderError("evidence", "Your website check has no readable public pages yet. Review it in Scans before preparing recommendations.");
+        const home = pages.find(page => page.status >= 200 && page.status < 300 && new URL(page.url).pathname === '/');
+        const shared = { brand: project.brand, aliases: project.aliases, locale: project.locale, businessNotes: project.knowledge.slice(0, 4000),
+          siteOverview: home ? { id: home.id, url: home.url, title: home.title, headings: home.h1, text: home.text.slice(0, 3500) } : null,
+          observations: this.store.observations(project.id, latest.id) };
+        if (!shared.observations.length) throw new ProviderError('evidence', 'This check has no saved answers to analyze.');
+        const sources = pages.map(page => ({ id: page.id, url: page.url, title: page.title.slice(0, 500), h1: page.h1.slice(0, 5).map(heading => heading.slice(0, 500)), text: page.text.slice(0, 8000) }));
+        const catalog = pages.map(page => ({ id: page.id, url: page.url, title: page.title.slice(0, 500) }));
+        const instructions = Math.max(Buffer.byteLength(prompts.diagnose, "utf8"), Buffer.byteLength(prompts.contentGaps, "utf8"));
+        const bytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value), 'utf8');
+        // Whole answers and page excerpts must fit. Oversized catalogs receive a separate,
+        // complete coverage review before any proposed new resource is accepted.
+        const largestPage = sources.reduce((largest, source) => Math.max(largest, bytes([source])), 0);
+        const catalogReserve = Math.min(bytes(catalog), largestPage + 4000);
+        const answerRoom = model.contextLength - 7000 - instructions - bytes({ ...shared, observations: [] })
+          - Math.max(largestPage + 4000, catalogReserve) - 2500;
+        const answerBatches = evidenceBatches(shared.observations, answerRoom);
+        const largestAnswers = answerBatches.reduce((largest, batch) => Math.max(largest, bytes(batch)), 0);
+        const available = model.contextLength - 7000 - instructions - bytes({ ...shared, observations: [] }) - catalogReserve - largestAnswers;
+        // Prefer deeper pages because the homepage already travels as the overview; homepage-only sites still have valid evidence.
+        const deeperPages = pages.filter(page => new URL(page.url).pathname !== "/" && page.status >= 200 && page.status < 300 && !page.noindex && page.text.trim());
+        const website = contentSources(deeperPages.length ? deeperPages : pages, project.prompts, Math.min(Math.max(12000, 2100 * project.prompts.length), Math.max(0, Math.floor(available / 3))), [], 2000);
+        evidence = {
+          version: 4,
+          context: { ...shared, website },
+          answerBatches,
+          sources,
+          measurementJobId: latest.id,
+        };
+      }
+      if (!priorEvidence) this.store.setStep(job.id, "diagnosis-inputs", "done", evidence);
+      const context: { brand: string; aliases: string[]; locale: string; observations: Observation[] } = evidence.context;
+      const sources: { id: string; url: string; title: string; h1: string[]; text: string }[] = evidence.sources;
+      const contexts: (typeof context)[] = evidence.version >= 3
+        ? evidence.answerBatches.map((observations: Observation[]) => ({ ...context, observations })) : [context];
+      const legacy = this.store.step(job.id, "diagnose");
+      const savedPlan = this.store.step(job.id, "diagnosis-batches");
+      const pageBatches = (input: typeof context) => {
+        const room = model.contextLength - 7000 - Buffer.byteLength(JSON.stringify(input) + prompts.diagnose, 'utf8');
+        return evidenceBatches(sources, evidence.version >= 2 ? Math.min(40000, Math.floor(room / 2)) : Math.min(65000, room));
+      };
+      const batches: { pages: typeof sources; contextIndex: number }[] = savedPlan?.body
+        ? evidence.version >= 3 ? JSON.parse(savedPlan.body) : JSON.parse(savedPlan.body).map((pages: typeof sources) => ({ pages, contextIndex: 0 }))
+        : contexts.flatMap((input, contextIndex) => (legacy ? [sources] : pageBatches(input)).map(pages => ({ pages, contextIndex })));
+      if (!savedPlan) this.store.setStep(job.id, "diagnosis-batches", "done", evidence.version >= 3 ? batches : batches.map(batch => batch.pages));
+      const result: z.infer<typeof diagnosisSchema> = { recommendations: [], uncertainties: [] };
+      let omittedSuggestions = 0;
+      for (const [index, { pages: batch, contextIndex }] of batches.entries()) {
+        const batchContext = contexts[contextIndex];
+        const reviewed = await this.structuredPass(diagnosisSchema, job, model, "diagnose", {
+          ...batchContext, pages: batch, coverage: { pagesAvailable: sources.length, pagesInThisBatch: batch.length, excerpts: true,
+            ...(evidence.version >= 3 ? { answersAvailable: context.observations.length, answersInThisBatch: batchContext.observations.length } : {}) },
+        }, signal, legacy ? "diagnose" : "diagnose:" + index,
+        "Preparing recommendations (" + (index + 1) + " of " + batches.length + ")");
+        const contextPages = evidence.version >= 2 ? (evidence.context.website as ReturnType<typeof contentSources>).sources : [];
+        const pageIds = new Set([...batch, ...contextPages].map(page => page.id));
+        if (evidence.version >= 2 && evidence.context.siteOverview?.id) pageIds.add(evidence.context.siteOverview.id);
+        if (reviewed.recommendations.some(recommendation => !pageIds.has(recommendation.targetPageId)))
+          this.rejectResponse(job, [legacy ? "diagnose" : "diagnose:" + index], "Analysis referenced a page outside its reviewed evidence.");
+        if (evidence.version >= 3) {
+          const suppliedIds = new Set([...pageIds, ...batchContext.observations.map(answer => answer.id)]);
+          reviewed.recommendations = reviewed.recommendations.filter(recommendation => {
+            if (recommendation.evidenceIds.some(id => !suppliedIds.has(id))) { omittedSuggestions++; return false; }
+            return true;
+          });
+        }
+        if (evidence.version >= 2 && reviewed.recommendations.length) {
+          const review = await this.structuredPass(z.object({ accepted: z.array(z.object({
+            index: z.number().int().nonnegative(), title: z.string().min(1).max(200),
+            description: z.string().min(1).max(3000), steps: z.array(z.string().min(1).max(2000)).min(1),
+            opportunity: opportunityDetails,
+            // Reviewers often repeat the candidate's target and evidence; they are read from the candidate, never from the review.
+            targetPageId: z.string().optional(), evidenceIds: z.array(z.string()).optional(),
+          }).strict()) }).strict(), job, model, 'opportunityReview', {
+            ...batchContext, pages: [...new Map([...batch, ...sources.filter(page => reviewed.recommendations.some(candidate => candidate.targetPageId === page.id))].map(page => [page.id, page])).values()], candidates: reviewed.recommendations.map((candidate, index) => ({ ...candidate, index })),
+          }, signal, 'opportunity-review:' + index, 'Checking which improvements are useful');
+          const seen = new Set<number>();
+          for (const accepted of review.accepted) {
+            const candidate = reviewed.recommendations[accepted.index];
+            if (!candidate || seen.has(accepted.index) || accepted.opportunity.type === 'new_content' ||
+              (accepted.targetPageId !== undefined && accepted.targetPageId !== candidate.targetPageId) ||
+              (accepted.evidenceIds !== undefined && JSON.stringify([...accepted.evidenceIds].sort()) !== JSON.stringify([...candidate.evidenceIds].sort())))
+              this.rejectResponse(job, ['opportunity-review:' + index], 'The review referenced an unknown, repeated or changed improvement.');
+            seen.add(accepted.index);
+            const { index: candidateIndex, targetPageId, evidenceIds, ...wording } = accepted;
+            result.recommendations.push({ ...candidate, ...wording });
+          }
+        } else result.recommendations.push(...reviewed.recommendations);
+        result.uncertainties.push(...reviewed.uncertainties);
+      }
+      if (evidence.version >= 2) for (const [contextIndex, batchContext] of contexts.entries()) {
+        const { website: suppliedWebsite, ...gapContext } = { ...evidence.context, observations: batchContext.observations };
+        const website = suppliedWebsite as ReturnType<typeof contentSources>;
+        const catalog = sources.map(page => ({ id: page.id, url: page.url, title: page.title }));
+        const receiptKey = contexts.length === 1 ? 'content-gaps' : 'content-gaps:' + contextIndex;
+        const fullGapInput = {
+          ...gapContext, pages: website.sources, coverage: { ...website.coverage,
+            ...(evidence.version >= 3 ? { answersAvailable: context.observations.length, answersInThisBatch: batchContext.observations.length } : {}) }, catalog,
+          existingImprovements: result.recommendations.map(item => ({ title: item.title, targetPageId: item.targetPageId })),
+        };
+        const gapPlanKey = 'content-gap-plan:' + contextIndex;
+        const priorGapPlan = this.store.step(job.id, gapPlanKey);
+        const staged = evidence.version >= 4 && Buffer.byteLength(JSON.stringify(fullGapInput) + prompts.contentGaps, 'utf8') > model.contextLength - 7000;
+        const gapPlan = priorGapPlan?.body ? JSON.parse(priorGapPlan.body) : {
+          staged,
+          input: staged ? { ...fullGapInput, catalog: [], existingImprovements: [], catalogReview: 'Provisional topics only; all captured pages will be reviewed separately before acceptance.' } : fullGapInput,
+        };
+        if (evidence.version >= 4 && !priorGapPlan) this.store.setStep(job.id, gapPlanKey, 'done', gapPlan);
+        const gaps = await this.structuredPass(diagnosisSchema, job, model, 'contentGaps', gapPlan.input, signal, receiptKey, 'Finding new topics from your saved answers');
+        // The homepage travels as the site overview, so it is supplied context alongside the website pages.
+        const supplied = new Set([...website.sources.map(page => page.id), ...(evidence.context.siteOverview?.id ? [evidence.context.siteOverview.id] : [])]);
+        const suppliedEvidence = new Set([...supplied, ...batchContext.observations.map(answer => answer.id)]);
+        for (const [gapIndex, gap] of gaps.recommendations.entries()) {
+          if (!supplied.has(gap.targetPageId) || gap.opportunity?.type !== 'new_content' || !gap.opportunity.topic ||
+            !gap.evidenceIds.some(id => supplied.has(id)) || !gap.evidenceIds.some(id => batchContext.observations.some(answer => answer.id === id)) ||
+            (evidence.version >= 3 && gap.evidenceIds.some(id => !suppliedEvidence.has(id))))
+            this.rejectResponse(job, [receiptKey], 'A new topic needs website context and a supporting saved answer.');
+          if (gapPlan.staged) {
+            // A bounded proposal cannot establish absence. Review every captured page before publishing it.
+            const proposal = { title: gap.title, description: gap.description, topic: gap.opportunity!.topic };
+            const planKey = 'content-gap-coverage-plan:' + contextIndex + ':' + gapIndex;
+            const priorCoveragePlan = this.store.step(job.id, planKey);
+            const batches: typeof sources[] = priorCoveragePlan?.body ? JSON.parse(priorCoveragePlan.body) : evidenceBatches(sources,
+              model.contextLength - 7000 - Buffer.byteLength(prompts.contentCoverage + JSON.stringify({ proposal, pages: [] }), 'utf8'));
+            if (!priorCoveragePlan) this.store.setStep(job.id, planKey, 'done', batches);
+            let covered = false;
+            for (const [batchIndex, pages] of batches.entries()) {
+              const key = planKey + ':' + batchIndex;
+              const review = await this.structuredPass(z.object({ matches: z.array(z.object({ pageId: z.string(), quote: z.string().trim().min(1) }).strict()) }).strict(),
+                job, model, 'contentCoverage', { proposal, pages }, signal, key);
+              for (const match of review.matches) {
+                const page = pages.find(page => page.id === match.pageId);
+                if (!page || ![page.title, ...page.h1, page.text].some(text => text.includes(match.quote)))
+                  this.rejectResponse(job, [key], 'The coverage review cited an unknown page or unsupported passage.');
+                covered = true;
+              }
+            }
+            if (covered) continue;
+          }
+          result.recommendations.push(gap);
+        }
+        result.uncertainties.push(...gaps.uncertainties);
+      }
+      result.uncertainties = [...new Set(result.uncertainties)];
+      const allowed = new Set([
+        ...sources.map((p) => p.id),
+        ...context.observations.map((o) => o.id),
+      ]);
+      result.recommendations = result.recommendations.filter(recommendation => {
+        const page = sources.find((p) => p.id === recommendation.targetPageId);
+        if (
+          !page || !withoutEvidenceList(recommendation.description, recommendation.evidenceIds).trim() ||
+          recommendation.evidenceIds.some((id) => !allowed.has(id)) ||
+          (evidence.version >= 2 && (!recommendation.evidenceIds.includes(page.id) ||
+            !recommendation.evidenceIds.some(id => context.observations.some(answer => answer.id === id))))
+        ) { omittedSuggestions++; return false; }
+        return true;
+      });
+      if (omittedSuggestions) result.uncertainties.push(omittedSuggestions + ' suggestions were left out because their supporting evidence could not be verified.');
+      result.recommendations = mergePageTasks(result.recommendations);
+      if (result.recommendations.length > 1) {
+        const candidates = result.recommendations.map((item, index) => ({
+          index, title: item.title, summary: item.description.slice(0, 200), type: item.opportunity?.type,
+          target: sources.find(page => page.id === item.targetPageId)!.url,
+        }));
+        const planSchema = z.object({ groups: z.array(z.object({
+          primaryIndex: z.number().int().nonnegative(), indices: z.array(z.number().int().nonnegative()).min(1),
+        }).strict()) }).strict();
+        const priorPlan = this.store.step(job.id, 'consolidation-batches');
+        const legacyPlan = this.store.step(job.id, 'consolidate');
+        const candidateBatches: typeof candidates[] = priorPlan?.body ? JSON.parse(priorPlan.body) : legacyPlan ? [candidates]
+          : evidenceBatches(candidates, model.contextLength - 7000 - Buffer.byteLength(prompts.consolidate + '{"candidates":}', 'utf8'));
+        if (!priorPlan) this.store.setStep(job.id, 'consolidation-batches', 'done', candidateBatches);
+        const plan: z.infer<typeof planSchema> = { groups: [] };
+        for (const [batchIndex, batch] of candidateBatches.entries()) {
+          const key = candidateBatches.length === 1 ? 'consolidate' : 'consolidate:' + batchIndex;
+          const part = await this.structuredPass(planSchema, job, model, 'consolidate', { candidates: batch }, signal, key);
+          const expected = new Set(batch.map(candidate => candidate.index)), received = new Set<number>();
+          for (const group of part.groups) {
+            if (!group.indices.includes(group.primaryIndex)) this.rejectResponse(job, [key], 'The action plan referenced an unrelated primary task.');
+            if (new Set(group.indices.map(index => result.recommendations[index]?.opportunity?.type)).size > 1)
+              this.rejectResponse(job, [key], 'The action plan combined different kinds of work.');
+            for (const index of group.indices) {
+              if (!expected.has(index) || received.has(index)) this.rejectResponse(job, [key], 'The action plan repeated or referenced an unknown task.');
+              received.add(index);
+            }
+          }
+          if (received.size !== expected.size) this.rejectResponse(job, [key], 'The action plan omitted a supported task.');
+          plan.groups.push(...part.groups);
+        }
+        const seen = new Set<number>();
+        for (const group of plan.groups) {
+          if (!group.indices.includes(group.primaryIndex))
+            this.rejectResponse(job, ['consolidate'], 'The action plan referenced an unrelated primary task.');
+          if (new Set(group.indices.map(index => result.recommendations[index]?.opportunity?.type)).size > 1)
+            this.rejectResponse(job, ['consolidate'], 'The action plan combined different kinds of work.');
+          for (const index of group.indices) {
+            if (!result.recommendations[index] || seen.has(index))
+              this.rejectResponse(job, ['consolidate'], 'The action plan repeated or referenced an unknown task.');
+            seen.add(index);
+          }
+        }
+        if (seen.size !== result.recommendations.length)
+          this.rejectResponse(job, ['consolidate'], 'The action plan omitted a supported task.');
+        // Related tasks share a heading while preserving each page's instructions and evidence.
+        result.recommendations = plan.groups.flatMap(group => {
+          const primary = result.recommendations[group.primaryIndex];
+          return [group.primaryIndex, ...group.indices.filter(index => index !== group.primaryIndex)]
+            .map(index => ({ ...result.recommendations[index], title: primary.title }));
+        });
+      }
+      result.recommendations = mergePageTasks(result.recommendations);
+      const receipt = {
+        findings: result.recommendations.length,
+        omittedSuggestions,
+        uncertainties: result.uncertainties,
+        pagesReviewed: sources.length,
+        measurementJobId: evidence.measurementJobId,
+        model: model.id,
+      };
+      this.store.db.transaction(() => {
+        for (const r of result.recommendations) {
+          this.store.put("finding", project.id, job.id, {
+            id: randomUUID(),
+            projectId: project.id,
+            jobId: job.id,
+            title: r.title,
+            description: withoutEvidenceList(r.description, r.evidenceIds),
+            priority: r.priority,
+            targetUrl: sources.find((p) => p.id === r.targetPageId)!.url,
+            evidenceIds: r.evidenceIds,
+            steps: r.steps,
+            confidence: "inferred",
+            status: "open",
+            kind: "analysis",
+            ...(r.opportunity ? { opportunity: r.opportunity } : {}),
+          });
+        }
+        this.store.setStep(job.id, "diagnosis-result", "done", receipt);
+      })();
+      return receipt;
+    }
+    throw new ProviderError("capability", "Connect ChatGPT or OpenRouter to analyze your collected evidence.");
+  }
   async contentModel(job: Job) {
     const models = await this.providers.models(job.provider!);
     const model =
@@ -757,7 +943,13 @@ export class Runner {
     }
     const collection = this.checkpointApiMeasurement(job, project);
     const competitors = provider === "chatgpt" && job.discoverCompetitors ? await discoverCompetitors(this, job, project, model, signal) : [];
-    return { ...collection, competitors: competitors.filter(site => site.role !== 'reference'), references: competitors.filter(site => ['reference', 'both'].includes(site.role ?? '')) };
+    const result = { ...collection, competitors: competitors.filter(site => site.role !== 'reference'), references: competitors.filter(site => ['reference', 'both'].includes(site.role ?? '')) };
+    if (!job.prepareRecommendations) return result;
+    // Onboarding can offer saved competitor choices while page recommendations continue.
+    this.store.updateJob(job.id, { result });
+    const analysis = await this.diagnose(job, project, signal, job.id);
+    if (analysis.waitingForWebsite) return { ...result, waitingForWebsite: true };
+    return { ...result, analysis };
   }
   /** The answer receipt and its findings commit together, independently of later suggestions. */
   checkpointApiMeasurement(job: Job, project: Project) {
@@ -808,6 +1000,7 @@ export class Runner {
       questions: 'Finding questions your customers might ask',
       questionReview: 'Reviewing questions for relevance and natural wording',
       competitors: 'Identifying competitors in the collected answers',
+      competitorsClassified: 'Identifying competitors and website types',
       research: 'Researching your source material',
       brief: 'Preparing a content brief',
       draft: 'Writing your draft',
@@ -817,6 +1010,7 @@ export class Runner {
       diagnose: 'Preparing recommendations',
       opportunityReview: 'Checking recommendations against your evidence',
       contentGaps: 'Finding useful new content topics',
+      contentCoverage: 'Checking existing pages before suggesting new content',
       consolidate: 'Organizing your improvement plan',
     };
     this.store.updateJob(job.id, { progress: progressLabel ?? progress[name] });

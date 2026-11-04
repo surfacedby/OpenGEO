@@ -5,6 +5,8 @@ import { projectInput, providers, jobKinds, contentTask, opportunityDetails } fr
 import { publicUrl } from "./network.js";
 import { portableJobResult } from "./portable-results.js";
 import { summarize } from "./analysis.js";
+import { normalizeTopics } from "./topics.js";
+import { topicNames } from "./topic-migration.js";
 const date = z.string().datetime({ offset: true });
 const id = z.string().min(1).max(200);
 const safeUrl = z
@@ -35,6 +37,7 @@ const page = z
     canonical: z.string(),
     noindex: z.boolean(),
     schemaTypes: z.array(z.string()),
+    structuredDataLimitations: z.array(z.string()).optional(),
     links: z.array(z.string()),
   })
   .strict();
@@ -141,7 +144,7 @@ const job = z
     spentUsd: z.number().nonnegative(),
     costBasis: z.enum(['reported', 'includes_estimates']).optional(),
     result: z.unknown().optional(),
-    campaignId: z.string().uuid().optional(),
+    topicId: z.string().uuid().optional(),
   })
   .strict();
 export const migrationPackage = z
@@ -149,8 +152,8 @@ export const migrationPackage = z
     format: z.literal("opengeo-project"),
     version: z.literal(1),
     exportedAt: date,
-    project: projectInput.extend({ id, createdAt: date }),
-    jobs: z.array(job),
+    project: z.preprocess(value => topicNames(value, true), projectInput.extend({ id, createdAt: date })),
+    jobs: z.array(z.preprocess(value => topicNames(value), job)),
     pages: z.array(page),
     sourceEvidence: z.array(sourceEvidence).default([]),
     observations: z.array(observation),
@@ -162,6 +165,7 @@ export function previewImport(store: Store, input: unknown) {
   const data = migrationPackage.parse(input);
   publicUrl(data.project.domain);
   for (const competitor of data.project.competitors) publicUrl(competitor);
+  data.project.topics = normalizeTopics(data.project);
   for (const row of data.pages) {
     publicUrl(row.url);
     for (const link of row.links) publicUrl(link);
@@ -245,7 +249,9 @@ export function importProject(store: Store, input: unknown) {
       const measurement = portableJobResult(old);
       const observations = data.observations.filter((row) => row.jobId === old.id);
       const measuredResult = measurement && measurement.metrics.completed === observations.length
-        ? { ...measurement, metrics: summarize(observations, measurement.metrics.requested) } : null;
+        ? { ...measurement, metrics: summarize(observations, measurement.metrics.requested),
+          analysis: measurement.analysis && measurement.analysis.measurementJobId === old.id
+            ? { ...measurement.analysis, measurementJobId: ids.get(measurement.analysis.measurementJobId)! } : undefined } : null;
       const restored = {
         ...old,
         id: ids.get(old.id)!,

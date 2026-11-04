@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown, ExternalLink, Lightbulb, Search, Check, ArrowRight, FilePenLine, ScanSearch, Link, BookOpen, Wrench } from 'lucide-react';
 import type { Finding, Job } from '../server/contracts';
+import { analysisMeasurementId } from '../server/portable-results';
 import { api } from './api';
 import { FindingEvidence } from './WorkflowControls';
 import { Select } from './Select';
@@ -8,7 +9,7 @@ import { findingGroups, targetLabel, targetDomain } from './finding-groups';
 import { SiteIcon } from './SiteIcon';
 import './findings.css';
 import { shortDate } from './format';
-import { EmptyState } from './ui/Primitives';
+import { Disclosure, EmptyState } from './ui/Primitives';
 
 export function Findings({ findings, projectId, run, compact = false, mode = 'opportunities', openAll, openFinding, createContent, drafts = [], openContent, focusedFinding, onFocused, jobs = [], measurementId, emptyMessage, emptyAction, emptyTitle = 'No recommendations yet' }: {
   findings: Finding[];
@@ -59,7 +60,12 @@ export function Findings({ findings, projectId, run, compact = false, mode = 'op
     onFocused?.();
   }, [focusedFinding, status, query]);
   if (compact && groups.length) return <div className="opportunity-preview">{groups.slice(0, 3).map(group => <button key={group.key} onClick={() => openFinding ? openFinding(group.findings[0]) : openAll?.()}>
-    <span className={'opportunity-symbol ' + group.priority}><Lightbulb size={18} /></span><span><strong>{group.title}</strong><small>{group.findings[0].opportunity?.type === 'new_content' ? 'Create new content' : group.findings[0].opportunity?.type === 'site_change' ? 'Website change' : group.findings.length === 1 ? 'One page to improve' : group.findings.length + ' related pages'} / {group.priority === 'high' ? 'High priority' : group.priority === 'medium' ? 'Worth reviewing' : 'Optional'}</small></span><ArrowRight size={16} />
+    <span className={'opportunity-symbol ' + group.priority}>{group.findings[0].opportunity?.type === 'new_content' ? <BookOpen size={18} /> : group.findings[0].opportunity?.type === 'site_change' ? <Wrench size={18} /> : <FilePenLine size={18} />}</span>
+    <span className="opportunity-preview-copy"><strong>{group.title}</strong>
+      <small>{group.findings[0].opportunity?.type === 'new_content' ? 'Create new content' : group.findings[0].opportunity?.type === 'site_change' ? 'Website change' : group.findings.length === 1 ? 'One page to improve' : group.findings.length + ' related pages'} / {group.priority === 'high' ? 'High priority' : group.priority === 'medium' ? 'Worth reviewing' : 'Optional'}</small>
+      <span className="opportunity-preview-benefit">{group.findings[0].opportunity?.benefit || group.findings[0].description}</span>
+      {group.findings[0].steps[0] && <span className="opportunity-preview-step"><ArrowRight size={14} /><span><b>Start with:</b> {group.findings[0].steps[0]}</span></span>}
+    </span><ArrowRight size={16} />
   </button>)}</div>;
   return <div className="improvement-list" ref={root}>
     {!compact && findings.length > 0 && <div className="improvement-toolbar">
@@ -80,12 +86,13 @@ export function Findings({ findings, projectId, run, compact = false, mode = 'op
         </div>
         {jobs.find(job => job.id === finding.jobId) && <small className="finding-period">{(() => {
           const job = jobs.find(job => job.id === finding.jobId)!;
-          const period = (job.result as { measurementJobId?: string } | null)?.measurementJobId;
-          return (period && period !== measurementId ? 'From an earlier check, analyzed ' : 'Analyzed ') + shortDate(job.createdAt);
+          const period = analysisMeasurementId(job);
+          const topic = job.topicId ?? jobs.find(item => item.id === period)?.topicId;
+          return (topic ? 'Topic check, analyzed ' : period && period !== measurementId ? 'From an earlier check, analyzed ' : 'Analyzed ') + shortDate(job.createdAt);
         })()}</small>}
         <div className="finding-next-step"><span>Start here</span><p>{finding.steps[0] ?? finding.description}</p></div>
-        <div className="improvement-detail"><h3>{finding.opportunity?.type === 'new_content' ? 'Build the resource' : 'Complete the improvement'}</h3>{finding.steps.length > 1 && <ol start={2}>{finding.steps.slice(1).map((step, index) => <li key={index}>{step}</li>)}</ol>}
-          <details className="finding-reason"><summary>Why this matters</summary><p>{finding.description}</p>{finding.opportunity && <p>{finding.opportunity.benefit}</p>}</details>
+        <div className="improvement-detail">{finding.steps.length > 1 && <><h3>{finding.opportunity?.type === 'new_content' ? 'Build the resource' : 'Complete the improvement'}</h3><ol start={2}>{finding.steps.slice(1).map((step, index) => <li key={index}>{step}</li>)}</ol></>}
+          <Disclosure label="Why this matters"><p>{finding.description}</p>{finding.opportunity && <p>{finding.opportunity.benefit}</p>}</Disclosure>
           {targetDomain(finding.targetUrl) && <a href={finding.targetUrl} target="_blank" rel="noreferrer">{finding.opportunity?.type === 'new_content' ? 'View context page' : 'Open page'} <ExternalLink size={13} /></a>}
           <small><Link size={13} />{finding.confidence === 'known' ? 'Observed on the page' : 'Review the interpretation against its sources'}</small>
           <FindingEvidence projectId={projectId} findingId={finding.id} />

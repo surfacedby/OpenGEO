@@ -1,5 +1,5 @@
-import type { Finding, Job, Observation, PageEvidence } from "./contracts.js";
-import { portableJobResult, completedMeasurement } from "./portable-results.js";
+import type { Finding, Job, Observation, PageSummary } from "./contracts.js";
+import { portableJobResult, completedMeasurement, completedAnalysisResult, analysisMeasurementId } from "./portable-results.js";
 
 export type SourceRow = {
   key: string;
@@ -27,8 +27,8 @@ export type HistoryPoint = {
   missing: number;
   mentionRate: number | null;
   citationRate: number | null;
-  /** Set on a campaign check, which asks only part of the brand's questions. */
-  campaign?: string;
+  /** Set on a topic check, which asks only part of the brand's questions. */
+  topic?: string;
 };
 export type Presentation = {
   domains: SourceRow[];
@@ -53,19 +53,26 @@ export type Presentation = {
 };
 
 /** Fresh plans replace unstarted suggestions; accepted work keeps its progress across rechecks. */
-export function currentFindings(findings: Finding[], jobs: Job[]) {
-  const audit = jobs.find(job => job.kind === 'audit' && job.status === 'completed');
-  const measurement = jobs.find(completedMeasurement);
-  const analysis = jobs.find(job => job.kind === 'diagnose' && job.status === 'completed');
+export function currentFindings(findings: Finding[], jobs: Job[], auditJobId?: string) {
+  const audit = auditJobId ? jobs.find(job => job.id === auditJobId) : jobs.find(job => job.kind === 'audit' && job.status === 'completed');
   const generations = new Map(jobs.map(job => [job.id, job]));
+  const scope = (job: Job) => job.topicId ?? generations.get(analysisMeasurementId(job) ?? '')?.topicId ?? '';
+  const measurements = new Map<string, Job>(), analyses = new Map<string, Job>();
+  // A newer partial check replaces advice only for its own Topic, never the brand or another Topic.
+  for (const job of jobs) {
+    const key = scope(job);
+    if (completedMeasurement(job) && !measurements.has(key)) measurements.set(key, job);
+    if ((completedAnalysisResult(job) || job.kind === 'diagnose' && job.status === 'completed') && !analyses.has(key)) analyses.set(key, job);
+  }
   return findings.filter(finding => {
     if (finding.kind === 'visibility') return false;
     if (finding.status !== 'open') return true;
     const job = generations.get(finding.jobId);
     if (!job) return true;
     if (job.kind === 'audit') return job.id === audit?.id;
-    if (job.kind === 'diagnose') {
-      const period = (job.result as { measurementJobId?: string } | null)?.measurementJobId;
+    const key = scope(job), measurement = measurements.get(key), analysis = analyses.get(key);
+    if (job.kind === 'diagnose' || job.prepareRecommendations || completedAnalysisResult(job)) {
+      const period = analysisMeasurementId(job);
       return job.id === analysis?.id && (!measurement || (period ? period === measurement.id : job.createdAt >= measurement.createdAt));
     }
     if (['measure', 'recheck'].includes(job.kind)) return job.id === measurement?.id;
@@ -224,7 +231,7 @@ export function workspacePresentation(
   observations: Observation[],
   prompts: string[] | null,
   requested: number,
-  auditPages: PageEvidence[] = [],
+  auditPages: PageSummary[] = [],
 ): Presentation {
   const availablePages = auditPages.filter(page => page.status >= 200 && page.status < 300);
   return {

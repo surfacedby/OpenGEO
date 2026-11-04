@@ -38,13 +38,13 @@ Question coverage uses the saved request plan. Editing today's questions does no
 
 Even comparable checks are samples. They can show a change worth investigating, but cannot isolate its cause.
 
-## Campaigns
+## Topics
 
-A campaign groups some of a brand's questions toward one goal, with optional target pages and a choice of the brand's competitors. A question can belong to several campaigns and still counts once in the brand's totals.
+A topic groups some of a brand's questions toward one goal, with optional target pages and a choice of the brand's competitors. A question can belong to several topics and still counts once in the brand's totals.
 
-A campaign reads every check that asked all of its questions: a check of the whole question list, or a check limited to the campaign. Its rates use only the answers to its own questions. Its trend compares checks with the same answer settings and the same campaign questions, so adding or removing a campaign question starts a new comparison.
+A topic reads every check that asked all of its questions: a check of the whole question list, or a check limited to the topic. Its rates use only the answers to its own questions. Its trend compares checks with the same answer settings and the same topic questions, so adding or removing a topic question starts a new comparison.
 
-A check limited to a campaign asks only that campaign's questions, so providers collect and price only those answers. Its answers count in the campaign. The brand's totals stay on the latest check of every question, and the brand's history shows the campaign check as a gap named after the campaign rather than as a reading.
+A check limited to a topic asks only that topic's questions, so providers collect and price only those answers. Its answers count in the topic. The brand's totals stay on the latest check of every question, and the brand's history shows the topic check as a gap named after the topic rather than as a reading.
 
 A target page is cited when an answer links to it. Each answer counts once per page. Fragments, a trailing slash, a leading `www.` and `utm_` tracking parameters (ChatGPT adds `utm_source=openai` to the links it cites) are ignored; any other difference in path or query is a different page.
 
@@ -52,9 +52,19 @@ A target page is cited when an answer links to it. Each answer counts once per p
 
 Each answer counts once for a domain or page, even if it cites it repeatedly. Page fragments are combined; different paths and queries remain distinct. A source's coverage cannot exceed 100%, but coverage across sources can add up to more than 100% because one answer may cite several sites. Unsafe or credential-bearing links are excluded from source tables.
 
+Website comparisons use the same selected check for both websites. Their percentages count citations, not market share or recommendations. The comparison includes answers citing both sites, one site, or neither. Its prompt and platform views retain their own answer counts; a gap alone is not a reason to create new content. A reference website is not automatically a competitor.
+
 ## Audits and suggested questions
 
 Audits preserve fetched page text and technical facts. Sitemaps help discover pages within the crawl budget and robots policy; a sitemap URL is not evidence until the page is fetched. Findings such as missing metadata or noindex describe page facts, not a proven cause of AI invisibility.
+
+During onboarding, the optional background website check discovers up to 10,000 public pages. It saves progress as pages arrive, works in small paced batches while OpenGEO is open, and yields between batches to other queued work. It resumes after an app restart; cancellation stays cancelled. It uses your internet connection but makes no AI calls. Pages excluded from search remain visible in their own group, without advice to make private content public.
+
+Existing brands can start page discovery from Scans and choose a limit of 1,000, 10,000 or 100,000 pages. Stop keeps the pages already checked; Resume explicitly continues that saved crawl. Only one background discovery can be active or paused for a brand. A completed crawl can be run again to check the website afresh. This does not schedule recurring checks or restart stopped work automatically.
+
+When a page, sitemap or robots policy responds with HTTP 429 or 503, the crawler preserves its position instead of treating the error page as website content. Background discovery waits at least 30 seconds, increases the delay on repeated responses and honors a valid Retry-After header. After three automatic retries at the same URL, or a requested wait longer than a day, it pauses for review. Manual checks pause immediately. Website checks share the saved wait for that host (including its www variant), even if the first check is cancelled or the app restarts. Other websites can continue. Waiting on another check does not consume a retry.
+
+Page text and headings come from the declared main content, a single article, or the visible body when neither exists. Navigation, dialogs, forms, hidden elements and other interface text are excluded; useful article headers, FAQ answers and service cards remain. Navigation links still help discover pages. This is HTML evidence, not a claim that every visual or interactive element has been understood. Previously saved page records keep the content collected at their original check.
 
 Website-grounded questions reference readable page records and are reviewed before tracking. Thin or unreadable evidence can yield no suggestions. ChatGPT and OpenRouter use separate passes to understand the website, draft audience questions and review their relevance. Offering quotations must match the page text and support the current offering in context. Questions should reflect the audience's needs rather than repeat specifications or assume a diagnosis.
 
@@ -63,6 +73,14 @@ These checks do not establish search demand. Your expertise can clarify scope bu
 ## Competitors and opportunities
 
 The first ChatGPT check can suggest competitors named in its answers with a matching website citation in the same answer. This can miss an uncited competitor, but avoids guessing domains. You choose which sites enter the comparison. Unconfirmed websites remain under **To review**, separate from confirmed competitors and references. A reviewed parent website covers its subdomains.
+
+Checks started with ChatGPT or OpenRouter also prepare recommendations from the saved answers and readable public pages. Topic checks use only their frozen questions and answers; their recommendations appear in the Topic's Opportunities tab as well as the general improvement list. A newer Topic check replaces only that Topic's unstarted advice, while accepted actions retain their evidence. If no website check is available, OpenGEO reads up to six pages first. Answer collection and recommendations share the same approved budget; a pause keeps collected answers available. Other connections retain their separate analysis controls.
+
+Local competitor review reads complete saved answers and their citation links in durable batches. A single answer that exceeds the chosen model's capacity pauses review rather than silently losing its ending. Recommendations exclude failed page responses, sign-in pages and pages marked noindex. These exclusions are still visible in Pages.
+
+New local reviews can also identify a website as an organization, product, publisher, directory, marketplace, platform or community. This category is separate from its competitor or reference role. The saved quote must occur in a supporting answer or that website's citation title. Missing or conflicting category evidence leaves the website unclassified. These are interpretations of saved answers, not independently verified business profiles; open the comparison to inspect the quoted evidence. Older reviews and providers without category results stay unclassified.
+
+Structured-data types are publisher declarations, not proof of eligibility for search features. The local reader resolves supported Schema.org contexts without fetching remote context documents. It inspects up to 16 blocks within 64 KB, with limits on nesting and entities; page details disclose malformed, unresolved or omitted declarations.
 
 When supported, SurfacedBy role review reads selected saved answers and cited websites to distinguish competing offerings from references. It is analysis of supplied evidence, not a fresh measurement or an authority score. Supported request sizes and availability are checked before approval; partial or unrelated results are not published.
 

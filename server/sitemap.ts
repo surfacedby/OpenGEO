@@ -1,5 +1,5 @@
 import { load } from "cheerio";
-import { crawlFetch, publicUrl, sameSiteHost, type CrawlPermission } from "./network.js";
+import { CrawlBackoff, crawlFetch, publicUrl, sameSiteHost, type CrawlPermission } from "./network.js";
 
 /** Sitemaps supply discovery URLs, not factual evidence. Every page still passes crawl policy and network checks. */
 export async function sitemapPages(base: URL, declared: string[], allowed: CrawlPermission, signal: AbortSignal, limit: number, fetcher = crawlFetch) {
@@ -23,7 +23,7 @@ export async function sitemapPages(base: URL, declared: string[], allowed: Crawl
         if (isIndex) { if (queue.length < 64) queue.push(entry.href); }
         else { pages.add(entry.href); if (pages.size >= limit) break; }
       }
-    } catch (error) { if (signal.aborted) throw error; /* Optional discovery failures do not replace page evidence. */ }
+    } catch (error) { if (signal.aborted || error instanceof CrawlBackoff) throw error; /* Optional discovery failures do not replace page evidence. */ }
   }
   return [...pages];
 }

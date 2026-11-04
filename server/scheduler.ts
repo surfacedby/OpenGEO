@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { Store } from "./storage.js";
 import { jobInput, ProviderError, type Job } from "./contracts.js";
-import { campaignScope } from "./campaigns.js";
+import { topicScope } from "./topics.js";
 export const scheduleInput = z
   .object({
     job: jobInput,
@@ -66,7 +66,7 @@ export class Scheduler {
         if (!existing) throw new ProviderError("setup", "This schedule was removed. Start a new schedule if you want to run it again.");
         return existing;
       }
-      campaignScope(this.store.project(input.job.projectId), input.job.campaignId);
+      topicScope(this.store.project(input.job.projectId), input.job.topicId);
       const s = { ...input, id: randomUUID(), nextAt: nextRun(input) };
       this.store.set("schedules", [...this.list(), s]);
       this.store.set("scheduleRequest:" + key, { input, id: s.id });

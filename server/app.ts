@@ -21,12 +21,12 @@ import {
   providers,
   ProviderError,
   auditCoverage,
-  type PageSummary,
+  type Finding,
 } from "./contracts.js";
-import { publicUrl, sameSiteHost } from "./network.js";
-import { campaignScope, campaignSummaries, campaignView, normalizeCampaigns, withCampaignChecks } from "./campaigns.js";
+import { publicUrl } from "./network.js";
+import { topicScope, topicSummaries, topicView, normalizeTopics, withTopicChecks } from "./topics.js";
 import { workspacePresentation, currentFindings } from "./presentation.js";
-import { auditFindingPresentation } from './audit.js';
+import { auditFindings } from './audit.js';
 import { SiteIcons } from "./site-icons.js";
 import { displayedMeasurement } from "./portable-results.js";
 import { UsageSharing } from "./usage.js";
@@ -191,7 +191,7 @@ export async function createApp(
     })();
   });
   app.post("/api/onboarding/start", (req) => {
-    const draft = setupDraft.parse(req.body);
+    const { backgroundCrawl, ...draft } = setupDraft.extend({ backgroundCrawl: z.boolean().default(false) }).parse(req.body);
     if (!draft.projectId) throw new ProviderError("setup", "Add a website before finishing setup.");
     const project = store.project(draft.projectId);
     if (!draft.localOnly && !vault.status()[draft.provider])
@@ -200,7 +200,8 @@ export async function createApp(
       throw new ProviderError("setup", "Connect both DataForSEO and OpenRouter for measurements, analysis and content.");
     // Finishing setup is one durable transaction, so an interrupted response cannot queue duplicate audits.
     return store.db.transaction(() => {
-      const job = draft.localOnly ? setupAudit(project) : null;
+      const backgroundAudit = backgroundCrawl ? setupAudit(project, 10000, true) : null;
+      const job = draft.localOnly ? backgroundAudit ?? setupAudit(project) : null;
       const consent = store.setting<{ enabled: boolean } | null>("usageConsent", null);
       if (!consent && !store.setting<any>("onboarding", null)?.completed) usage.setEnabled(usage.status().enabled);
       store.set("onboarding", { completed: true });
@@ -232,7 +233,7 @@ export async function createApp(
     if (!project.prompts.length) throw new ProviderError("setup", "Select at least one question to check.");
     return store.db.transaction(() => {
       const key = createHash("sha256").update(JSON.stringify([project.domain, project.brand, project.aliases, project.prompts, project.locale])).digest("hex");
-      const job = store.enqueue(jobInput.parse({ projectId, kind: "measure", provider: "chatgpt", discoverCompetitors: true }), "setup-check:" + projectId + ":" + key);
+      const job = store.enqueue(jobInput.parse({ projectId, kind: "measure", provider: "chatgpt", discoverCompetitors: true, prepareRecommendations: true }), "setup-check:" + projectId + ":" + key);
       if (!store.step(job.id, "project")) store.setStep(job.id, "project", "done", project);
       const draft = store.setting<any>("setupDraft", null);
       if (draft?.projectId === projectId) store.set("setupDraft", { ...draft, checkJobId: job.id });
@@ -240,11 +241,11 @@ export async function createApp(
     })();
   });
   /** Setup reuses an active or finished audit of this domain, so retried requests never queue a second one; an audit that did not finish is replaced rather than awaited. */
-  function setupAudit(project: import("./contracts.js").Project, maxPages = 100) {
+  function setupAudit(project: import("./contracts.js").Project, maxPages = 100, background = false) {
     const usable = store.jobs(project.id).find(job => job.kind === "audit" && ["queued", "running", "paused", "completed"].includes(job.status) &&
-      JSON.parse(store.step(job.id, "project")?.body ?? "null")?.domain === project.domain);
+      (!background || job.maxPages >= maxPages) && JSON.parse(store.step(job.id, "project")?.body ?? "null")?.domain === project.domain);
     if (usable) return usable;
-    const job = store.enqueue(jobInput.parse({ projectId: project.id, kind: "audit", maxCostUsd: 0, maxPages }), "setup-audit:" + project.id + ":" + randomUUID());
+    const job = store.enqueue(jobInput.parse({ projectId: project.id, kind: "audit", maxCostUsd: 0, maxPages, ...(background ? { background: true } : {}) }), "setup-audit:" + project.id + ":" + randomUUID());
     store.setStep(job.id, "project", "done", project);
     return job;
   }
@@ -289,14 +290,7 @@ export async function createApp(
       try { publicUrl(competitor); }
       catch { throw new z.ZodError([{ code: "custom", path: ["competitors", index], message: "Enter a public competitor website without embedded credentials." }]); }
     }
-    const site = publicUrl(input.domain);
-    for (const [index, campaign] of input.campaigns.entries())
-      for (const [position, url] of campaign.targetUrls.entries()) {
-        let page: URL | undefined;
-        try { page = publicUrl(url); } catch {}
-        if (!page || !sameSiteHost(page, site)) throw new z.ZodError([{ code: "custom", path: ["campaigns", index, "targetUrls", position], message: "Choose a page on this website." }]);
-      }
-    input.campaigns = normalizeCampaigns(input);
+    input.topics = normalizeTopics(input);
     return input;
   };
   app.post("/api/projects", (req) =>
@@ -317,13 +311,27 @@ export async function createApp(
     if (runner.hasActiveProject((req.params as any).id)) throw new ProviderError('in_progress', 'Wait for this brand\'s current scan or cancellation to finish.');
     return store.deleteProject((req.params as any).id, input.confirmation);
   });
+  app.post('/api/projects/:id/prompts', (req) => {
+    const input = z.object({ prompts: z.array(z.string().trim().min(3).max(500)).min(1).max(200) }).strict().parse(req.body);
+    return store.db.transaction(() => {
+      const id = (req.params as { id: string }).id;
+      const { id: _id, createdAt: _createdAt, ...current } = store.project(id);
+      const known = new Set(current.prompts.map(text => text.trim().toLocaleLowerCase()));
+      const added = input.prompts.filter(text => {
+        const key = text.toLocaleLowerCase();
+        if (known.has(key)) return false;
+        known.add(key); return true;
+      });
+      return store.updateProject(id, parseProject({ ...current, prompts: [...current.prompts, ...added] }));
+    })();
+  });
   app.get("/api/projects/:id/workspace", (req) => {
     const id = (req.params as any).id;
     const project = store.project(id),
       jobs = store.jobs(id),
-      brandJobs = jobs.filter((job) => !job.campaignId);
+      brandJobs = jobs.filter((job) => !job.topicId);
     const audit = jobs.find(
-        (j) => j.kind === "audit" && j.status === "completed",
+        (j) => j.kind === "audit" && (j.status === "completed" || ['queued', 'running', 'paused'].includes(j.status) && store.pageCount(id, j.id) > 0),
       ),
       measure = displayedMeasurement(brandJobs, (job) => store.answerCount(id, job.id));
     const observations = measure ? store.observations(id, measure.id) : [];
@@ -332,12 +340,21 @@ export async function createApp(
       ? JSON.parse(snapshot.body).prompts
       : project.prompts;
     const coverage = auditCoverage.safeParse((audit?.result as any)?.coverage);
-    const pages = audit ? store.pages(id, audit.id) : [];
-    const savedPages = new Map(store.pages(id).map(page => [page.id, page]));
+    const pages = audit ? store.pageSummaries(id, audit.id) : [];
+    const pageFindings = new Map<string, Finding[] | null>();
     const auditJobs = new Set(jobs.filter(job => job.kind === 'audit').map(job => job.id));
-    const findings = currentFindings(store.findings(id), brandJobs).map(finding => {
-      const page = finding.evidenceIds.map(id => savedPages.get(id)).find(Boolean);
-      return page && auditJobs.has(finding.jobId) ? auditFindingPresentation(project, finding, page) : finding;
+    const findings = currentFindings(store.findings(id), jobs, audit?.id).map(finding => {
+      if (!auditJobs.has(finding.jobId)) return finding;
+      // Accepted older work still needs its original evidence, but polling must not load every historical crawl.
+      const current = finding.evidenceIds.map(evidenceId => {
+        if (!pageFindings.has(evidenceId)) {
+          const page = store.pageEvidence(id, evidenceId);
+          pageFindings.set(evidenceId, page ? auditFindings(project, finding.jobId, [page]) : null);
+        }
+        return pageFindings.get(evidenceId);
+      }).find(Boolean);
+      const copy = current?.find(item => item.kind === finding.kind);
+      return copy ? { ...finding, title: copy.title, description: copy.description, steps: copy.steps } : finding;
     });
     const metrics = measurementMetrics(measure, observations, measure ? prompts.length : 0);
     const presentation = workspacePresentation(brandJobs, measure, observations,
@@ -346,23 +363,23 @@ export async function createApp(
       project,
       jobs,
       auditCoverage: coverage.success ? coverage.data : null,
-      pages: pages.map(({ text: _text, links: _links, ...page }): PageSummary => page),
+      pages,
       observations,
       findings,
       content: store.artifacts(id, "content"),
       metrics,
-      presentation: { ...presentation, history: withCampaignChecks(presentation.history, jobs, project) },
+      presentation: { ...presentation, history: withTopicChecks(presentation.history, jobs, project) },
       measurement: measure ?? null,
       comparison: recheckComparison(brandJobs),
       competitors: competitorEvidence(project, observations),
-      campaigns: campaignSummaries(store, project, jobs),
+      topics: topicSummaries(store, project, jobs),
     };
   });
-  app.get("/api/projects/:id/campaigns/:campaign", (req) => {
-    const { id, campaign } = req.params as { id: string; campaign: string };
-    const project = store.project(id), found = project.campaigns.find((item) => item.id === campaign);
-    if (!found) throw new Error("Campaign not found");
-    return campaignView(store, project, found);
+  app.get("/api/projects/:id/topics/:topic", (req) => {
+    const { id, topic } = req.params as { id: string; topic: string };
+    const project = store.project(id), found = project.topics.find((item) => item.id === topic);
+    if (!found) throw new Error("Topic not found");
+    return topicView(store, project, found);
   });
   app.get("/api/projects/:id/site-icon", async (req, res) => {
     const id = (req.params as any).id;
@@ -399,10 +416,7 @@ export async function createApp(
     store.project(id);
     const row = store.findings(id).find((f) => f.id === finding);
     if (!row) throw new Error("Finding not found");
-    const ids = new Set(row.evidenceIds);
-    const pages = store.pages(id).filter((page) => ids.has(page.id));
-    const sources = store.artifacts<{ id: string }>(id, "source").filter(source => ids.has(source.id));
-    const observations = store.observations(id).filter((answer) => ids.has(answer.id));
+    const { pages, sources, observations } = store.evidenceRecords(id, row.evidenceIds);
     const found = new Set([...pages, ...sources, ...observations].map((record) => record.id));
     return {
       pages,
@@ -413,7 +427,7 @@ export async function createApp(
   });
   app.post("/api/jobs", (req) => {
     const input = jobInput.parse(req.body);
-    if (input.campaignId) campaignScope(store.project(input.projectId), input.campaignId);
+    if (input.topicId) topicScope(store.project(input.projectId), input.topicId);
     const key = z
       .string()
       .min(8)

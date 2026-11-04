@@ -156,7 +156,8 @@ tbody tr:hover { background: var(--surface-2); }
 /* Modal */
 .modal { background: var(--surface); color: var(--text); padding: 0; margin: auto; border-radius: var(--radius); width: min(540px, calc(100% - 32px)); max-height: 90dvh; overflow: auto; box-shadow: var(--shadow-lg); border: 1px solid var(--border); }
 .modal::backdrop { background: rgb(16 24 40 / .45); backdrop-filter: blur(2px); }
-.detail-drawer { margin: 0 0 0 auto; width: min(960px, 100%); height: 100dvh; max-height: 100dvh; max-width: 100%; border-radius: var(--radius) 0 0 var(--radius); }
+.detail-drawer { margin: 0 0 0 auto; width: min(960px, 100%); height: 100dvh; max-height: 100dvh; max-width: 100%; border-radius: 0; }
+.drawer-body { padding: var(--panel-space); min-width: 0; }
 .modal > .panel-heading { position: sticky; top: 0; background: var(--surface); z-index: 1; min-height: 56px; }
 .modal > .panel-heading h2 { font-size: 16px; }
 .modal > .panel-heading button { color: var(--muted); padding: 6px; border-radius: var(--radius-sm); min-width: 32px; min-height: 32px; display: grid; place-items: center; }
@@ -201,6 +202,11 @@ nav button.active > svg { color: var(--primary); }
 .workspace-identity a { display: inline-flex; align-items: center; gap: 3px; }
 .workspace-identity a:hover { color: var(--primary-text); }
 .topbar-actions { display: flex; align-items: center; gap: 8px; }
+.activity-notice { display: flex; align-items: center; gap: 12px; padding: 10px 28px; background: var(--primary-50); border-bottom: 1px solid var(--primary-100); color: var(--primary-text); flex-shrink: 0; }
+.activity-notice > div { display: flex; flex: 1; align-items: baseline; gap: 12px; flex-wrap: wrap; min-width: 0; }
+.activity-notice strong { font-size: 13px; }
+.activity-notice span { font-size: 12px; overflow-wrap: anywhere; }
+@media (max-width: 640px) { .activity-notice { padding: 10px 12px; align-items: flex-start; } .activity-notice > div { gap: 2px; flex-direction: column; } }
 .connection-shortcut { display: flex; align-items: center; gap: 7px; min-height: 34px; border: 1px solid var(--border); background: var(--surface); padding: 5px 10px; border-radius: 999px; font-size: 12px; font-weight: 500; color: var(--text); }
 .connection-shortcut:hover { background: var(--surface-2); border-color: var(--border-strong); }
 .connection-shortcut .connection-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 3px var(--success-50); }

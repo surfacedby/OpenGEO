@@ -136,8 +136,8 @@ try {
       runtime.store.put("observation", project.id, job.id, observation);
     currentId = job.id;
   }
-  const campaign = { id: randomUUID(), name: "Documentation examples", goal: "Answers about example domains link to the example page.", prompts: [prompts[0], prompts[2]], targetUrls: ["https://example.com/"], competitors: ["iana.org"], reviewBy: "2026-10-01", status: "active", createdAt: "2026-09-20T10:00:00.000Z" };
-  assert.equal((await runtime.app.inject({ method: "PATCH", url: `/api/projects/${project.id}`, headers: { authorization: "Bearer " + runtime.token }, payload: { campaigns: [campaign] } })).statusCode, 200);
+  const topic = { id: randomUUID(), name: "Documentation examples", goal: "Answers about example domains link to the example page.", prompts: [prompts[0], prompts[2]], targetUrls: ["https://example.com/"], competitors: ["iana.org"], reviewBy: "2026-10-01", status: "active", createdAt: "2026-09-20T10:00:00.000Z" };
+  assert.equal((await runtime.app.inject({ method: "PATCH", url: `/api/projects/${project.id}`, headers: { authorization: "Bearer " + runtime.token }, payload: { topics: [topic] } })).statusCode, 200);
   const page = await browser.newPage({
     viewport: { width: 1360, height: 900 },
     deviceScaleFactor: 2,
@@ -162,7 +162,7 @@ try {
   assert.equal(projection.presentation.domains[0].answers, 4);
   assert.equal(projection.presentation.domains[0].answerRate, 100);
   assert.equal(projection.presentation.prompts[0].requested, 2);
-  assert.deepEqual(projection.campaigns.map((item: { questions: number; targets: number; targetsCited: number }) => [item.questions, item.targets, item.targetsCited]), [[3, 1, 1]]);
+  assert.deepEqual(projection.topics.map((item: { questions: number; targets: number; targetsCited: number }) => [item.questions, item.targets, item.targetsCited]), [[3, 1, 1]]);
   assert.deepEqual(
     projection.presentation.outcomes.map(
       (group: { count: number }) => group.count,
@@ -204,7 +204,7 @@ try {
       "Overview",
       "Visibility",
       "Prompts",
-      "Campaigns",
+      "Topics",
       "Responses",
       "Sources",
       "Competitors",
@@ -312,42 +312,42 @@ try {
       }
     }
   }
-  // Campaign screens: the list and each tab of one campaign, then the lens over the evidence screens.
+  // Topic screens: the list and each tab of one topic, then the lens over the evidence screens.
   for (const width of [1360, 760, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 780 : 900 });
-    await navigate(page, "Campaigns");
-    await page.getByRole("button", { name: campaign.name, exact: true }).click();
-    await page.getByRole("heading", { name: campaign.name, exact: true }).waitFor();
+    await navigate(page, "Topics");
+    await page.getByRole("button", { name: topic.name, exact: true }).click();
+    await page.getByRole("heading", { name: topic.name, exact: true }).waitFor();
     for (const tab of ["Results", "Questions", "Target pages", "Competitors", "Checks"]) {
       await page.getByRole("tab", { name: new RegExp("^" + tab) }).click();
       if (tab === "Target pages") assert.match(await page.getByRole("tabpanel").innerText(), /Cited in 2 of 3 answers/);
-      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `Campaign ${tab} at ${width}px`);
-      await page.screenshot({ path: join(output, `campaign-${tab.toLowerCase().replaceAll(" ", "-")}-${width}.png`), fullPage: true });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `Topic ${tab} at ${width}px`);
+      await page.screenshot({ path: join(output, `topic-${tab.toLowerCase().replaceAll(" ", "-")}-${width}.png`), fullPage: true });
     }
     await navigate(page, "Visibility");
-    await page.getByRole("button", { name: width === 1360 ? "Campaign" : "Mobile campaign", exact: true }).click();
-    await page.getByRole("option", { name: new RegExp(campaign.name) }).click();
+    await page.getByRole("button", { name: width === 1360 ? "Topic" : "Mobile topic", exact: true }).click();
+    await page.getByRole("option", { name: new RegExp(topic.name) }).click();
     await page.getByText("Showing 3 of 4 questions", { exact: true }).waitFor();
     await page.getByRole("button", { name: "Check these 3 questions", exact: true }).waitFor();
     for (const view of ["Visibility", "Responses", "Sources", "Competitors"]) {
       await navigate(page, view);
       await page.getByRole("heading", { name: view, exact: true }).waitFor();
       await page.locator(".workspace-loading").waitFor({ state: "hidden" });
-      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `${view} for a campaign at ${width}px`);
-      await page.screenshot({ path: join(output, `campaign-lens-${view.toLowerCase()}-${width}.png`) });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `${view} for a topic at ${width}px`);
+      await page.screenshot({ path: join(output, `topic-lens-${view.toLowerCase()}-${width}.png`) });
     }
-    await page.getByRole("button", { name: width === 1360 ? "Campaign" : "Mobile campaign", exact: true }).click();
+    await page.getByRole("button", { name: width === 1360 ? "Topic" : "Mobile topic", exact: true }).click();
     await page.getByRole("option", { name: /All questions/ }).click();
     await navigate(page, "Prompts");
-    await page.getByRole("button", { name: /^No campaign/ }).waitFor();
+    await page.getByRole("button", { name: /^No topic/ }).waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `Grouped prompts at ${width}px`);
     await page.screenshot({ path: join(output, `prompts-grouped-${width}.png`) });
-    await navigate(page, "Campaigns");
-    await page.getByRole("button", { name: "New campaign", exact: true }).click();
-    const editor = page.getByRole("dialog", { name: "New campaign" });
-    await editor.getByLabel("Campaign name").waitFor();
-    assert.equal(await editor.getByRole("button", { name: "Create campaign", exact: true }).isDisabled(), true);
-    await editor.screenshot({ path: join(output, `campaign-dialog-${width}.png`) });
+    await navigate(page, "Topics");
+    await page.getByRole("button", { name: "New topic", exact: true }).click();
+    const editor = page.getByRole("dialog", { name: "New topic" });
+    await editor.getByLabel("Topic name").waitFor();
+    assert.equal(await editor.getByRole("button", { name: "Create topic", exact: true }).isDisabled(), true);
+    await editor.screenshot({ path: join(output, `topic-dialog-${width}.png`) });
     await editor.getByRole("button", { name: "Cancel", exact: true }).click();
   }
   await navigate(page, "Competitors");
@@ -388,28 +388,30 @@ try {
   assert.equal(await page.getByRole('button', { name: 'View answers for iana.org', exact: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: 'Remove iana.org from comparison', exact: true }).count(), 1);
   await page.getByRole('button', { name: 'View answers for W3C', exact: true }).click();
-  await page.getByRole('heading', { name: 'Questions where your website wasn\'t cited', exact: true }).waitFor();
-  assert.equal(await page.locator('.competitor-detail-grid > div').first().getByRole('link').count(), 2);
-  assert.equal(await page.locator('.competitor-detail-grid > div').last().getByRole('link').count(), 1);
-  await page.locator('.competitor-detail-grid > div').first().getByRole('link').first().click();
-  assert.equal(await page.locator('.competitor-full-answers').getAttribute('open'), '');
-  assert.equal(await page.locator('.competitor-full-answers .answer').count(), 2);
+  await page.getByRole('button', { name: '2 Only W3C cited', exact: true }).click();
+  assert.equal(await page.locator('.competitor-prompt').count(), 2);
+  await page.getByRole('button', { name: 'Only your site cited', exact: true }).click();
+  assert.equal(await page.locator('.competitor-prompt').count(), 1);
+  await page.locator('.competitor-prompt summary').click();
+  assert.equal(await page.locator('.competitor-prompt').getAttribute('open'), '');
+  assert.equal(await page.locator('.competitor-prompt .answer').count(), 2);
+  await page.getByRole('dialog').getByRole('button', { name: 'Close dialog', exact: true }).click();
   await page.getByRole('button', { name: /^References/ }).click();
   await page.getByText('Provides documentation used in these answers.', { exact: true }).waitFor();
   assert.equal(await page.getByRole('checkbox', { name: 'Follow IANA', exact: true }).count(), 0);
   assert.equal(runtime.store.project(project.id).competitors.includes('example.org'), false);
   await navigate(page, "Sources");
-  await page.getByRole("button", { name: /^Pages/ }).click();
+  await page.getByRole("tab", { name: /^All cited pages/ }).click();
   assert.equal(
     await page
-      .getByRole("button", { name: /^Pages/ })
-      .getAttribute("aria-pressed"),
+      .getByRole("tab", { name: /^All cited pages/ })
+      .getAttribute("aria-selected"),
     "true",
   );
   await page
     .getByRole("textbox", { name: "Search sources", exact: true })
     .fill("no-such-source");
-  await page.getByText("No matching sources", { exact: true }).waitFor();
+  await page.getByText("No sources match this filter", { exact: true }).waitFor();
   await page
     .getByRole("textbox", { name: "Search sources", exact: true })
     .fill("");
@@ -429,8 +431,10 @@ try {
     /End of full test answer\./,
   );
   assert.equal(await page.locator('.answer-reader .answer-document strong').innerText(), 'UX review evidence');
+  await page.getByRole('dialog', { name: 'Answer and sources', exact: true }).getByRole('tab', { name: /^Sources/ }).click();
   assert.equal(await page.locator('.answer-reader .answer-sources .site-icon').count(), 3);
   assert.ok((await page.locator('.answer-reader .answer-sources a').first().getAttribute('href'))?.startsWith('https://'));
+  await page.getByRole('dialog', { name: 'Answer and sources', exact: true }).getByRole('tab', { name: 'Answer', exact: true }).click();
   await page.screenshot({ path: join(output, 'answer-drawer-mobile.png') });
   await page.keyboard.press('Escape');
   await page.getByRole('dialog', { name: 'Answer and sources', exact: true }).waitFor({ state: 'detached' });
@@ -526,10 +530,11 @@ try {
   await navigate(page, 'Scans');
   await page.getByRole('textbox', { name: 'Search audited pages' }).fill('does-not-exist');
   await page.getByRole('heading', { name: 'No matching pages', exact: true }).waitFor();
-  await page.getByRole('button', { name: 'Show all pages', exact: true }).click();
-  await page.locator('.audit-pages-table summary').first().click();
-  assert.equal(await page.locator('.audit-pages-table details[open] li').first().innerText(), 'Example domain');
-  await page.getByRole('button', { name: /^Unavailable/ }).click();
+  await page.getByRole('button', { name: 'Clear search', exact: true }).click();
+  await page.getByRole('button', { name: 'Example domain', exact: true }).click();
+  assert.equal(await page.locator('.page-detail-list li').first().innerText(), 'Example domain');
+  await page.getByRole('dialog').getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await page.getByRole('tab', { name: /^Unavailable/ }).click();
   await page.getByRole('heading', { name: 'No unavailable pages in this audit', exact: true }).waitFor();
   await page.getByRole('button', { name: 'Show all pages', exact: true }).click();
   for (const width of [1360, 390]) {
@@ -537,7 +542,12 @@ try {
     for (const view of ['Scans', 'Opportunities', 'Content']) {
       await navigate(page, view);
       if (view === 'Opportunities') await page.locator('.improvement-group > summary').getByText(finding.title, { exact: true }).waitFor();
-      if (view === 'Scans') await page.getByText('Synthetic heading check', { exact: true }).waitFor();
+      if (view === 'Scans') {
+        await page.getByRole('button', { name: 'Example domain', exact: true }).click();
+        await page.getByText('Synthetic heading check', { exact: true }).waitFor();
+        await page.screenshot({ path: join(output, `page-details-${width}.png`) });
+        await page.getByRole('dialog').getByRole('button', { name: 'Close dialog', exact: true }).click();
+      }
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `${view} populated at ${width}px`);
       await page.screenshot({ path: join(output, `${view.toLowerCase()}-loaded-${width}.png`) });
     }
@@ -549,7 +559,7 @@ try {
     await page.setViewportSize({ width, height: 900 });
     await page.getByRole('button', { name: width === 1360 ? 'Website' : 'Mobile website', exact: true }).click();
     await page.getByRole('option', { name: /example.org/ }).click();
-    for (const view of ['Overview', 'Visibility', 'Campaigns', 'Responses', 'Sources', 'Competitors', 'Scans', 'Opportunities', 'Content', 'Reports']) {
+    for (const view of ['Overview', 'Visibility', 'Topics', 'Responses', 'Sources', 'Competitors', 'Scans', 'Opportunities', 'Content', 'Reports']) {
       await navigate(page, view);
       await page.getByRole('heading', { name: view, exact: true }).waitFor();
       await page.locator('.workspace-loading').waitFor({ state: 'hidden' });
@@ -564,10 +574,10 @@ try {
       viewportChecks: 39,
       populatedViewportChecks: 6,
       emptyViewportChecks: 20,
-      campaignViewportChecks: 30,
+      topicViewportChecks: 30,
       settingsTabChecks: 9,
       tests:
-        "all thirteen screens, campaign list, tabs, lens and grouped prompts, populated audit/opportunities/content, optional measurement details, outcome filters, comparison settings preservation, gaps, zero values, deduplication, source grouping/search/drill-down, question drill-down, keyboard answer drawer/chart, editable questions, empty history and unsaved-draft persistence",
+        "all thirteen screens, topic list, tabs, lens and grouped prompts, populated audit/opportunities/content, optional measurement details, outcome filters, comparison settings preservation, gaps, zero values, deduplication, source grouping/search/drill-down, question drill-down, keyboard answer drawer/chart, editable questions, empty history and unsaved-draft persistence",
       providerRequests: 0,
       rendererErrors: failures.length,
     }),

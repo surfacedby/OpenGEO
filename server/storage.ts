@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { ProviderError, contentTask } from "./contracts.js";
+import { topicNames } from "./topic-migration.js";
+import { completedBrandMeasurement, completedMeasurement, analysisInProgress } from './portable-results.js';
 import type {
   Project,
   ProjectInput,
@@ -10,6 +12,7 @@ import type {
   JobInput,
   Observation,
   PageEvidence,
+  PageSummary,
   Finding,
 } from "./contracts.js";
 export class Store {
@@ -28,32 +31,60 @@ export class Store {
  CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),status TEXT NOT NULL,body TEXT NOT NULL,idempotency TEXT UNIQUE);
  CREATE TABLE IF NOT EXISTS artifacts(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),job_id TEXT NOT NULL REFERENCES jobs(id),kind TEXT NOT NULL,body TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS artifacts_project ON artifacts(project_id,kind);
+ CREATE INDEX IF NOT EXISTS artifacts_project_job ON artifacts(project_id,kind,job_id);
  CREATE TABLE IF NOT EXISTS steps(job_id TEXT NOT NULL REFERENCES jobs(id),step TEXT NOT NULL,state TEXT NOT NULL,body TEXT,PRIMARY KEY(job_id,step));
  CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,body TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS crawl_cooldowns(host TEXT PRIMARY KEY,retry_at REAL NOT NULL);
  INSERT OR IGNORE INTO migrations VALUES(1);`);
     this.db.exec(`CREATE TABLE IF NOT EXISTS content_recovery(content_id TEXT PRIMARY KEY REFERENCES artifacts(id),project_id TEXT NOT NULL REFERENCES projects(id),session TEXT NOT NULL,sequence INTEGER NOT NULL,body TEXT);
  INSERT OR IGNORE INTO migrations VALUES(2);`);
+    // Rename only known scope fields, atomically; answer text and other user data stay untouched.
+    try {
+    if (!this.db.prepare('SELECT version FROM migrations WHERE version=3').get()) this.db.transaction(() => {
+      for (const table of ['projects', 'jobs'] as const) {
+        for (const row of this.db.prepare(`SELECT id, body FROM ${table}`).all() as { id: string; body: string }[]) {
+          const body = JSON.stringify(topicNames(JSON.parse(row.body), table === 'projects'));
+          if (body !== row.body) this.db.prepare(`UPDATE ${table} SET body=? WHERE id=?`).run(body, row.id);
+        }
+      }
+      for (const row of this.db.prepare("SELECT job_id, body FROM steps WHERE step='project' AND body IS NOT NULL").all() as { job_id: string; body: string }[]) {
+        const body = JSON.stringify(topicNames(JSON.parse(row.body), true));
+        if (body !== row.body) this.db.prepare("UPDATE steps SET body=? WHERE job_id=? AND step='project'").run(body, row.job_id);
+      }
+      const schedules = this.setting<any[]>('schedules', []);
+      this.set('schedules', schedules.map(row => ({ ...row, job: topicNames(row.job) })));
+      for (const row of this.db.prepare("SELECT key, body FROM settings WHERE key GLOB 'scheduleRequest:*'").all() as { key: string; body: string }[]) {
+        const receipt = JSON.parse(row.body);
+        if (receipt.input?.job) this.set(row.key, { ...receipt, input: { ...receipt.input, job: topicNames(receipt.input.job) } });
+      }
+      this.db.prepare('INSERT INTO migrations VALUES(3)').run();
+    })();
+    } catch (error) {
+      // A refused migration must release the file so the original backup can be inspected or restored.
+      this.db.close();
+      throw error;
+    }
     // An interrupted provider call must be reconciled by a human, never replayed as a fresh paid request.
     for (const job of this.jobs().filter((j) => j.status === "running"))
       this.updateJob(job.id, {
-        status: "paused",
-        error: "interrupted",
-        progress: "Interrupted. Review completed evidence before resuming.",
+        status: job.kind === 'audit' && job.background ? 'queued' : 'paused',
+        error: job.kind === 'audit' && job.background ? null : 'interrupted',
+        progress: job.kind === 'audit' && job.background ? 'Continuing your saved website check' : 'Interrupted. Review completed evidence before resuming.',
       });
   }
   projects(): Project[] {
     return this.db
       .prepare("SELECT body FROM projects ORDER BY rowid DESC")
       .all()
-      .map((r: any) => ({ campaigns: [], ...JSON.parse(r.body) }));
+      .map((r: any) => ({ topics: [], ...JSON.parse(r.body) }));
   }
-  /** Projects saved before campaigns existed read as having none. */
+  /** Projects saved before topics existed read as having none. */
   project(id: string): Project {
     const r = this.db
       .prepare("SELECT body FROM projects WHERE id=?")
       .get(id) as any;
     if (!r) throw new Error("Project not found");
-    return { campaigns: [], ...JSON.parse(r.body) };
+    return { topics: [], ...JSON.parse(r.body) };
   }
   createProject(input: ProjectInput) {
     const p = {
@@ -146,8 +177,19 @@ export class Store {
         return old;
       }
       this.project(input.projectId);
-      if (input.kind === 'diagnose' && this.jobs(input.projectId).some(job => job.kind === 'diagnose' && ['queued', 'running'].includes(job.status)))
+      if (input.kind === 'audit' && input.background && this.jobs(input.projectId).some(job =>
+        job.kind === 'audit' && job.background && ['queued', 'running', 'paused'].includes(job.status)))
+        throw new ProviderError('in_progress', 'Website discovery is already saved for this brand. Follow or resume it in Scans.');
+      if (['measure', 'recheck'].includes(input.kind) && this.jobs(input.projectId).some(job =>
+        ['measure', 'recheck'].includes(job.kind) && job.provider === input.provider &&
+        job.topicId === input.topicId && ['queued', 'running', 'paused'].includes(job.status) && (!completedMeasurement(job) || job.prepareRecommendations)))
+        throw new ProviderError('in_progress', 'This visibility check is already in progress. Open the current check to follow or resume it.');
+      if (input.kind === 'diagnose' && this.jobs(input.projectId).some(job => analysisInProgress(job) && ['queued', 'running'].includes(job.status)))
         throw new ProviderError('in_progress', 'An improvement plan is already being prepared. Follow its progress in Opportunities.');
+      const analysisMeasurement = input.kind === 'diagnose' ? input.measurementJobId
+        ? this.job(input.measurementJobId) : this.jobs(input.projectId).find(completedBrandMeasurement) : undefined;
+      if (analysisMeasurement && (analysisMeasurement.projectId !== input.projectId || !completedMeasurement(analysisMeasurement)))
+        throw new ProviderError('evidence', 'Choose a completed visibility check for this brand.');
       if (input.kind === 'competitors' && this.jobs(input.projectId).some(job => job.kind === 'competitors' && job.measurementJobId === input.measurementJobId && ['queued', 'running', 'paused'].includes(job.status)))
         throw new ProviderError('in_progress', 'A competitor review is already saved for this check. Resume it or follow its progress.');
       if (input.kind === 'revise' && !this.artifacts<any>(input.projectId, 'content').some((doc) => doc.id === input.contentId))
@@ -164,6 +206,7 @@ export class Store {
       const now = new Date().toISOString();
       const j: Job = {
         ...input,
+        ...(analysisMeasurement ? { measurementJobId: analysisMeasurement.id } : {}),
         id: randomUUID(),
         status: "queued",
         createdAt: now,
@@ -222,6 +265,39 @@ export class Store {
   }
   pages(id: string, jobId?: string) {
     return this.artifacts<PageEvidence>(id, "page", jobId);
+  }
+  /** Polling reads metadata directly; large crawl bodies stay out of the JavaScript object graph. */
+  pageSummaries(projectId: string, jobId: string): PageSummary[] {
+    return this.db.prepare("SELECT json_remove(body, '$.text', '$.links') AS body FROM artifacts WHERE project_id=? AND job_id=? AND kind='page' ORDER BY rowid DESC")
+      .all(projectId, jobId).map((row: any) => JSON.parse(row.body));
+  }
+  pageCount(projectId: string, jobId: string): number {
+    return (this.db.prepare("SELECT COUNT(*) AS count FROM artifacts WHERE project_id=? AND job_id=? AND kind='page'").get(projectId, jobId) as { count: number }).count;
+  }
+  /** Older saved crawls may need findings backfilled; read bodies only for those pages. */
+  unauditedPageIds(projectId: string, jobId: string): string[] {
+    return (this.db.prepare("SELECT a.id FROM artifacts a WHERE a.project_id=? AND a.job_id=? AND a.kind='page' AND NOT EXISTS (SELECT 1 FROM steps s WHERE s.job_id=a.job_id AND s.step='audit-page:' || a.id) ORDER BY a.rowid")
+      .all(projectId, jobId) as { id: string }[]).map(row => row.id);
+  }
+  findingCount(projectId: string, jobId: string): number {
+    return (this.db.prepare("SELECT COUNT(*) AS count FROM artifacts WHERE project_id=? AND job_id=? AND kind='finding'").get(projectId, jobId) as { count: number }).count;
+  }
+  pageEvidence(projectId: string, id: string): PageEvidence | undefined {
+    const row = this.db.prepare("SELECT body FROM artifacts WHERE project_id=? AND id=? AND kind='page'").get(projectId, id) as { body: string } | undefined;
+    return row ? JSON.parse(row.body) : undefined;
+  }
+  evidenceRecords(projectId: string, ids: string[]) {
+    const result = { pages: [] as PageEvidence[], sources: [] as { id: string }[], observations: [] as Observation[] };
+    if (!ids.length) return result;
+    const rows = this.db.prepare("SELECT kind,body FROM artifacts WHERE project_id=? AND id IN (SELECT value FROM json_each(?)) AND kind IN ('page','source','observation') ORDER BY rowid DESC")
+      .all(projectId, JSON.stringify([...new Set(ids)])) as { kind: string; body: string }[];
+    for (const row of rows) {
+      const body = JSON.parse(row.body);
+      if (row.kind === 'page') result.pages.push(body);
+      else if (row.kind === 'source') result.sources.push(body);
+      else result.observations.push(body);
+    }
+    return result;
   }
   portableArtifacts<T = Record<string, unknown>>(projectId: string, kind: "page" | "source" | "content"): (T & { jobId: string })[] {
     return this.db.prepare("SELECT body,job_id FROM artifacts WHERE project_id=? AND kind=? ORDER BY rowid DESC")
@@ -314,6 +390,14 @@ export class Store {
       else this.db.prepare("UPDATE content_recovery SET session=? WHERE content_id=? AND project_id=?").run(randomUUID(), id, projectId);
     })();
     return doc;
+  }
+  crawlRetryAt(host: string): number | undefined {
+    const row = this.db.prepare('SELECT retry_at FROM crawl_cooldowns WHERE host=? AND retry_at>?').get(host, Date.now()) as { retry_at: number } | undefined;
+    return row?.retry_at;
+  }
+  deferCrawlHost(host: string, retryAt: number) {
+    this.db.prepare('DELETE FROM crawl_cooldowns WHERE retry_at<=?').run(Date.now());
+    this.db.prepare('INSERT INTO crawl_cooldowns(host,retry_at) VALUES(?,?) ON CONFLICT(host) DO UPDATE SET retry_at=MAX(retry_at,excluded.retry_at)').run(host, retryAt);
   }
   setting<T>(key: string, fallback: T): T {
     const r = this.db

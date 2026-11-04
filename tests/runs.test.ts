@@ -42,6 +42,16 @@ test("failures resolve per piece of work, can be dismissed, and setup-only or an
   assert.deepEqual(runsNeedingAttention([answered]), [], "a check with every answer saved is a result, not a failure");
 });
 
+test('failed automatic follow-up remains visible even though its answers are available', () => {
+  const id = '1d08d14a-1571-41c6-a681-f55bd648c21f';
+  const failed = { ...run(id, 'measure', 'failed', '2026-10-01T09:00:00Z'), prepareRecommendations: true,
+    result: { comparisonKey: 'a'.repeat(64), collectionCompletedAt: '2026-10-01T09:00:00Z',
+      metrics: { requested: 1, completed: 1, missing: 0, mentionRate: 100, citationRate: 0, citations: 0 } } } as Job;
+  assert.deepEqual(runsNeedingAttention([failed]).map(job => job.id), [id]);
+  const recovery = { ...run('analysis', 'diagnose', 'completed', '2026-10-02T09:00:00Z'), measurementJobId: id } as Job;
+  assert.deepEqual(runsNeedingAttention([recovery, failed]), []);
+});
+
 test("only a run that did not finish can be dismissed", () => {
   const directory = mkdtempSync(join(tmpdir(), "opengeo-dismiss-"));
   const store = new Store(directory);

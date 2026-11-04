@@ -217,6 +217,59 @@ test("competitor analysis checkpoints bounded batches and does not replay saved 
   } finally { globalThis.fetch = original; await f.close(); }
 });
 
+test('competitor review keeps the end of a long answer and later citations in its durable input', async () => {
+  const f = fixture(), original = globalThis.fetch;
+  const answer = 'Context about customer support. '.repeat(700) + 'Alternative is the comparable support workspace.';
+  const citations = ['one', 'two', 'three', 'four', 'alternative'].map(name => ({ type: 'url_citation', url: 'https://' + name + '.example/guide' }));
+  let measurements = 0, reviews = 0;
+  globalThis.fetch = (async (url, init) => {
+    if (String(url).endsWith('/models')) return json({ models: [{ slug: 'fixture-model', display_name: 'Fixture model', visibility: 'list', context_window: 65536 }] });
+    const request = JSON.parse(init!.body as string);
+    if (request.tools) { measurements++; return stream(answer, citations); }
+    const input = JSON.parse(request.input[0].content);
+    reviews++;
+    assert.equal(input.answers[0].text, answer);
+    assert.equal(input.answers[0].citations.length, 5);
+    assert.equal(input.answers[0].citations[4].url, 'https://alternative.example/guide');
+    return stream(JSON.stringify({ competitors: [{ name: 'Alternative', domain: 'alternative.example', role: 'competitor', observationIds: [input.answers[0].id] }] }));
+  }) as typeof fetch;
+  try {
+    const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'measure', provider: 'chatgpt', discoverCompetitors: true }), 'full-answer-competitors');
+    await f.runner.tick();
+    const finished = f.store.job(job.id);
+    assert.equal(finished.status, 'completed', finished.progress);
+    assert.deepEqual((finished.result as any).competitors.map((site: any) => site.domain), ['alternative.example']);
+    assert.equal(JSON.parse(f.store.step(job.id, 'competitor-batches')!.body!)[0][0].text, answer);
+    await f.runner.execute(finished, f.project, new AbortController().signal);
+    assert.equal(measurements, 1);
+    assert.equal(reviews, 1);
+  } finally { globalThis.fetch = original; await f.close(); }
+});
+
+test('new competitor review saves supported destination categories without extra provider calls', async () => {
+  const f = fixture(), original = globalThis.fetch;
+  let reviews = 0;
+  const answer = 'Alternative is a software product for customer questions.';
+  globalThis.fetch = (async (url, init) => {
+    if (String(url).endsWith('/models')) return json({ models: [{ slug: 'fixture-model', display_name: 'Fixture', visibility: 'list', context_window: 32768 }] });
+    const request = JSON.parse(init!.body as string);
+    if (request.tools) return stream(answer, [{ type: 'url_citation', url: 'https://alternative.example/', title: 'Alternative' }]);
+    const input = JSON.parse(request.input[0].content);
+    reviews++;
+    return stream(JSON.stringify({ competitors: [{ name: 'Alternative', domain: 'alternative.example', role: 'competitor', observationIds: [input.answers[0].id], category: 'product', categoryEvidence: { observationId: input.answers[0].id, source: 'answer', quote: answer } }] }));
+  }) as typeof fetch;
+  try {
+    const job = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'measure', provider: 'chatgpt', discoverCompetitors: true }), 'categorized-review');
+    await f.runner.tick();
+    const completed = f.store.job(job.id);
+    assert.equal(completed.status, 'completed', completed.progress);
+    assert.equal((completed.result as any).competitors[0].category, 'product');
+    assert.equal((completed.result as any).competitors[0].categoryEvidence.quote, answer);
+    await f.runner.execute(completed, f.project, new AbortController().signal);
+    assert.equal(reviews, 1);
+  } finally { globalThis.fetch = original; await f.close(); }
+});
+
 test("competitor evidence permits a cited alternative regardless of website category", async () => {
   const f = fixture(), original = globalThis.fetch;
   const question = "Where can I host a discussion group for my customers?";
@@ -312,6 +365,7 @@ test("setup records preserve row selections, deduplicate requests, snapshot inpu
     assert.equal((await app.inject({ method: "PUT", url: "/api/onboarding/draft", headers, payload: { ...draft, projectId: other.id, discoveryJobId: first.id } })).statusCode, 409);
     const check = (await app.inject({ method: "POST", url: "/api/onboarding/check", headers, payload: { projectId: f.project.id } })).json();
     assert.equal(check.provider, "chatgpt"); assert.equal(check.maxCostUsd, 0); assert.equal(check.discoverCompetitors, true);
+    assert.equal(check.prepareRecommendations, true);
     assert.equal((await app.inject({ method: "POST", url: "/api/onboarding/check", headers, payload: { projectId: f.project.id } })).json().id, check.id);
     f.store.updateProject(f.project.id, { ...f.store.project(f.project.id), domain: "changed.example" });
     const changed = (await app.inject({ method: "POST", url: "/api/onboarding/check", headers, payload: { projectId: f.project.id } })).json();
@@ -425,6 +479,29 @@ test("a business cited on several of its own hosts is offered once under its par
   assert.equal(sites[0].role, "both");
   assert.equal(sites[0].reason, "Offers API monitoring.", "a reference cannot erase the competing explanation");
   assert.deepEqual(new Set(sites[0].observationIds), new Set(["a1", "a2", "a3"]));
+});
+
+test('destination categories require evidence from their own cited answer and conflicts remain unclassified', () => {
+  const observations = [{ id: 'a1', answer: 'Alternative is a software product. Forum hosts member discussions.', citations: [
+    { url: 'https://alternative.example/', title: 'Alternative software' },
+    { url: 'https://forum.example/', title: 'Forum community discussions' },
+  ] }] as Observation[];
+  const base = { name: 'Alternative', domain: 'alternative.example', role: 'competitor' as const, observationIds: ['a1'] };
+  const proof = { observationId: 'a1', source: 'answer' as const, quote: 'Alternative is a software product.' };
+  assert.equal(confirmedWebsites({ domain: 'example.com' }, observations, [{ ...base, category: 'product', categoryEvidence: proof }])[0].category, 'product');
+  for (const categoryEvidence of [
+    { ...proof, observationId: 'missing' }, { ...proof, quote: 'Invented description' },
+    { ...proof, source: 'citation' as const, url: 'https://forum.example/', quote: 'Forum community discussions' },
+  ]) assert.equal(confirmedWebsites({ domain: 'example.com' }, observations, [{ ...base, category: 'product', categoryEvidence }])[0].category, undefined);
+  const contradictory = confirmedWebsites({ domain: 'example.com' }, observations, [
+    { ...base, category: 'product', categoryEvidence: proof },
+    { ...base, category: 'organization', categoryEvidence: proof },
+  ])[0];
+  assert.equal(contradictory.category, undefined);
+  assert.equal(contradictory.categoryEvidence, undefined);
+  const reference = confirmedWebsites({ domain: 'example.com' }, observations, [{ name: 'Forum', domain: 'forum.example', role: 'reference', observationIds: ['a1'], category: 'community', categoryEvidence: { observationId: 'a1', source: 'citation', url: 'https://forum.example/', quote: 'Forum community discussions' } }])[0];
+  assert.equal(reference.category, 'community');
+  assert.equal(reference.role, 'reference');
 });
 
 test("typographic name variants retain cited roles without accepting unnamed or uncited businesses", () => {

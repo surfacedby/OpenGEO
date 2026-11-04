@@ -30,7 +30,7 @@ test('brand journey separates prompts and results, saves edits and confirms dele
     await page.getByRole('tab', { name: /Tracked prompts/ }).click();
     await page.getByRole('button', { name: 'Add a question', exact: true }).click();
     await page.getByRole('textbox', { name: 'Question 1', exact: true }).fill('What does Example Domain offer?');
-    await page.getByRole('tab', { name: 'Suggested for you', exact: true }).click();
+    await page.getByRole('tab', { name: 'Suggested by AI', exact: true }).click();
     await expect(page.getByText('Save or cancel your prompt changes before switching tabs.')).toBeVisible();
     await expect(page.getByRole('textbox', { name: 'Question 1', exact: true })).toHaveText('What does Example Domain offer?');
     await page.getByRole('button', { name: 'Save prompts', exact: true }).click();

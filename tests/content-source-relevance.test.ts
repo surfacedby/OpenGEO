@@ -1,7 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parsePage } from '../server/audit.js';
-import { contentSources } from '../server/evidence-context.js';
+import { contentSources, evidenceBatches } from '../server/evidence-context.js';
+
+test('evidence batches retain whole Unicode records at exact serialized boundaries', () => {
+  const records = [{ text: 'é中文🙂\n"quoted"' }, { text: 'Second complete answer' }, { text: 'è中文🙂\n"quoted"' }];
+  const limit = Buffer.byteLength(JSON.stringify(records.slice(0, 2)), 'utf8');
+  assert.deepEqual(evidenceBatches(records, limit), [records.slice(0, 2), records.slice(2)]);
+  assert.deepEqual(evidenceBatches(records, limit - 1), records.map(record => [record]));
+  assert.throws(() => evidenceBatches(records, 2), /more room/);
+  assert.deepEqual(evidenceBatches([], 2), []);
+});
+
+test('large evidence lists preserve every record once within the byte ceiling', () => {
+  const records = Array.from({ length: 20000 }, (_, id) => ({ id, text: 'Saved answer ' + id + ' 中文' }));
+  const batches = evidenceBatches(records, 65000);
+  assert.deepEqual(batches.flat(), records);
+  for (const batch of batches) assert.ok(Buffer.byteLength(JSON.stringify(batch), 'utf8') <= 65000);
+});
 
 const page = (path: string, title: string, text: string) => parsePage('https://example.com/' + path, 200,
   '<title>' + title + '</title><h1>' + title + '</h1><p>' + text + '</p>');

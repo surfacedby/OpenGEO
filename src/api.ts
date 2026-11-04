@@ -6,7 +6,7 @@ let sessionGeneration = 0;
 let sessionRefresh: Promise<void> | undefined;
 function refreshSession(): Promise<void> {
   if (!sessionRefresh) {
-    sessionRefresh = fetch("/api/session", { credentials: "same-origin" }).then(response => {
+    sessionRefresh = fetch("/api/session", { credentials: "same-origin", signal: AbortSignal.timeout(15000) }).then(response => {
       if (response.status === 401) throw new RequestError("Your workspace is locked. Open /login in another tab, sign in, then retry. Your unsaved work stays in this tab.");
       if (!response.ok) throw new Error("Local session could not be renewed");
       sessionGeneration++;
@@ -29,6 +29,7 @@ export async function api<T = any>(
   const generation = sessionGeneration;
   const options: RequestInit = {
     method,
+    ...(method === "GET" ? { signal: AbortSignal.timeout(15000) } : {}),
     credentials: "same-origin",
     headers: {
       ...(body !== undefined ? { "Content-Type": "application/json" } : {}),

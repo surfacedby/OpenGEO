@@ -33,9 +33,9 @@ Put the main action in `PageHeader`. Do not repeat the page introduction in a bo
 | Area | Pattern |
 | --- | --- |
 | Overview | Evidence summary, citation coverage, comparable history and next action |
-| Prompts | Tracked questions, grounded suggestions, prompt editing and grouping by campaign |
-| Campaigns | Questions grouped toward one goal, each with results, target pages, competitors and the checks that read it |
-| Visibility | Trends, readable chart data, question coverage grouped by campaign and check history |
+| Prompts | Tracked questions, grounded suggestions, prompt editing and grouping by topic |
+| Topics | Questions grouped toward one goal, each with results, target pages, competitors and the checks that read it |
+| Visibility | Trends, readable chart data, question coverage grouped by topic and check history |
 | Responses | Search and mutually exclusive outcome filters, then a full-answer drawer |
 | Sources | Domain/page views with citation counts and supporting answers |
 | Competitors | Saved comparison websites, citation comparison and supporting evidence |
@@ -49,12 +49,14 @@ Put the main action in `PageHeader`. Do not repeat the page introduction in a bo
 
 ## Evidence and scope
 
+Answer drawers use full-width Answer, Sources and Searches tabs. Opening an answer starts on its complete saved text; citations and provider-reported queries have their own readable panels. Missing queries stay unavailable. Long response lists and page groups share the Pagination primitive, keeping filter totals separate from the visible page. Filtering a response list returns to its first page.
+
 The overview summary and response filters use existing saved observations. They do not request new answers or spend provider credits. Missing data stays missing; an empty history is not a zero score. Deltas use the server's comparable measurement. Charts mark incomplete checks with shaded gaps and retain an accessible data table.
 
 Traffic attribution, market-wide rankings, outreach and sentiment scores require additional collection or analysis. Do not add placeholder versions of these features to fill a layout. Existing audits, answers, citations, findings and drafts supply the visuals.
 
 ## Local verification
 
-Build before browser checks. `scripts/analytics-ui-review.ts` covers all thirteen screens at desktop, tablet and mobile widths, each campaign tab, the campaign selector over Visibility, Responses, Sources and Competitors, and grouped prompts, then checks header clipping, chart labels, evidence navigation, filters, answer drawers and saved draft navigation. `scripts/workflow-ui-review.ts` checks task dialogs, dropdowns, keyboard isolation, submission safety and a check limited to one campaign. Connection and recheck review scripts cover provider availability and retained run settings.
+Build before browser checks. `scripts/analytics-ui-review.ts` covers all thirteen screens at desktop, tablet and mobile widths, each topic tab, the topic selector over Visibility, Responses, Sources and Competitors, and grouped prompts, then checks header clipping, chart labels, evidence navigation, filters, answer drawers and saved draft navigation. `scripts/workflow-ui-review.ts` checks task dialogs, dropdowns, keyboard isolation, submission safety and a check limited to one topic. Connection and recheck review scripts cover provider availability and retained run settings.
 
 These scripts use isolated local test records and keep paid work stopped. Their labelled screenshots are regression evidence, not public product claims. Public screenshots follow `SCREENSHOT_PROFILE.md`.

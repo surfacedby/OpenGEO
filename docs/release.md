@@ -8,7 +8,7 @@ Public v1 requires the complete workflow, working desktop/Docker distributions, 
 
 ## GitHub beta scope
 
-Version 0.1.0-beta.4 targets an unsigned Windows x64 installer and ad hoc signed, unnotarized Mac arm64/x64 DMGs. Source and locally built Docker installation are available separately. Microsoft Store and Mac App Store enrollment are deferred.
+Version 0.1.0-beta.5 targets an unsigned Windows x64 installer and ad hoc signed, unnotarized Mac arm64/x64 DMGs. Source and locally built Docker installation are available separately. Microsoft Store and Mac App Store enrollment are deferred.
 
 Only attach binaries whose exact payload passed confidentiality review and whose actual installation and local workflow were exercised. State the tested host and limitations: an isolated maintainer profile or native hosted runner is not a clean-machine certification. Do not attach untested platforms merely because source tests passed there.
 
@@ -84,7 +84,7 @@ requires an exact full commit on `master` and a private draft release targeting
 that commit. Draft review assets must never be published.
 
 1. **Prepare:** build on Windows x64 and both native Mac architectures; install
-   beta.1 in an isolated profile, update it, verify the project, audit evidence,
+   beta.4 in an isolated profile, update it, verify the project, audit evidence,
    disabled usage sharing and OS-encrypted storage survive, then exercise a fresh
    installation. Verify the Mac resource seal and retain complete payload
    inventories. Also build and operate Docker on Linux amd64 and arm64. Upload

@@ -25,12 +25,12 @@ files = list(build.glob('*' + suffix))
 assert len(files) == 1
 shutil.copyfile(files[0], candidate)
 old_hash = {
-    'windows-x64': 'd85052f027ce2d2e23eba7609d45f078043e8fff1d607ccf926e81118b7b7b9c',
-    'macos-arm64': '23485758370a09d9f39ced43db34f7511a49c453703a23f9eb31e0045f903ae8',
-    'macos-x64': '2b42948aa1de52745464a4fe52e71b12021e0bc388e3175ce97f76c9f20863a2',
+    'windows-x64': '89942580cf267f30dfdb397a770275b33b36baf598cd175e7375d8e35f54ede8',
+    'macos-arm64': 'c6f5c2c6cfa1c17d7aa705c96c1b817f36fa2c1b1b177afaeb9fe5234380dcb8',
+    'macos-x64': 'aebe7bb9c0e8a80a6953240289865b33eb1e6c010c3a67cd3d0ee3fa4ff38072',
 }[target]
 previous = out / ('previous' + suffix)
-download_public('https://github.com/surfacedby/OpenGEO/releases/download/v0.1.0-beta.1/OpenGEO-0.1.0-beta.1-' + target + suffix, previous, old_hash)
+download_public('https://github.com/surfacedby/OpenGEO/releases/download/v0.1.0-beta.4/OpenGEO-0.1.0-beta.4-' + target + suffix, previous, old_hash)
 profile = out / 'upgrade-profile'
 profile.mkdir()
 receipt = out / 'upgrade-workspace.json'

@@ -1,9 +1,13 @@
-import { useId, type ReactNode } from 'react';
-import { ChartColumn, Check, FileText, Lightbulb, Link, MessagesSquare, Minus, ScanSearch, Search, TrendingDown, TrendingUp, type LucideIcon } from 'lucide-react';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
+import { ChartColumn, Check, ChevronDown, ChevronLeft, ChevronRight, FileText, Lightbulb, Link, MessagesSquare, Minus, ScanSearch, Search, TrendingDown, TrendingUp, type LucideIcon } from 'lucide-react';
 import { pointChange, shortDate } from '../format';
 
 export function PageHeader({ title, description, icon: Icon, children }: { title: string; description: string; icon: LucideIcon; children?: ReactNode }) {
   return <div className="page-heading"><div className="page-heading-copy"><span className="page-icon"><Icon size={22} aria-hidden="true" /></span><div><h1>{title}</h1><p>{description}</p></div></div>{children}</div>;
+}
+
+export function Disclosure({ label, children, onOpenChange }: { label: string; children: ReactNode; onOpenChange?: (open: boolean) => void }) {
+  return <details className="disclosure" onToggle={event => { if (event.target === event.currentTarget) onOpenChange?.(event.currentTarget.open); }}><summary>{label}<ChevronDown size={16} aria-hidden="true" /></summary><div className="disclosure-content">{children}</div></details>;
 }
 
 export function EmptyState({ title, children, icon: Icon = Search, action }: { title: string; children: ReactNode; icon?: LucideIcon; action?: ReactNode }) {
@@ -22,13 +26,31 @@ export function Toolbar({ children, actions }: { children?: ReactNode; actions?:
   return <div className="content-toolbar"><div className="toolbar-main">{children}</div>{actions && <div className="toolbar-actions">{actions}</div>}</div>;
 }
 
+export function Pagination({ page, total, pageSize, label, unit, onChange }: { page: number; total: number; pageSize: number; label: string; unit: string; onChange: (page: number) => void }) {
+  if (total <= pageSize) return null;
+  const current = Math.min(Math.max(0, page), Math.ceil(total / pageSize) - 1);
+  return <nav className="list-pagination" aria-label={label + ' pagination'}>
+    <span aria-live="polite">{current * pageSize + 1}-{Math.min((current + 1) * pageSize, total)} of {total} {unit}</span>
+    <button type="button" className="secondary compact" aria-label={'Previous ' + label + ' ' + unit} disabled={current === 0} onClick={() => onChange(current - 1)}><ChevronLeft size={15} />Previous</button>
+    <button type="button" className="secondary compact" aria-label={'Next ' + label + ' ' + unit} disabled={(current + 1) * pageSize >= total} onClick={() => onChange(current + 1)}>Next<ChevronRight size={15} /></button>
+  </nav>;
+}
+
 export function ActionCard({ title, description, icon: Icon, children }: { title: string; description: string; icon: LucideIcon; children: ReactNode }) {
   return <Section className="action-card"><Icon size={24} aria-hidden="true" /><h2>{title}</h2><p>{description}</p><div className="button-row">{children}</div></Section>;
 }
 
 export function Tabs<T extends string>({ label, value, items, onChange, panelId }: { label: string; value: T; items: { value: T; label: string; count?: number; icon?: LucideIcon }[]; onChange: (value: T) => void; panelId: string }) {
   const id = useId();
-  return <div className="section-tabs" role="tablist" aria-label={label}>{items.map((item, index) => {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const list = ref.current, active = list?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!list || !active) return;
+    const bounds = list.getBoundingClientRect(), selected = active.getBoundingClientRect();
+    if (selected.left < bounds.left) list.scrollLeft -= bounds.left - selected.left;
+    else if (selected.right > bounds.right) list.scrollLeft += selected.right - bounds.right;
+  }, [value]);
+  return <div ref={ref} className="section-tabs" role="tablist" aria-label={label}>{items.map((item, index) => {
     const Icon = item.icon;
     return <button key={item.value} id={id + '-' + index} type="button" role="tab" aria-controls={panelId} aria-selected={item.value === value} tabIndex={item.value === value ? 0 : -1} onClick={() => onChange(item.value)} onKeyDown={event => {
       if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return;

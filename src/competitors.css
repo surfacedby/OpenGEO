@@ -11,10 +11,10 @@
 .competitor-metrics > div:nth-child(3) svg { color: var(--teal); background: var(--teal-50); }
 .competitor-metrics strong { font-size: 22px; line-height: 1.2; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
 .competitor-metrics span { font-size: 12px; color: var(--muted); }
-.competitor-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); padding: var(--space-4) var(--panel-space); border-bottom: 1px solid var(--divider); }
-.competitor-toolbar .search { width: 220px; margin-left: auto; }
-.competitor-toolbar .segmented-control { flex-wrap: wrap; }
-.competitor-toolbar .secondary.compact, .competitor-ranking-row > .secondary.compact, .competitor-answer-detail .secondary.compact { min-height: 34px; padding: 6px 11px; }
+.competitor-toolbar { display: grid; grid-template-columns: minmax(180px, 1fr) repeat(2, minmax(150px, 180px)) auto; align-items: center; gap: var(--space-3); padding: var(--space-4) var(--panel-space); border-bottom: 1px solid var(--divider); }
+.competitor-toolbar .search { width: 100%; margin: 0; }
+.competitor-toolbar .segmented-control { grid-column: 1 / -1; justify-self: start; flex-wrap: wrap; }
+.competitor-toolbar .secondary.compact, .competitor-ranking-row > .secondary.compact { min-height: 34px; padding: 6px 11px; }
 .competitor-table-intro { padding: 12px 20px; border-bottom: 1px solid var(--divider); background: var(--surface-2); }
 .competitor-table-intro > p { max-width: 640px; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
 .competitor-ranking-head, .competitor-ranking-row { display: grid; grid-template-columns: minmax(190px, 1fr) minmax(180px, 1.5fr) 130px 34px; gap: 20px; padding: 12px 20px; align-items: center; border-top: 1px solid var(--divider); }
@@ -27,7 +27,8 @@
 .competitor-identity a { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; width: fit-content; }
 .competitor-identity a:hover { color: var(--primary-text); }
 .competitor-identity small { font-size: 11px; font-weight: 500; color: var(--violet); background: var(--violet-50); border-radius: 999px; padding: 0 7px; width: fit-content; margin-top: 3px; }
-.competitor-ranking-row > p { color: var(--text); font-size: 13px; line-height: 1.55; margin: 0; }
+.competitor-reason p { color: var(--text); font-size: 13px; line-height: 1.55; margin: 0; }
+.competitor-reason small { display: block; margin-bottom: var(--space-1); color: var(--muted); font-weight: 500; }
 .competitor-ranking-row > button { padding: 6px; min-width: 34px; }
 .competitor-rate { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 2px 8px; }
 .competitor-rate strong { color: var(--ink); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -39,19 +40,24 @@
 .competitor-discovery-heading .primary.compact { min-height: 32px; padding: 5px 12px; }
 .competitor-footnote, .competitor-progress { padding: 10px 20px; margin: 0; font-size: 12px; line-height: 1.55; color: var(--muted); border-top: 1px solid var(--divider); background: var(--surface-2); }
 .competitor-progress { border: 1px solid var(--warning-200); background: var(--warning-50); color: var(--warning); border-radius: var(--radius-md); }
-.competitor-answer-detail .compact-answer { padding: 16px 20px; }
-.competitor-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 16px 20px 20px; }
-.competitor-detail-grid h3 { font-size: 13px; font-weight: 600; margin: 0 0 8px; }
-.competitor-detail-grid a { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--divider); color: var(--text); font-size: 13px; line-height: 1.55; }
-.competitor-detail-grid a:hover { color: var(--primary-text); text-decoration: none; }
-.competitor-detail-grid a > span { display: grid; gap: 1px; }
-.competitor-detail-grid a > svg { flex: none; color: var(--faint); }
-.competitor-detail-grid small { display: block; font-size: 12px; line-height: 1.55; color: var(--muted); margin-top: 6px; }
-.competitor-detail-grid a small { margin: 0; }
-.competitor-full-answers { border-top: 1px solid var(--divider); }
-.competitor-full-answers > summary { display: flex; align-items: center; gap: 6px; padding: 12px 20px; color: var(--primary-text); cursor: pointer; font-size: 13px; font-weight: 500; list-style: none; }
-.competitor-full-answers > summary::-webkit-details-marker { display: none; }
-.competitor-full-answers > div { scroll-margin-top: 16px; }
+.competitor-profile { display: grid; gap: var(--space-5); }
+.competitor-versus { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-5); }
+.competitor-versus section { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-3); padding: var(--space-4); background: var(--surface-2); }
+.competitor-versus h3 { align-self: center; font-size: var(--text-body); overflow-wrap: anywhere; }
+.competitor-versus strong { grid-column: 1 / -1; font-size: 32px; font-weight: 600; }
+.competitor-versus p { grid-column: 1 / -1; color: var(--muted); font-size: var(--text-caption); }
+.competitor-profile-section { margin-top: var(--space-6); padding-top: var(--space-5); border-top: 1px solid var(--divider); }
+.competitor-profile-section h3 { font-size: var(--text-body); margin-bottom: var(--space-4); }
+.competitor-comparison-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
+.competitor-comparison-facts > * { display: grid; gap: var(--space-2); text-align: left; padding: var(--space-3) 0; border: 0; background: transparent; }
+.competitor-comparison-facts strong { font-size: 24px; font-weight: 600; }
+.competitor-comparison-facts span { color: var(--muted); font-size: var(--text-body); }
+.competitor-comparison-facts button:hover span { color: var(--primary-text); text-decoration: underline; }
+.competitor-prompt { padding: var(--space-4) 0; border-bottom: 1px solid var(--divider); }
+.competitor-prompt summary { cursor: pointer; line-height: 1.6; }
+.competitor-prompt summary small { display: block; color: var(--muted); }
+.competitor-prompt .compact-answer { margin-top: var(--space-4); }
+.competitor-profile .filter-chips { margin-bottom: var(--space-4); }
 .tracked-competitors { display: flex; flex-wrap: wrap; gap: 8px; padding: 16px 20px 4px; }
 .tracked-competitors > div { display: inline-flex; align-items: center; gap: 8px; padding: 4px 4px 4px 6px; border: 1px solid var(--border); border-radius: 999px; font-size: 13px; font-weight: 500; color: var(--ink); background: var(--surface-2); }
 .tracked-competitors > div .site-icon { border-radius: 50%; }
@@ -62,20 +68,21 @@
 .competitor-manage label { display: grid; gap: 6px; font-size: 13px; width: 300px; }
 .competitor-manage .save-notice { margin: 0 20px 16px; }
 @media (max-width: 1100px) {
+  .competitor-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .competitor-ranking-head, .competitor-ranking-row { grid-template-columns: minmax(160px, 1fr) minmax(140px, 1fr) 110px 34px; gap: 14px; }
   .competitor-summary { grid-template-columns: 1fr; gap: 14px; }
   .competitor-check { display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--divider); padding-top: 12px; }
   .competitor-check > .choice { width: 230px; }
 }
 @media (max-width: 760px) {
-  .competitor-detail-grid { grid-template-columns: 1fr; gap: 18px; padding: 14px; }
+  .competitor-toolbar { grid-template-columns: minmax(0, 1fr); }
   .competitor-toolbar .search { width: 100%; margin-left: 0; }
   .competitor-toolbar > .secondary { width: 100%; }
   .competitor-summary { padding: 14px; }
   .competitor-check > .choice { width: 190px; }
   .competitor-ranking-head { display: none; }
   .competitor-ranking-row { grid-template-columns: minmax(0, 1fr) 96px 34px; gap: 10px; padding: 12px 14px; }
-  .competitor-ranking-row > p { grid-column: 1 / -1; grid-row: 2; }
+  .competitor-reason { grid-column: 1 / -1; grid-row: 2; }
   .competitor-metrics { gap: 8px; }
   .competitor-metrics > div { grid-template-columns: 1fr; padding-right: 0; gap: 6px; }
   .competitor-metrics > div + div { padding-left: 10px; }

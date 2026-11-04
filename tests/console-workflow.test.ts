@@ -76,6 +76,8 @@ test("Console check totals and public citations survive project edits, dashboard
     await runtime.runner.tick();
     assert.equal(store.job(rejected.id).error, "estimate");
     assert.equal(submitted, 1);
+    await runtime.runner.cancel(rejected.id);
+    assert.equal(store.job(rejected.id).status, "cancelled");
     previewCount = 3; finalCount = 1;
     const inconsistent = enqueue("console-inconsistent-scope-check");
     await runtime.runner.tick();

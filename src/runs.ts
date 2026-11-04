@@ -3,6 +3,8 @@ import { completedMeasurement } from "../server/portable-results";
 
 /** The work a run produces. A later success on the same work resolves an earlier failure. */
 function target(job: Job) {
+  if (job.prepareRecommendations && completedMeasurement(job)) return 'analysis:' + job.id;
+  if (job.kind === 'diagnose' && job.measurementJobId) return 'analysis:' + job.measurementJobId;
   switch (job.kind) {
     case "measure":
     case "recheck":
@@ -30,7 +32,7 @@ export function runsNeedingAttention(jobs: Job[], kinds?: Job["kind"][]) {
     if (["queued", "running", "paused"].includes(job.status)) return true;
     if (job.status === "cancelled") return job.error === "cancel_remote";
     // A check whose answers were all saved is a usable result even if follow-up work failed.
-    if (job.status !== "failed" || job.dismissedAt || completedMeasurement(job)) return false;
+    if (job.status !== "failed" || job.dismissedAt || (completedMeasurement(job) && !job.prepareRecommendations)) return false;
     return !scoped.some((other) => target(other) === target(job) && other.status === "completed" && other.createdAt > job.createdAt);
   });
 }

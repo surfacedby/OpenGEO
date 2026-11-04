@@ -6,6 +6,7 @@ import { FormFeedback, useFormFeedback } from "./FormFeedback";
 import { ProviderIcon, providerOptions, providerLabels } from "./provider-ui";
 import { AnswerCard } from "./DataPresentation";
 import { SiteIcon } from "./SiteIcon";
+import { Disclosure } from "./ui/Primitives";
 import { targetDomain } from "./finding-groups";
 import { CalendarClock, Check, Plus, Trash2, Upload, Download } from "lucide-react";
 import identity from "../brand/identity.json";
@@ -15,14 +16,34 @@ import type { Model, Project, Provider } from "../server/contracts";
 import type { Observation, PageEvidence, ManagedSourceEvidence } from "../server/contracts";
 
 export function FindingEvidence({ projectId, findingId }: { projectId: string; findingId: string }) {
+  return <FindingEvidenceContent key={projectId + ":" + findingId} projectId={projectId} findingId={findingId} />;
+}
+
+function FindingEvidenceContent({ projectId, findingId }: { projectId: string; findingId: string }) {
   const [evidence, setEvidence] = useState<{ pages: PageEvidence[]; sources: ManagedSourceEvidence[]; observations: Observation[]; missing: number } | null>(null);
   const [error, setError] = useState("");
-  return <details onToggle={(event) => {
-    if (event.currentTarget.open && !evidence)
-      void api("/projects/" + projectId + "/findings/" + findingId + "/evidence").then(setEvidence).catch((e) => setError(e.message));
-  }}>
-    <summary>Inspect supporting evidence</summary>
-    {error && <p role="alert">{error}</p>}
+  const [loading, setLoading] = useState(false);
+  const pending = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  async function loadEvidence() {
+    if (pending.current || evidence) return;
+    pending.current = true;
+    setLoading(true);
+    setError("");
+    try {
+      const result = await api<NonNullable<typeof evidence>>("/projects/" + projectId + "/findings/" + findingId + "/evidence");
+      if (mounted.current) setEvidence(result);
+    } catch (cause) {
+      if (mounted.current) setError(cause instanceof Error ? cause.message : "Supporting evidence could not be loaded.");
+    } finally {
+      pending.current = false;
+      if (mounted.current) setLoading(false);
+    }
+  }
+  return <Disclosure label="Supporting evidence" onOpenChange={open => { if (open && !error) void loadEvidence(); }}>
+    {loading && <p role="status">Loading supporting pages and answers…</p>}
+    {error && <div><p role="alert">{error}</p><button className="secondary" onClick={() => void loadEvidence()}>Try again</button></div>}
     {evidence && <>
       {evidence.pages.map((page) => <article key={page.id}>
         <h3><a className="evidence-source-link" href={page.url} target="_blank" rel="noreferrer"><SiteIcon projectId={projectId} domain={targetDomain(page.url)!} size={24} /><span>{page.title || page.url}</span></a></h3>
@@ -38,7 +59,7 @@ export function FindingEvidence({ projectId, findingId }: { projectId: string; f
       {evidence.missing > 0 && <p>{evidence.missing} supporting records are unavailable on this installation.</p>}
       {!evidence.pages.length && !evidence.sources.length && !evidence.observations.length && !evidence.missing && <p>This domain-level interpretation has no linked answer records. Review its evidence period and explanation.</p>}
     </>}
-  </details>;
+  </Disclosure>;
 }
 
 export function BackupControls({

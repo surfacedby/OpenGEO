@@ -7,9 +7,11 @@
 .tracked-prompt-list { list-style:none; padding:0; margin:0; }
 .tracked-prompt-list li { display:flex; gap:var(--space-3); align-items:center; padding:20px 0; border-bottom:1px solid var(--divider); }
 .tracked-prompt-list li:last-child { border-bottom:0; padding-bottom:4px; }
-.tracked-prompt-list li > svg { flex-shrink:0; color:var(--muted); }
-.tracked-prompt-list li > span:first-of-type { flex:1; overflow-wrap:anywhere; }
-.prompt-ready { display:flex; gap:5px; align-items:center; font-size:var(--text-caption); color:var(--success); }
+.tracked-prompt-choice { display:flex; gap:var(--space-3); align-items:flex-start; flex:1; min-width:0; margin:0; cursor:pointer; font-weight:400; }
+.tracked-prompt-choice input[type=checkbox] { flex:none; width:16px; height:16px; margin-top:4px; }
+.tracked-prompt-choice span { overflow-wrap:anywhere; }
+.prompt-result { display:grid; justify-items:end; gap:var(--space-1); color:var(--muted); font-size:var(--text-caption); flex-shrink:0; }
+@media(max-width:760px) { .tracked-prompt-list li { flex-wrap:wrap; } .tracked-prompt-choice { flex-basis:100%; } .prompt-result { justify-items:start; margin-left:calc(16px + var(--space-3)); } }
 .prompt-suggestion { padding:var(--space-5) 0; border-bottom:1px solid var(--divider); }
 .prompt-suggestion label { display:flex; gap:var(--space-3); align-items:flex-start; margin:0; }
 .prompt-suggestion input[type=checkbox] { width:16px; flex-shrink:0; margin-top:3px; }
@@ -28,4 +30,4 @@
 .desktop-updates progress { width:100%; height:8px; accent-color:var(--primary); margin-bottom:var(--space-3); }
 .update-notice { margin:16px var(--page-space) 0; padding:16px 20px; border-left:3px solid var(--primary); background:var(--primary-50); }
 .update-notice p { margin-bottom:12px; }
-@media(max-width:760px) { .scan-options { grid-template-columns:1fr; gap:0; } .brand-delete-row { align-items:flex-start; flex-direction:column; } .prompt-ready { font-size:0; } .prompt-list-label span:last-child { visibility:hidden; } }
+@media(max-width:760px) { .scan-options { grid-template-columns:1fr; gap:0; } .brand-delete-row { align-items:flex-start; flex-direction:column; } .prompt-list-label span:last-child { visibility:hidden; } }
