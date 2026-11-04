@@ -800,8 +800,8 @@ function WorkflowRow({
     </button>
   );
 }
-const jobLabels: Record<Job["kind"], string> = { audit: "Website health", discover: "Question suggestions", competitors: "Competitor review", measure: "Visibility check", recheck: "Visibility recheck", diagnose: "Recommendations", content: "Content draft", revise: "Draft revision" };
-const jobIcons: Record<Job["kind"], typeof ScanSearch> = { audit: ScanSearch, discover: Sparkles, competitors: Users, measure: ChartNoAxesCombined, recheck: RefreshCw, diagnose: Lightbulb, content: FileText, revise: FilePenLine };
+const jobLabels: Record<Job["kind"], string> = { audit: "Website health", discover: "Question suggestions", competitors: "Competitor review", measure: "Visibility check", recheck: "Visibility recheck", diagnose: "Recommendations", content: "Content draft", revise: "Draft revision", ask: "Ask" };
+const jobIcons: Record<Job["kind"], typeof ScanSearch> = { audit: ScanSearch, discover: Sparkles, competitors: Users, measure: ChartNoAxesCombined, recheck: RefreshCw, diagnose: Lightbulb, content: FileText, revise: FilePenLine, ask: Search };
 /** A run's live status. A check with every answer saved is only finishing follow-up work. */
 function jobSummary(job: Job) {
   if (job.kind === 'audit' && ['queued', 'paused'].includes(job.status) && job.availableAt && Date.parse(job.availableAt) > Date.now())

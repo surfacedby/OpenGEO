@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { presence, comparisonKey, summarize } from "./analysis.js";
-import { ProviderError, type Job, type Project, type Observation } from "./contracts.js";
+import { ProviderError, answerKind, type Job, type Project, type Observation } from "./contracts.js";
 import { publicUrl } from "./network.js";
 import { managedJob, consoleManaged, managedStep, validateManagedResult } from "./console-managed.js";
 import type { Runner } from "./workflows.js";
@@ -38,7 +38,7 @@ function save(runner: Runner, job: Job, project: Project, input: Input, output: 
     comparisonKey: comparisonKey(project, job, observations), profile: "selected_questions", terminalStatus: output.job.status,
     collectionCompletedAt: observations.map(row => row.observedAt).sort().at(-1) };
   runner.store.db.transaction(() => {
-    for (const observation of observations) runner.store.put("observation", project.id, job.id, observation);
+    for (const observation of observations) runner.store.put(answerKind(job), project.id, job.id, observation);
     runner.store.updateJob(job.id, { requestedAnswers: input.questions.length, result });
     runner.store.setStep(job.id, "console-measurement-result", "done", result);
   })();

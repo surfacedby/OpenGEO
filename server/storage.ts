@@ -319,8 +319,28 @@ export class Store {
   observations(id: string, jobId?: string) {
     return this.artifacts<Observation>(id, "observation", jobId);
   }
-  answerCount(projectId: string, jobId: string) {
-    return (this.db.prepare("SELECT COUNT(*) AS count FROM artifacts WHERE project_id=? AND job_id=? AND kind='observation'").get(projectId, jobId) as { count: number }).count;
+  /** Answers of one job under its own kind: observations for checks, ask answers for asks. */
+  answers(projectId: string, jobId: string, kind: "observation" | "ask-answer") {
+    return this.artifacts<Observation>(projectId, kind, jobId);
+  }
+  answerCount(projectId: string, jobId: string, kind: "observation" | "ask-answer" = "observation") {
+    return (this.db.prepare("SELECT COUNT(*) AS count FROM artifacts WHERE project_id=? AND job_id=? AND kind=?").get(projectId, jobId, kind) as { count: number }).count;
+  }
+  /** An ask is removed whole: its engine runs, their receipts and their answers. Unfinished work keeps its receipts. */
+  deleteAsk(projectId: string, askId: string) {
+    return this.db.transaction(() => {
+      const jobs = this.jobs(projectId).filter(job => job.kind === "ask" && job.askId === askId);
+      if (!jobs.length) throw new Error("Ask not found");
+      if (jobs.some(job => ["queued", "running"].includes(job.status) ||
+          ["interrupted", "waiting", "cancel_remote", "cost_unknown", "invalid_response"].includes(job.error ?? "")))
+        throw new ProviderError("in_progress", "Wait for this ask to finish, or skip its engines, before deleting it.");
+      for (const job of jobs) {
+        this.db.prepare("DELETE FROM artifacts WHERE job_id=?").run(job.id);
+        this.db.prepare("DELETE FROM steps WHERE job_id=?").run(job.id);
+        this.db.prepare("DELETE FROM jobs WHERE id=?").run(job.id);
+      }
+      return { deleted: true };
+    })();
   }
   findings(id: string) {
     return this.artifacts<Finding>(id, "finding");

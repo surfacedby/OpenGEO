@@ -10,6 +10,7 @@ import { pageSearchExclusion } from './page-classification.js';
 import { scheduledBudgetCeiling } from "./scheduler.js";
 import { completedBrandMeasurement, completedMeasurement } from "./portable-results.js";
 import { topicScope } from "./topics.js";
+import { askScope } from "./ask-scope.js";
 import { evidenceBatches, contentSources } from "./evidence-context.js";
 import {
   presence,
@@ -27,6 +28,7 @@ import { cancelConsoleManaged, managedStep } from "./console-managed.js";
 import {
   ProviderError,
   jobInput,
+  answerKind,
   contentTask,
   opportunityDetails,
   type Job,
@@ -89,15 +91,22 @@ export function mergePageTasks<T extends { targetPageId: string; title: string; 
   }
   return [...tasks.values()];
 }
+type Slot = { id: string; abort: AbortController; done: Promise<void> };
 export class Runner {
   private crawlPolicies = new Map<string, CrawlPolicies>();
+  /** Asks run in their own lane beside the one check at a time, so a question never waits behind a long check. */
+  static readonly askLane = 6;
   private cancelling = new Set<string>();
+  private askSlots = new Map<string, Slot>();
+  isWorking(id: string) {
+    return this.active?.id === id || this.askSlots.has(id) || this.cancelling.has(id);
+  }
   hasActiveProject(projectId: string) {
-    return (this.active && this.store.job(this.active.id).projectId === projectId) || [...this.cancelling].some(id => this.store.job(id).projectId === projectId);
+    return [this.active, ...this.askSlots.values()].some(slot => slot && this.store.job(slot.id).projectId === projectId) ||
+      [...this.cancelling].some(id => this.store.job(id).projectId === projectId);
   }
   private timer: ReturnType<typeof setInterval> | undefined;
-  private active:
-    { id: string; abort: AbortController; done: Promise<void> } | undefined;
+  private active: Slot | undefined;
   constructor(
     readonly store: Store,
     readonly providers: Providers,
@@ -119,8 +128,9 @@ export class Runner {
   }
   stop() {
     if (this.timer) clearInterval(this.timer);
-    this.active?.abort.abort();
-    return this.active?.done ?? Promise.resolve();
+    const slots = [this.active, ...this.askSlots.values()].filter((slot): slot is Slot => Boolean(slot));
+    for (const slot of slots) slot.abort.abort();
+    return Promise.all(slots.map(slot => slot.done)).then(() => undefined);
   }
   async cancel(id: string) {
     if (this.cancelling.has(id)) return this.store.job(id);
@@ -135,9 +145,10 @@ export class Runner {
       status: "cancelled",
       progress: job.kind === 'audit' && !job.provider ? 'Website check stopped. Pages already checked are saved.' : "Cancelled. Completed provider calls may still be billable.",
     });
-    if (this.active?.id === id) {
-      this.active.abort.abort();
-      await this.active.done;
+    const slot = this.active?.id === id ? this.active : this.askSlots.get(id);
+    if (slot) {
+      slot.abort.abort();
+      await slot.done;
     }
     const associatedRead = this.store.step(id, 'analysis-audit');
     if (associatedRead?.body) {
@@ -151,7 +162,7 @@ export class Runner {
     }
     if (job.provider === 'console') {
       if (await cancelConsoleManaged(this, job)) {
-        if (["measure", "recheck"].includes(job.kind)) {
+        if (["measure", "recheck", "ask"].includes(job.kind)) {
           try {
             const snapshot = this.store.step(job.id, "project");
             await collectCancelledMeasurement(this, job, snapshot?.body ? JSON.parse(snapshot.body) : this.store.project(job.projectId));
@@ -224,28 +235,41 @@ export class Runner {
     })();
   }
   async tick() {
-    if (this.active) return;
-    const job = this.store
+    const queued = this.store
       .jobs()
       .reverse()
       .filter((j) => j.status === "queued" && (!j.availableAt || Date.parse(j.availableAt) <= Date.now()))
       // A yielded crawl rejoins at its next ready time, behind work already waiting.
-      .sort((a, b) => Date.parse(a.availableAt ?? a.createdAt) - Date.parse(b.availableAt ?? b.createdAt))[0];
-    if (!job) return;
+      .sort((a, b) => Date.parse(a.availableAt ?? a.createdAt) - Date.parse(b.availableAt ?? b.createdAt));
+    const runs: Promise<void>[] = [];
+    for (const job of queued.filter((j) => j.kind === "ask")) {
+      if (this.askSlots.size >= Runner.askLane) break;
+      runs.push(this.run(job, "ask"));
+    }
+    const next = this.active ? undefined : queued.find((j) => j.kind !== "ask");
+    if (next) runs.push(this.run(next, "main"));
+    await Promise.all(runs);
+  }
+  /** The slot is claimed before the first await, so the next tick never starts the same job twice. */
+  private async run(job: Job, lane: "main" | "ask") {
     const abort = new AbortController();
     let resolveDone!: () => void;
     const done = new Promise<void>((resolve) => {
       resolveDone = resolve;
     });
-    this.active = { id: job.id, abort, done };
+    const slot = { id: job.id, abort, done };
+    if (lane === "ask") this.askSlots.set(job.id, slot);
+    else this.active = slot;
     this.store.updateJob(job.id, { status: "running", error: null, progress: "Starting" });
     try {
       const saved = this.store.step(job.id, "project");
       const project: Project = saved?.body
         ? JSON.parse(saved.body)
-        : topicScope(this.store.project(job.projectId), job.topicId);
+        : job.kind === "ask"
+          ? askScope(this.store.project(job.projectId), job.question!)
+          : topicScope(this.store.project(job.projectId), job.topicId);
       if (!saved) this.store.setStep(job.id, "project", "done", project);
-      if (["measure", "recheck"].includes(job.kind) && job.requestedAnswers === undefined)
+      if (["measure", "recheck", "ask"].includes(job.kind) && job.requestedAnswers === undefined)
         this.store.updateJob(job.id, { requestedAnswers: project.prompts.length });
       const result = await this.execute(job, project, abort.signal);
       if ((result as { waitingForWebsite?: boolean } | null)?.waitingForWebsite && this.store.job(job.id).status !== 'cancelled') {
@@ -300,7 +324,8 @@ export class Runner {
       }
     } finally {
       if (!['queued', 'running'].includes(this.store.job(job.id).status)) this.crawlPolicies.delete(job.id);
-      this.active = undefined;
+      if (lane === "ask") this.askSlots.delete(job.id);
+      else this.active = undefined;
       resolveDone();
     }
   }
@@ -383,7 +408,7 @@ export class Runner {
         findings: this.store.findingCount(project.id, job.id),
       };
     }
-    if (job.kind === "measure" || job.kind === "recheck") {
+    if (job.kind === "measure" || job.kind === "recheck" || job.kind === "ask") {
       if (!project.prompts.length) throw new Error("Add at least one prompt");
       if (job.provider === "console")
         return this.consoleMeasure(job, project, signal);
@@ -452,7 +477,7 @@ export class Runner {
             costUsd: result.costUsd,
           };
           this.store.db.transaction(() => {
-            this.store.put("observation", project.id, job.id, observation);
+            this.store.put(answerKind(job), project.id, job.id, observation);
             this.store.updateJob(job.id, {
               spentUsd:
                 this.store.job(job.id).spentUsd + (result.costUsd ?? estimate),
@@ -468,7 +493,7 @@ export class Runner {
             "Provider cost exceeded the estimate. Further requests have stopped.",
           );
       }
-      const observations = this.store.observations(project.id, job.id);
+      const observations = this.store.answers(project.id, job.id, answerKind(job));
       return {
         metrics: summarize(observations, project.prompts.length),
         comparisonKey: comparisonKey(
@@ -929,7 +954,7 @@ export class Runner {
           ...presence(project, completion.text, completion.citations.map((citation) => citation.url)), costUsd: completion.costUsd,
         };
         this.store.db.transaction(() => {
-          this.store.put("observation", project.id, job.id, observation);
+          this.store.put(answerKind(job), project.id, job.id, observation);
           this.store.updateJob(job.id, { spentUsd: this.store.job(job.id).spentUsd + (completion.costUsd ?? estimate),
             costBasis: completion.costUsd === null ? "includes_estimates" : this.store.job(job.id).costBasis ?? "reported" });
           this.store.setStep(job.id, name, "done", observation);
@@ -956,7 +981,7 @@ export class Runner {
   checkpointApiMeasurement(job: Job, project: Project) {
     const prior = this.store.step(job.id, "measurement-result");
     if (prior?.state === "done") return JSON.parse(prior.body!);
-    const observations = this.store.observations(project.id, job.id);
+    const observations = this.store.answers(project.id, job.id, answerKind(job));
     if (observations.length !== project.prompts.length)
       throw new ProviderError("evidence", "The answer collection is incomplete. Saved answers remain available.");
     const result = {
@@ -1078,6 +1103,8 @@ export class Runner {
           ? "selected_questions" : "full_check";
       });
     if (profile === "selected_questions") return consoleMeasurement(this, job, project, signal);
+    if (job.kind === "ask")
+      throw new ProviderError("capability", "This SurfacedBy connection cannot answer a single question on this AI platform. Choose another engine.");
     const platform = job.platform === 'chat_gpt' ? 'chatgpt' : job.platform;
     if (this.store.step(job.id, 'console-scan')?.state !== 'done') {
       const capability = await this.providers.console('/capabilities', undefined, undefined, signal);

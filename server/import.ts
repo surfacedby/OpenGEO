@@ -128,7 +128,8 @@ export type PortableContent = z.infer<typeof content>;
 const job = z
   .object({
     id,
-    kind: z.enum(jobKinds),
+    // Exports leave asks out, so an imported file never carries one.
+    kind: z.enum(jobKinds).exclude(["ask"]),
     provider: z.enum(providers).optional(),
     model: z.string().optional(),
     platform: z.string(),

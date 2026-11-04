@@ -43,7 +43,7 @@ const contracts = {
 } as const;
 type Operation = keyof typeof contracts;
 export function managedOperation(job: Job): Operation {
-  return ["measure", "recheck"].includes(job.kind) ? "measurement" : job.kind === "discover" ? "questions" : job.kind === "competitors" ? "competitors" : job.kind === "diagnose" ? "local_opportunities" : "content";
+  return ["measure", "recheck", "ask"].includes(job.kind) ? "measurement" : job.kind === "discover" ? "questions" : job.kind === "competitors" ? "competitors" : job.kind === "diagnose" ? "local_opportunities" : "content";
 }
 export function managedStep(job: Job, step: string) {
   return contracts[managedOperation(job)].prefix + "-" + step;
@@ -153,6 +153,8 @@ export async function consoleManaged<I, O extends { job: z.infer<typeof managedJ
         throw new ProviderError("budget", "This run exceeds the remaining schedule allowance. No work was submitted.");
       runner.store.setStep(job.id, step("approval"), "done", quote.id);
     }
+    // An ask's spending limit is approved in the ask itself, before the run exists; the quote above already fits it.
+    if (job.kind === "ask") runner.store.setStep(job.id, step("approval"), "done", quote.id);
     if (runner.store.step(job.id, step("approval"))?.body !== JSON.stringify(quote.id))
       throw new ProviderError("approval", "Estimated maximum: $" + creditUsd(quote.estimated_credits).toFixed(2) + ". Approve to start. Completed work is charged and unused credits returned.");
   }

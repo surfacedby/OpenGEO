@@ -12,6 +12,7 @@ export function exportProject(store: Store, id: string) {
     project: store.project(id),
     jobs: store
       .jobs(id)
+      .filter((job) => job.kind !== "ask")
       .map(
         ({
           id,

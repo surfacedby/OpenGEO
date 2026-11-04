@@ -14,7 +14,8 @@ export const scheduleInput = z
     monthlyBudgetUsd: z.number().finite().min(0).max(10000),
     enabled: z.boolean().default(true),
   })
-  .strict();
+  .strict()
+  .refine((schedule) => schedule.job.kind !== "ask", "An ask runs once. Track its question to check it on a schedule.");
 export type Schedule = z.infer<typeof scheduleInput> & {
   id: string;
   nextAt: string;

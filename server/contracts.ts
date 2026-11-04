@@ -162,7 +162,7 @@ export const contentTask = z.object({
   .refine(task => Boolean(task.findingId) === Boolean(task.targetUrl) && Boolean(task.findingId) === Boolean(task.recommendation), 'Keep the opportunity and target page together')
   .refine(task => task.mode !== 'page_update' || Boolean(task.findingId), 'A page update requires its source opportunity');
 export type ContentTask = z.infer<typeof contentTask>;
-export const jobKinds = ["audit", "discover", "competitors", "measure", "diagnose", "content", "revise", "recheck"] as const;
+export const jobKinds = ["audit", "discover", "competitors", "measure", "diagnose", "content", "revise", "recheck", "ask"] as const;
 export const jobInput = z
   .object({
     projectId: z.string().uuid(),
@@ -185,17 +185,22 @@ export const jobInput = z
     maxPages: z.number().int().positive().max(100000).default(100),
     background: z.boolean().optional(),
     topicId: z.string().uuid().optional(),
+    askId: z.string().uuid().optional(),
+    question: z.string().trim().min(3).max(500).optional(),
   })
   .strict()
   .refine(input => !input.prepareRecommendations || ['measure', 'recheck'].includes(input.kind) && ['chatgpt', 'openrouter'].includes(input.provider ?? ''), 'Automatic recommendations require a ChatGPT or OpenRouter visibility check')
   .refine(input => !input.background || input.kind === 'audit', 'Only website checks run in paced background batches')
   .refine((input) => !input.topicId || ["measure", "recheck"].includes(input.kind), "Only visibility checks can be limited to a topic")
+  .refine((input) => input.kind === "ask" ? Boolean(input.askId && input.question) : !input.askId && !input.question, "An ask needs one question and its identifier")
   .refine((input) => input.kind !== 'revise' || (!!input.contentId && !!input.revisionInstructions), 'Choose a draft and describe the revision')
   .refine((input) => input.kind !== 'competitors' || !!input.measurementJobId, 'Choose a saved visibility check')
   .refine((input) => (input.kind === 'discover') === !!input.auditJobId, 'Question suggestions read one website audit')
   .refine(input => (!input.findingId && !input.contentMode) || input.kind === 'content', 'Content options apply only to a new draft')
   .refine(input => input.contentMode !== 'page_update' || !!input.findingId, 'Choose a page improvement before drafting its changes');
 export type JobInput = z.infer<typeof jobInput>;
+/** An ask's answers are saved apart from observations, so no evidence view, rate or trend can read them. */
+export const answerKind = (job: Pick<JobInput, "kind">) => job.kind === "ask" ? "ask-answer" : "observation";
 export type Job = JobInput & {
   id: string;
   status:
