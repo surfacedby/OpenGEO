@@ -43,6 +43,8 @@ OpenGEO checks the connected server's capabilities before offering managed work.
 
 ## Spending, pauses and cancellation
 
+An ask uses ChatGPT on your plan by default. Paid engines are chosen for each ask and share its spending limit evenly, rounded down to the cent, so together they cannot spend more than the limit. A SurfacedBy price must fit its engine's share before anything is submitted; the limit you set for the ask is its approval. DataForSEO uses the saved per-request estimate. After every ask the choice returns to the free engine.
+
 OpenGEO never silently substitutes a paid provider. If access expires or a quota is reached, affected work pauses with its progress preserved. A reset time is shown only when the service supplies one.
 
 A run budget controls whether another provider request starts. It cannot undo a charge already incurred. Completed paid work is retained. For managed operations, an approved maximum can be held until the final receipt confirms the charge and release of unused credit.

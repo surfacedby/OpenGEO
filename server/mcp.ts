@@ -101,4 +101,46 @@ server.registerTool(
   },
   ({ id }) => call("/jobs/" + id + "/cancel", {}),
 );
+const askEngines = z.enum(["chatgpt", "surfacedby-chatgpt", "surfacedby-gemini", "dataforseo-chatgpt", "dataforseo-gemini", "dataforseo-perplexity"]);
+server.registerTool(
+  "list_ask_engines",
+  {
+    description: "List the engines an ask can use for a project, whether each is available and why not, how each is priced, and the default spending limit.",
+    inputSchema: { projectId: z.string().uuid() },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  },
+  ({ projectId }) => call("/projects/" + projectId + "/asks/engines"),
+);
+server.registerTool(
+  "estimate_ask",
+  {
+    description: "Price one question on the chosen engines without running it. ChatGPT is free on the connected plan; SurfacedBy returns a quote; DataForSEO uses the saved per-request estimate.",
+    inputSchema: { projectId: z.string().uuid(), question: z.string().min(3).max(500), engines: z.array(askEngines).min(1) },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  },
+  ({ projectId, ...input }) => call("/projects/" + projectId + "/asks/estimate", input),
+);
+server.registerTool(
+  "ask_engines",
+  {
+    description: "Ask one question of the chosen engines once. Paid engines share maxCostUsd evenly and an engine whose price exceeds its share stops before any purchase. Engines are never substituted. Answers stay out of the project's evidence until the question is tracked.",
+    inputSchema: {
+      projectId: z.string().uuid(),
+      question: z.string().min(3).max(500),
+      engines: z.array(askEngines).min(1),
+      maxCostUsd: z.number().finite().nonnegative().max(1000).optional(),
+    },
+    annotations: { readOnlyHint: false, openWorldHint: true },
+  },
+  ({ projectId, ...input }) => call("/projects/" + projectId + "/asks", input),
+);
+server.registerTool(
+  "read_ask",
+  {
+    description: "Read one ask's answers per engine with their state, surface, citations, searches and cost, or every ask for the project when askId is omitted.",
+    inputSchema: { projectId: z.string().uuid(), askId: z.string().uuid().optional() },
+    annotations: { readOnlyHint: true },
+  },
+  ({ projectId, askId }) => call("/projects/" + projectId + "/asks" + (askId ? "/" + askId : "")),
+);
 await server.connect(new StdioServerTransport());

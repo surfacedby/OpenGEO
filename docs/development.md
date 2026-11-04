@@ -71,10 +71,12 @@ Use the same `OPENGEO_DATA_DIR` as the running app. Its local session file autho
 | `review ID` | Read a paused run's approval requirements |
 | `resume ID approval.json` | Submit explicit review and an optional increased ceiling |
 | `cancel ID` | Stop work and request supported provider cancellation |
+| `ask PROJECT ask.json` | Ask one question of the engines in the file, with its spending limit |
+| `asks PROJECT [ASK]` | List a project's asks, or read one ask's answers |
 
-The shortened commands in the table are subcommands of `node dist-server/cli.js`. An approval file contains `reviewed` and optionally `maxCostUsd`. Question discovery requires an audited website through `auditJobId`.
+The shortened commands in the table are subcommands of `node dist-server/cli.js`. An approval file contains `reviewed` and optionally `maxCostUsd`. An ask file contains `question`, `engines` (for example `["chatgpt", "surfacedby-gemini"]`) and, for paid engines, `maxCostUsd`. Question discovery requires an audited website through `auditJobId`.
 
-For MCP stdio, launch `node dist-server/mcp.js`. It exposes the same start, read, review, resume and cancellation operations.
+For MCP stdio, launch `node dist-server/mcp.js`. It exposes the same start, read, review, resume and cancellation operations, plus `list_ask_engines`, `estimate_ask`, `ask_engines` and `read_ask` for asks.
 
 ## Runtime and storage
 

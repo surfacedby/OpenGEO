@@ -48,6 +48,14 @@ A check limited to a topic asks only that topic's questions, so providers collec
 
 A target page is cited when an answer links to it. Each answer counts once per page. Fragments, a trailing slash, a leading `www.` and `utm_` tracking parameters (ChatGPT adds `utm_source=openai` to the links it cites) are ignored; any other difference in path or query is a different page.
 
+## Asks
+
+An ask sends one question, typed as a person would search it, to the engines you choose, and keeps each engine's answer with its surface, model, locale, date, searches and citations. It is scored with the same mention and citation rules as a check.
+
+**Asks are not evidence.** Their answers never enter Responses, Sources, rates, trends, findings or exports, because a question asked once, on engines picked for that moment, has no denominator to compare against. Each answer is one sample: the screen shows earlier answers to the same tracked question beside it so a single reading is not mistaken for a trend.
+
+An engine that returns no answer is left out of every count rather than read as "not mentioned". Answers from different surfaces are shown side by side and never combined into one score. Tracking an ask adds its question to the website's questions, and to a topic if you choose one; it counts from the next check, and the ask's own answers stay where they are.
+
 ## Read source coverage
 
 Each answer counts once for a domain or page, even if it cites it repeatedly. Page fragments are combined; different paths and queries remain distinct. A source's coverage cannot exceed 100%, but coverage across sources can add up to more than 100% because one answer may cite several sites. Unsafe or credential-bearing links are excluded from source tables.

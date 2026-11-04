@@ -202,6 +202,7 @@ try {
     await page.setViewportSize({ width, height: width === 390 ? 780 : 900 });
     for (const view of [
       "Overview",
+      "Ask history",
       "Visibility",
       "Prompts",
       "Topics",
@@ -571,13 +572,13 @@ try {
   console.log(
     JSON.stringify({
       output,
-      viewportChecks: 39,
+      viewportChecks: 42,
       populatedViewportChecks: 6,
       emptyViewportChecks: 20,
       topicViewportChecks: 30,
       settingsTabChecks: 9,
       tests:
-        "all thirteen screens, topic list, tabs, lens and grouped prompts, populated audit/opportunities/content, optional measurement details, outcome filters, comparison settings preservation, gaps, zero values, deduplication, source grouping/search/drill-down, question drill-down, keyboard answer drawer/chart, editable questions, empty history and unsaved-draft persistence",
+        "all fourteen screens, topic list, tabs, lens and grouped prompts, populated audit/opportunities/content, optional measurement details, outcome filters, comparison settings preservation, gaps, zero values, deduplication, source grouping/search/drill-down, question drill-down, keyboard answer drawer/chart, editable questions, empty history and unsaved-draft persistence",
       providerRequests: 0,
       rendererErrors: failures.length,
     }),

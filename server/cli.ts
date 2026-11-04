@@ -34,6 +34,12 @@ else if (command === "run") {
       2,
     ),
   );
+} else if (command === "asks") {
+  if (!args[0]) throw new Error("Pass the project ID, and an ask ID to read one ask");
+  console.log(JSON.stringify(await call("/projects/" + args[0] + "/asks" + (args[1] ? "/" + args[1] : "")), null, 2));
+} else if (command === "ask") {
+  if (!args[0] || !args[1]) throw new Error("Pass the project ID and a JSON file with question, engines and maxCostUsd");
+  console.log(JSON.stringify(await call("/projects/" + args[0] + "/asks", JSON.parse(readFileSync(args[1], "utf8"))), null, 2));
 } else if (command === "schedule") {
   if (!args[0]) throw new Error("Pass a schedule JSON file");
   console.log(
@@ -45,5 +51,5 @@ else if (command === "run") {
   );
 } else
   throw new Error(
-    "Commands: projects, workspace <id>, job <id>, review <id>, resume <id> <approval.json>, cancel <id>, run <file.json>, schedule <file.json>",
+    "Commands: projects, workspace <id>, job <id>, review <id>, resume <id> <approval.json>, cancel <id>, run <file.json>, schedule <file.json>, ask <project> <ask.json>, asks <project> [ask]",
   );

@@ -52,3 +52,39 @@ test("CLI and MCP review the same saved work and cannot resume uncertain request
     await client.close(); await runtime.app.close(); rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("CLI and MCP ask one question on the free engine and read it back without touching evidence", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "opengeo-automation-ask-"));
+  const runtime = await start({ directory, port: 0, protector: {
+    encrypt: value => Buffer.from(value), decrypt: value => value.toString(),
+  } });
+  const client = new Client({ name: "Local verification", version: "1.0.0" });
+  const env = Object.fromEntries(Object.entries({ ...process.env, OPENGEO_DATA_DIR: directory })
+    .filter((entry): entry is [string, string] => entry[1] !== undefined));
+  const run = promisify(execFile);
+  const cli = (...args: string[]) => run(process.execPath, [resolve("node_modules/tsx/dist/cli.mjs"), "server/cli.ts", ...args], { env });
+  try {
+    await runtime.runner.stop(); runtime.scheduler.stop(); runtime.usage.setEnabled(false);
+    runtime.runner.providers.vault.set("chatgpt", { active: "fixture", profiles: [{ id: "fixture", access_token: "synthetic-access", expiresAt: Date.now() + 3600000, scopes: ["chatgpt.tokens.use.direct"] }] });
+    const project = runtime.store.createProject(projectInput.parse({ domain: "example.com", brand: "Example" }));
+    await client.connect(new StdioClientTransport({ command: process.execPath,
+      args: [resolve("node_modules/tsx/dist/cli.mjs"), "server/mcp.ts"], env, stderr: "pipe" }));
+    const tools = (await client.listTools()).tools;
+    assert.ok(tools.some(tool => tool.name === "ask_engines" && tool.annotations?.openWorldHint && !tool.annotations?.readOnlyHint));
+    assert.ok(tools.some(tool => tool.name === "read_ask" && tool.annotations?.readOnlyHint));
+    const read = (result: any) => JSON.parse(result.content[0].text);
+    const paid = await client.callTool({ name: "ask_engines", arguments: { projectId: project.id, question: "Which example tools are free?", engines: ["surfacedby-chatgpt"] } });
+    assert.equal(paid.isError, true);
+    const asked = read(await client.callTool({ name: "ask_engines", arguments: { projectId: project.id, question: "Which example tools are free?", engines: ["chatgpt"] } }));
+    const viaMcp = read(await client.callTool({ name: "read_ask", arguments: { projectId: project.id, askId: asked.askId } }));
+    assert.deepEqual(viaMcp.engines.map((row: any) => [row.engine, row.state]), [["chatgpt", "collecting"]]);
+    assert.equal(JSON.parse((await cli("asks", project.id)).stdout).asks[0].askId, asked.askId);
+    const file = join(directory, "ask.json");
+    writeFileSync(file, JSON.stringify({ question: "Which example reports are public?", engines: ["chatgpt"] }));
+    assert.match(JSON.parse((await cli("ask", project.id, file)).stdout).askId, /^[0-9a-f-]{36}$/);
+    assert.equal(runtime.store.observations(project.id).length, 0);
+    assert.equal(JSON.parse((await cli("workspace", project.id)).stdout).jobs.length, 0);
+  } finally {
+    await client.close(); await runtime.app.close(); rmSync(directory, { recursive: true, force: true });
+  }
+});
