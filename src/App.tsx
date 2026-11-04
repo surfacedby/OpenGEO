@@ -2,6 +2,7 @@ import {
   useEffect,
   useState,
   useRef,
+  useMemo,
   type ReactNode,
 } from "react";
 import {
@@ -48,7 +49,6 @@ import { useCloseProtection, type EditState } from './useCloseProtection';
 import { Select } from "./Select";
 import { AuditPages } from './AuditPages';
 import { SourceWorkspace } from './SourceWorkspace';
-import { pageSearchExclusion } from '../server/page-classification';
 import { FormFeedback, useFormFeedback } from "./FormFeedback";
 import { ProviderIcon, providerLabels, providerOptions, providerOrder } from "./provider-ui";
 import { AnswerList, AnswerDistribution, AuditEssentials, CheckHistory, CitationComparison, MeasurementScope, PromptTable, SourcesTable, VisibilityChart } from "./DataPresentation";
@@ -56,7 +56,7 @@ import { SiteIcon } from "./SiteIcon";
 import { AuditSummary } from "./AuditSummary";
 import { AuditCoverageDetails } from "./AuditCoverageDetails";
 import { Findings } from "./Findings";
-import { findingGroups, opportunityFindings, auditFindings, targetDomain } from "./finding-groups";
+import { findingGroups, opportunityFindings, visibleAuditFindings, targetDomain } from "./finding-groups";
 import { ContentWorkspace } from "./ContentWorkspace";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { runsNeedingAttention } from "./runs";
@@ -242,10 +242,7 @@ export function App() {
   const topicMeasurement = topicJobs.find(completedMeasurement);
   const topicAnalysis = topicMeasurement && topicJobs.find(job => completedAnalysisResult(job)?.measurementJobId === topicMeasurement.id);
   const topicPending = topicJobs.find(job => analysisInProgress(job) || ['measure', 'recheck'].includes(job.kind) && ['queued', 'running', 'paused'].includes(job.status));
-  const auditIssues = auditFindings(w?.findings ?? []).filter(finding => {
-    const target = w?.pages.find(page => page.url === finding.targetUrl);
-    return !target || !pageSearchExclusion(target);
-  });
+  const auditIssues = useMemo(() => visibleAuditFindings(w?.findings ?? [], w?.pages ?? []), [w?.findings, w?.pages]);
   const ownCitations = w?.presentation.outcomes.find((group) => group.kind === "cited");
   const ownWebsite = w ? { domain:w.project.domain, citationRate:w.metrics.citationRate, answersCiting:ownCitations?.count ?? 0, answersCollected:w.metrics.completed, observationIds:ownCitations?.observationIds ?? [] } : null;
   useEffect(() => { setScope(null); setTopicPage(null); }, [selected]);

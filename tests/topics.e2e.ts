@@ -126,6 +126,11 @@ test('topics, actual searches, persistent progress and safe outside dismissal', 
     await navigate(page, 'Topics');
     await page.getByRole('button', { name: 'New topic', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'New topic', exact: true });
+    await expect(dialog.locator('datalist option')).toHaveCount(20);
+    await dialog.getByLabel('Add a target page', { exact: true }).fill('Example article 0');
+    await expect(dialog.locator('datalist option')).toHaveCount(1);
+    await expect(dialog.locator('datalist option')).toHaveAttribute('value', 'https://example.com/blog/article-0');
+    await dialog.getByLabel('Add a target page', { exact: true }).fill('');
     await dialog.getByLabel('Topic name', { exact: true }).fill('Unsaved topic');
     await page.mouse.click(20, 500);
     await expect(dialog).toContainText('Discard your unsaved topic changes?');

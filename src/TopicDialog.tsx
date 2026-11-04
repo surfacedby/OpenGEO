@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { Plus, Save, Search, Trash2, X } from 'lucide-react';
 import type { Topic, PageSummary, Project } from '../server/contracts';
 import { api } from './api';
@@ -6,6 +6,7 @@ import { Dialog } from './ui/Dialog';
 import { Select } from './Select';
 import { FormFeedback, useFormFeedback } from './FormFeedback';
 import { useCloseProtection } from './useCloseProtection';
+import { pageSuggestions } from './page-suggestions';
 
 /** Topics save with the brand, so a topic can only point at questions and competitors the brand already tracks. */
 export function TopicDialog({ project, pages, topic, initialPrompts = [], close, saved }: {
@@ -22,7 +23,7 @@ export function TopicDialog({ project, pages, topic, initialPrompts = [], close,
   const requestClose = () => { if (!busy) { if (dirty) setConfirmClose(true); else close(); } };
   const feedback = useFormFeedback(), listId = useId();
   const shown = [...new Set(project.prompts)].filter(prompt => prompt.toLowerCase().includes(query.trim().toLowerCase()));
-  const audited = pages.filter(item => item.status < 400 && !targets.includes(item.url));
+  const audited = useMemo(() => pageSuggestions(pages, targets, page), [pages, targets, page]);
   async function save(next: Topic[], open: string | null) {
     setBusy(true); feedback.setError('');
     try { await api('/projects/' + project.id, { topics: next }, 'PATCH'); await saved(open); }
@@ -57,7 +58,7 @@ export function TopicDialog({ project, pages, topic, initialPrompts = [], close,
           {targets.length > 0 && <ul className="topic-target-list">{targets.map(url => <li key={url}><span>{url.replace(/^https?:\/\//, '')}</span><button type="button" aria-label={'Remove ' + url} onClick={() => setTargets(targets.filter(item => item !== url))}><X size={14} /></button></li>)}</ul>}
           {targets.length < 20 && <div className="topic-add-page"><input type="url" list={listId} aria-label="Add a target page" placeholder={'https://' + project.domain + '/'} value={page} onChange={event => setPage(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); addPage(); } }} {...feedback.field('targetUrls')} /><button type="button" className="secondary" disabled={!page.trim()} onClick={addPage}><Plus size={15} />Add</button>
             <datalist id={listId}>{audited.map(item => <option key={item.id} value={item.url}>{item.title}</option>)}</datalist></div>}
-          <small>{pages.length ? 'Suggestions come from your latest website check.' : 'You can enter a page now, or discover pages from Scans.'}</small>
+          <small>{pages.length ? 'Type a page title or URL to find public pages from your latest website check, or enter a URL.' : 'You can enter a page now, or discover pages from Scans.'}</small>
         </fieldset>
         <fieldset className="topic-competitors">
           <legend>Competitors <span>Leave all unchecked to compare with every competitor</span></legend>
