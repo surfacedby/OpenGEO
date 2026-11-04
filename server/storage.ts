@@ -17,6 +17,7 @@ import type {
 } from "./contracts.js";
 export class Store {
   readonly db: Database.Database;
+  private readonly instanceId = randomUUID();
   onJobCompleted?: (kind: Job["kind"], provider: Job["provider"]) => void;
   onImprovementCompleted?: () => void;
   constructor(readonly directory: string) {
@@ -265,6 +266,11 @@ export class Store {
   }
   pages(id: string, jobId?: string) {
     return this.artifacts<PageEvidence>(id, "page", jobId);
+  }
+  /** Both this connection's writes and other SQLite writers invalidate a polled view; reopening cannot reuse an old validator. */
+  workspaceRevision(): string {
+    const row = this.db.prepare('SELECT total_changes() AS changes, data_version AS external FROM pragma_data_version').get() as { changes: number; external: number };
+    return `${this.instanceId}:${row.changes}:${row.external}`;
   }
   /** Polling reads metadata directly; large crawl bodies stay out of the JavaScript object graph. */
   pageSummaries(projectId: string, jobId: string): PageSummary[] {

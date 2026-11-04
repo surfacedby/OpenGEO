@@ -325,10 +325,15 @@ export async function createApp(
       return store.updateProject(id, parseProject({ ...current, prompts: [...current.prompts, ...added] }));
     })();
   });
-  app.get("/api/projects/:id/workspace", (req) => {
+  app.get("/api/projects/:id/workspace", (req, res) => {
     const id = (req.params as any).id;
-    const project = store.project(id),
-      jobs = store.jobs(id),
+    // Read the revision first: a concurrent external write during assembly must invalidate the next poll.
+    const etag = '"' + createHash('sha256').update(id + ':' + store.workspaceRevision()).digest('hex') + '"';
+    const project = store.project(id);
+    // Authorization and project existence are checked before accepting the browser's in-memory validator.
+    res.header('ETag', etag);
+    if (req.headers['if-none-match'] === etag) return res.code(304).send();
+    const jobs = store.jobs(id),
       brandJobs = jobs.filter((job) => !job.topicId);
     const audit = jobs.find(
         (j) => j.kind === "audit" && (j.status === "completed" || ['queued', 'running', 'paused'].includes(j.status) && store.pageCount(id, j.id) > 0),

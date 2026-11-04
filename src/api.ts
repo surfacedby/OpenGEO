@@ -4,6 +4,8 @@ export class RequestError extends Error {
 }
 let sessionGeneration = 0;
 let sessionRefresh: Promise<void> | undefined;
+// Keep only the current workspace in memory, never in browser or disk storage.
+let workspaceCache: { path: string; etag: string; data: unknown } | undefined;
 function refreshSession(): Promise<void> {
   if (!sessionRefresh) {
     sessionRefresh = fetch("/api/session", { credentials: "same-origin", signal: AbortSignal.timeout(15000) }).then(response => {
@@ -26,12 +28,15 @@ export async function api<T = any>(
       : "The workspace did not confirm this schedule. Check your schedules or retry with the same settings."
     : "Your local workspace could not be reached. Keep the application running and try again.";
   let response: Response;
+  const workspaceRead = method === 'GET' && /^\/projects\/[^/]+\/workspace$/.test(path);
+  const cached = workspaceRead && workspaceCache?.path === path ? workspaceCache : undefined;
   const generation = sessionGeneration;
   const options: RequestInit = {
     method,
     ...(method === "GET" ? { signal: AbortSignal.timeout(15000) } : {}),
     credentials: "same-origin",
     headers: {
+      ...(cached ? { 'If-None-Match': cached.etag } : {}),
       ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
       ...(repeatable
         ? { "Idempotency-Key": idempotencyKey ?? crypto.randomUUID() }
@@ -44,15 +49,22 @@ export async function api<T = any>(
     // Local authorization runs before handlers, so a refused request has not
     // started work. Other failures retain the caller's explicit retry flow.
     if (response.status === 401 && path !== "/session") {
+      workspaceCache = undefined;
+      delete (options.headers as Record<string, string>)['If-None-Match'];
       if (generation === sessionGeneration) await refreshSession();
       response = await fetch("/api" + path, options);
     }
   } catch (error) { if (error instanceof RequestError) throw error; throw new Error(unavailable); }
+  if (response.status === 304 && cached && (options.headers as Record<string, string>)['If-None-Match'] === cached.etag) return cached.data as T;
   let data;
   try { data = await response.json(); } catch { throw new Error(unavailable); }
   if (!response.ok) {
     const fields: ValidationField[] = Array.isArray(data?.fields) ? data.fields.filter((field: any) => Array.isArray(field?.path) && field.path.every((part: unknown) => typeof part === "string" || typeof part === "number") && typeof field.message === "string") : [];
     throw new RequestError(fields.length ? fields.map(field => field.path.join(" ") + ": " + field.message).join(". ") : data?.error ?? "The request could not be completed", fields);
+  }
+  if (workspaceRead) {
+    const etag = response.headers.get('etag');
+    workspaceCache = etag ? { path, etag, data } : undefined;
   }
   return data;
 }
