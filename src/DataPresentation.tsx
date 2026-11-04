@@ -719,6 +719,7 @@ export function AnswerCard({ observation: o }: { observation: Observation }) {
           ))}
         </ul></aside></div>
         <p className="answer-provenance">{collectionLabel(o)}. {retrievalLabel(o)}. Model: {o.model}.</p>
+        {o.searchQueries?.length ? <p className="answer-provenance">Searched: {o.searchQueries.join("; ")}</p> : null}
       </div></Dialog>}
     </article>
   );

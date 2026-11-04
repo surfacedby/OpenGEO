@@ -54,6 +54,7 @@ const observation = z
     surface: z.enum(["api", "consumer_interface", "unknown"]),
     retrieval: z.enum(["web_search", "model_only", "provider_managed"]).optional(),
     webSearchConfirmed: z.boolean().optional(),
+    searchQueries: z.array(z.string().min(1).max(300)).max(20).optional(),
     mentioned: z.boolean(),
     cited: z.boolean(),
     costUsd: z.number().nullable(),
