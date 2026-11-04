@@ -22,9 +22,11 @@ export async function api<T = any>(
   method = body !== undefined ? "POST" : "GET",
   idempotencyKey?: string,
 ): Promise<T> {
-  const repeatable = ["/jobs", "/schedules"].includes(path) && method === "POST";
+  const asking = /^\/projects\/[^/]+\/asks$/.test(path);
+  const repeatable = (["/jobs", "/schedules"].includes(path) || asking) && method === "POST";
   const unavailable = repeatable
     ? path === "/jobs" ? "The workspace did not confirm this run. If it started, it appears as in progress on this page; otherwise retry with the same inputs."
+      : asking ? "The workspace did not confirm this ask. If it started, it appears in Ask history; otherwise ask again."
       : "The workspace did not confirm this schedule. Check your schedules or retry with the same settings."
     : "Your local workspace could not be reached. Keep the application running and try again.";
   let response: Response;

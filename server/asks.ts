@@ -8,6 +8,7 @@ import type { Providers } from "./providers.js";
 import type { Store } from "./storage.js";
 import type { Vault } from "./vault.js";
 import type { Runner } from "./workflows.js";
+import { askShare } from "./ask-scope.js";
 
 /** Every engine an ask can use searches the web before answering; a route that answers from model memory is not offered. */
 export const askEngines = {
@@ -102,7 +103,7 @@ export async function estimateAsk(deps: AskDeps, projectId: string, body: unknow
   return { engines, totalUsd: known ? Math.round(engines.reduce((sum, row) => sum + (row.estimateUsd ?? 0), 0) * 100) / 100 : null };
 }
 
-/** The limit is split evenly across paid engines and rounded down to the cent, so together they can never spend more than it. */
+/** The limit is shared across paid engines by askShare, so together they can never spend more than it. */
 export async function createAsk(deps: AskDeps, projectId: string, body: unknown, key: string) {
   const input = askInput.parse(body);
   deps.store.project(projectId);
@@ -112,7 +113,7 @@ export async function createAsk(deps: AskDeps, projectId: string, body: unknown,
   if (unavailable) throw new ProviderError("capability", unavailable.label + " (" + unavailable.detail + "): " + unavailable.reason + ".");
   const paid = chosen.filter(engine => engine.price !== "free");
   if (paid.length && input.maxCostUsd <= 0) throw new ProviderError("budget", "Set a spending limit to ask paid engines. Nothing was started.");
-  const share = paid.length ? Math.floor((input.maxCostUsd / paid.length) * 100 + 1e-9) / 100 : 0;
+  const share = askShare(input.maxCostUsd, paid.length);
   if (paid.length && share <= 0) throw new ProviderError("budget", "This limit is too small to share across the paid engines. Nothing was started.");
   const askId = askIdFor(projectId, key);
   const jobs = deps.store.db.transaction(() => chosen.map(engine => deps.store.enqueue(jobInput.parse({
@@ -129,7 +130,7 @@ function askJobs(store: Store, projectId: string, askId?: string) {
 
 function engineState(store: Store, job: Job) {
   const answer = store.answers(job.projectId, job.id, "ask-answer")[0] ?? null;
-  const state = answer ? "answered" : ["queued", "running"].includes(job.status) ? "collecting"
+  const state: "answered" | "collecting" | "paused" | "skipped" | "no_answer" = answer ? "answered" : ["queued", "running"].includes(job.status) ? "collecting"
     : job.status === "paused" ? "paused" : job.status === "cancelled" ? "skipped" : "no_answer";
   return { answer, state };
 }
@@ -176,7 +177,10 @@ export function readAsk(store: Store, projectId: string, askId: string) {
       .map(topic => ({ id: topic.id, name: topic.name, tracked: topic.prompts.some(prompt => sameQuestion(prompt, text)) })),
     engines: jobs.slice().reverse().map(job => {
       const id = engineOf(job), { answer, state } = engineState(store, job);
-      return { engine: id, ...(id ? askEngines[id] : {}), jobId: job.id, state, status: job.status, progress: job.progress, error: job.error,
+      const meta: { provider: string; platform: string; label: string; detail: string; surface: string } = id ? askEngines[id]
+        : { provider: job.provider ?? "chatgpt", platform: job.platform, label: "Engine", detail: "", surface: "api" };
+      return { engine: id ?? null, provider: meta.provider, platform: meta.platform, label: meta.label, detail: meta.detail, surface: meta.surface,
+        jobId: job.id, state, status: job.status, progress: job.progress, error: job.error,
         spentUsd: job.spentUsd, maxCostUsd: job.maxCostUsd, costBasis: job.costBasis ?? null, answer };
     }),
     history: trackedHistory(store, projectId, text),

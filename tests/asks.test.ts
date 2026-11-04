@@ -9,6 +9,7 @@ import { Vault } from '../server/vault.js';
 import { createApp } from '../server/app.js';
 import { jobInput, projectInput } from '../server/contracts.js';
 import { exportProject } from '../server/export.js';
+import { askFit, askShare } from '../server/ask-scope.js';
 
 // Synthetic fixtures only: example.com identities, invented credentials and a fake fetch for both providers.
 const session = 'synthetic-ask-session';
@@ -260,4 +261,16 @@ test('earlier tracked answers to the same question show beside an ask, and an un
     assert.deepEqual(estimate.engines[0], { id: 'surfacedby-chatgpt', estimateUsd: null, note: 'Priced when the ask starts' });
     assert.equal(estimate.totalUsd, null);
   } finally { await f.close(); }
+});
+
+test('the limit is shared so paid engines can never spend more than it, and the warning names the smallest limit that fits', () => {
+  for (const [limit, engines] of [[1, 3], [.1, 3], [.07, 2], [10, 6], [.01, 2]] as const)
+    assert.ok(askShare(limit, engines) * engines <= limit + 1e-9, `${limit} across ${engines}`);
+  assert.equal(askShare(.25, 2), .12);
+  assert.deepEqual(askFit(.1, [.1, .1]), { shareUsd: .05, overLimit: true, suggestedLimitUsd: .2 });
+  assert.deepEqual(askFit(.24, [.12, .12]), { shareUsd: .12, overLimit: false, suggestedLimitUsd: .24 });
+  assert.deepEqual(askFit(.23, [.12, .12]), { shareUsd: .11, overLimit: true, suggestedLimitUsd: .24 });
+  assert.equal(askFit(1, [null, .4]).overLimit, false);
+  assert.equal(askFit(0, [null]).overLimit, true);
+  assert.deepEqual(askFit(1, []), { shareUsd: 0, overLimit: false, suggestedLimitUsd: null });
 });
