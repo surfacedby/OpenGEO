@@ -325,6 +325,11 @@ export class Store {
   findings(id: string) {
     return this.artifacts<Finding>(id, "finding");
   }
+  nonAuditFindings(id: string): Finding[] {
+    return (this.db.prepare(`SELECT f.body FROM artifacts f JOIN jobs j ON j.id=f.job_id
+      WHERE f.project_id=? AND f.kind='finding' AND json_extract(j.body,'$.kind')!='audit'
+      ORDER BY f.rowid DESC`).all(id) as { body: string }[]).map(row => JSON.parse(row.body));
+  }
   patchFinding(projectId: string, id: string, status: Finding["status"]) {
     const r = this.db
       .prepare(

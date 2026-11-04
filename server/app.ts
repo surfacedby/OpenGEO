@@ -26,7 +26,7 @@ import {
 import { publicUrl } from "./network.js";
 import { topicScope, topicSummaries, topicView, normalizeTopics, withTopicChecks } from "./topics.js";
 import { workspacePresentation, currentFindings } from "./presentation.js";
-import { auditFindings } from './audit.js';
+import { auditFindings, auditFindingPresentation } from './audit.js';
 import { SiteIcons } from "./site-icons.js";
 import { displayedMeasurement } from "./portable-results.js";
 import { UsageSharing } from "./usage.js";
@@ -327,8 +327,10 @@ export async function createApp(
   });
   app.get("/api/projects/:id/workspace", (req, res) => {
     const id = (req.params as any).id;
+    const { pages: pageMode } = z.object({ pages: z.enum(['full', 'lazy']).default('full') }).strict().parse(req.query);
     // Read the revision first: a concurrent external write during assembly must invalidate the next poll.
-    const etag = '"' + createHash('sha256').update(id + ':' + store.workspaceRevision()).digest('hex') + '"';
+    const revision = store.workspaceRevision();
+    const etag = '"' + createHash('sha256').update(id + ':' + pageMode + ':' + revision).digest('hex') + '"';
     const project = store.project(id);
     // Authorization and project existence are checked before accepting the browser's in-memory validator.
     res.header('ETag', etag);
@@ -345,10 +347,10 @@ export async function createApp(
       ? JSON.parse(snapshot.body).prompts
       : project.prompts;
     const coverage = auditCoverage.safeParse((audit?.result as any)?.coverage);
-    const pages = audit ? store.pageSummaries(id, audit.id) : [];
+    const pages = audit && pageMode === 'full' ? store.pageSummaries(id, audit.id) : [];
     const pageFindings = new Map<string, Finding[] | null>();
     const auditJobs = new Set(jobs.filter(job => job.kind === 'audit').map(job => job.id));
-    const findings = currentFindings(store.findings(id), jobs, audit?.id).map(finding => {
+    const findings = currentFindings(pageMode === 'lazy' ? store.nonAuditFindings(id) : store.findings(id), jobs, audit?.id).map(finding => {
       if (!auditJobs.has(finding.jobId)) return finding;
       // Accepted older work still needs its original evidence, but polling must not load every historical crawl.
       const current = finding.evidenceIds.map(evidenceId => {
@@ -364,11 +366,17 @@ export async function createApp(
     const metrics = measurementMetrics(measure, observations, measure ? prompts.length : 0);
     const presentation = workspacePresentation(brandJobs, measure, observations,
       snapshot?.body ? prompts : measure ? null : project.prompts, metrics.requested, pages);
+    if (pageMode === 'lazy' && audit) presentation.audit = store.pageCatalog.summary(id, audit.id);
+    const auditCounts = pageMode === 'lazy' ? store.pageCatalog.findingCounts(id, audit?.id) : { total: 0, done: 0 };
     return {
       project,
       jobs,
       auditCoverage: coverage.success ? coverage.data : null,
       pages,
+      pageMode,
+      auditId: audit?.id ?? null,
+      revision,
+      findingCounts: { total: findings.length + auditCounts.total, done: findings.filter(finding => finding.status === 'done').length + auditCounts.done },
       observations,
       findings,
       content: store.artifacts(id, "content"),
@@ -394,6 +402,30 @@ export async function createApp(
       groupOffset: z.coerce.number().int().min(0).max(1000000).default(0),
     }).strict().parse(req.query);
     return { checkId: check, ...store.pageCatalog.list(id, check, input) };
+  });
+  app.get('/api/projects/:id/checks/:check/page-suggestions', (req, res) => {
+    const { id, check } = z.object({ id: z.string().uuid(), check: z.string().uuid() }).parse(req.params);
+    store.project(id);
+    const job = store.job(check);
+    if (job.projectId !== id || job.kind !== 'audit') return res.code(404).send({ error: 'Website check not found' });
+    const { query } = z.object({ query: z.string().max(300).default('') }).strict().parse(req.query);
+    return { pages: store.pageCatalog.suggestions(id, check, query) };
+  });
+  app.get('/api/projects/:id/checks/:check/pages/:page', (req, res) => {
+    const { id, check, page: pageId } = z.object({ id: z.string().uuid(), check: z.string().uuid(), page: z.string().uuid() }).parse(req.params);
+    const project = store.project(id), job = store.job(check);
+    if (job.projectId !== id || job.kind !== 'audit') return res.code(404).send({ error: 'Website check not found' });
+    const page = store.pageCatalog.page(id, check, pageId);
+    if (!page) return res.code(404).send({ error: 'Page not found' });
+    const originals = new Map<string, ReturnType<Store['pageEvidence']>>();
+    const findings = store.pageCatalog.findings(id, check, page.url).map(finding => {
+      const evidence = finding.evidenceIds.map(evidenceId => {
+        if (!originals.has(evidenceId)) originals.set(evidenceId, store.pageEvidence(id, evidenceId));
+        return originals.get(evidenceId);
+      }).find(Boolean);
+      return evidence ? auditFindingPresentation(project, finding, evidence) : finding;
+    });
+    return { page, findings };
   });
   app.get("/api/projects/:id/topics/:topic", (req) => {
     const { id, topic } = req.params as { id: string; topic: string };

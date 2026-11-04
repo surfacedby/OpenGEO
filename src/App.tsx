@@ -2,7 +2,6 @@ import {
   useEffect,
   useState,
   useRef,
-  useMemo,
   type ReactNode,
 } from "react";
 import {
@@ -56,7 +55,7 @@ import { SiteIcon } from "./SiteIcon";
 import { AuditSummary } from "./AuditSummary";
 import { AuditCoverageDetails } from "./AuditCoverageDetails";
 import { Findings } from "./Findings";
-import { findingGroups, opportunityFindings, visibleAuditFindings, targetDomain } from "./finding-groups";
+import { findingGroups, opportunityFindings, targetDomain } from "./finding-groups";
 import { ContentWorkspace } from "./ContentWorkspace";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { runsNeedingAttention } from "./runs";
@@ -87,6 +86,9 @@ type Workspace = {
   project: Project;
   jobs: Job[];
   pages: PageSummary[];
+  auditId: string | null;
+  revision: string;
+  findingCounts: { total: number; done: number };
   auditCoverage: AuditCoverage | null;
   observations: Observation[];
   findings: Finding[];
@@ -184,7 +186,7 @@ export function App() {
       ]);
       const selection = selectedRef.current;
       const id = ps.some((project) => project.id === selection) ? selection : ps[0]?.id;
-      const next = id ? await api<Workspace>("/projects/" + id + "/workspace") : null;
+      const next = id ? await api<Workspace>("/projects/" + id + "/workspace?pages=lazy") : null;
       if (sequence !== refreshSequence.current || selectedRef.current !== selection) return;
       setProjects(ps);
       setConnected(connection.connected);
@@ -242,7 +244,6 @@ export function App() {
   const topicMeasurement = topicJobs.find(completedMeasurement);
   const topicAnalysis = topicMeasurement && topicJobs.find(job => completedAnalysisResult(job)?.measurementJobId === topicMeasurement.id);
   const topicPending = topicJobs.find(job => analysisInProgress(job) || ['measure', 'recheck'].includes(job.kind) && ['queued', 'running', 'paused'].includes(job.status));
-  const auditIssues = useMemo(() => visibleAuditFindings(w?.findings ?? [], w?.pages ?? []), [w?.findings, w?.pages]);
   const ownCitations = w?.presentation.outcomes.find((group) => group.kind === "cited");
   const ownWebsite = w ? { domain:w.project.domain, citationRate:w.metrics.citationRate, answersCiting:ownCitations?.count ?? 0, answersCollected:w.metrics.completed, observationIds:ownCitations?.observationIds ?? [] } : null;
   useEffect(() => { setScope(null); setTopicPage(null); }, [selected]);
@@ -464,7 +465,7 @@ export function App() {
                   <RunsPanel jobs={runsNeedingAttention(w.jobs).filter((job) => measured || job.id !== activeAudit?.id)} run={run} />
                   {measured && <><div className="analytics-grid"><VisibilityChart presentation={w.presentation} openVisibility={() => changePage("Visibility")} /><SourcesTable presentation={w.presentation} collected={w.metrics.completed} compact evidence={openEvidence} openSources={() => changePage("Sources")} projectId={p!.id} ownDomain={p!.domain} /></div><div className="analytics-grid"><AnswerDistribution presentation={w.presentation} collected={w.metrics.completed} requested={w.metrics.requested} missing={w.metrics.missing} collecting={activeMeasurement?.id === w.measurement?.id} evidence={openEvidence} /><CitationComparison projectId={p!.id} ownDomain={p!.domain} rows={[ownWebsite!,...w.competitors]} evidence={openEvidence} openCompetitors={() => changePage("Competitors")} /></div></>}
                   {measured && !activeMeasurement && !analyzed && !activeAnalysis && !pausedAnalysis && <section className="insight-banner"><Lightbulb size={22} /><div><h2>{w.metrics.mentionRate === 0 ? 'Your brand was missing from this check' : 'Turn your visibility into your next improvement'}</h2><p>{`${w.metrics.completed} answers collected. Analyze them alongside your pages to find where useful content can make a difference.`}</p></div><button className="secondary" onClick={() => canAnalyze ? changePage('Opportunities') : openConnections()}>{canAnalyze ? 'Review next steps' : 'Connect for analysis'} <ArrowRight size={15} /></button></section>}
-                  {!measured && audited && <AuditSummary audit={w.presentation.audit} domain={p!.domain} findings={w.findings} openAudit={() => changePage("Scans")} />}
+                  {!measured && audited && <AuditSummary audit={w.presentation.audit} domain={p!.domain} findingCounts={w.findingCounts} openAudit={() => changePage("Scans")} />}
                   {!measured && <section className="panel next-steps">
                       <div className="panel-heading">
                         <h2>Your next steps</h2>
@@ -492,8 +493,8 @@ export function App() {
                       <WorkflowRow
                         n="3"
                         title="Turn insights into better content"
-                        description={w.findings.some((finding) => finding.status === "done") ? "Review the improvements you've marked done" : w.content.length ? "Review your drafts and apply an improvement" : "Turn evidence into useful content"}
-                        done={w.findings.some((finding) => finding.status === "done")}
+                        description={w.findingCounts.done ? "Review the improvements you've marked done" : w.content.length ? "Review your drafts and apply an improvement" : "Turn evidence into useful content"}
+                        done={w.findingCounts.done > 0}
                         onClick={() => changePage("Content")}
                       />
                       <WorkflowRow
@@ -536,11 +537,11 @@ export function App() {
                 <><div className="scan-options"><ActionCard icon={ChartNoAxesCombined} title="AI visibility" description="Ask the questions your customers ask. See which brands are mentioned and which websites get cited."><button className="primary" onClick={measurementAction.action}>{measurementAction.label}<ArrowRight size={16} /></button><button className="text-button" onClick={() => changePage('Visibility')}>View results<ArrowRight size={14} /></button></ActionCard><ActionCard icon={ScanSearch} title="Website health" description="Find pages that are hard to access, missing useful details or unclear to search engines. Runs on your device with no AI charges."><button className="secondary" disabled={!!activeAudit} onClick={() => setJobDialog('audit')}>{activeAudit ? 'Checking your website...' : 'Check website health'}<ArrowRight size={16} /></button></ActionCard></div><RunsPanel jobs={runsNeedingAttention(w.jobs, ["audit", "measure", "recheck"])} run={run} /><h2>Website health results</h2><AuditEssentials audit={w.presentation.audit} /><section className="panel">
                   <div className="panel-heading">
                     <h2>Pages checked</h2>
-                    <span>{w.pages.length} {w.pages.length === 1 ? "page" : "pages"}</span>
+                    <span>{w.presentation.audit.pages} {w.presentation.audit.pages === 1 ? "page" : "pages"}</span>
                   </div>
                   {w.auditCoverage && <AuditCoverageDetails coverage={w.auditCoverage} />}
-                  {w.pages.length ? (
-                    <AuditPages pages={w.pages} findings={auditIssues} projectId={p!.id} run={run} />
+                  {w.presentation.audit.pages && w.auditId ? (
+                    <AuditPages key={p!.id + ':' + w.auditId} checkId={w.auditId} revision={w.revision} projectId={p!.id} run={run} />
                   ) : (
                     <Empty title={w.auditCoverage ? "No pages could be inspected" : "Your website health check starts here"}>
                       {w.auditCoverage ? "Review the coverage above before starting another run. Missing pages have not been assessed." : activeAudit ? 'Pages appear here as your check finishes. Follow its progress above.' : 'Start a website health check above. Results will show which pages need attention and what to improve.'}
@@ -654,7 +655,7 @@ export function App() {
                   <div className="panel-heading">
                     <h2>Export your work</h2>
                   </div>
-                  <div className="report-overview"><div><h3>{p!.brand}</h3><p>Your saved workspace, ready to share or back up. Reports use the current evidence; backups also preserve earlier checks and draft versions.</p></div><dl className="evidence-summary" aria-label="Current workspace evidence"><div><dt>Audited pages</dt><dd>{w.pages.length}</dd></div><div><dt>Answers in current check</dt><dd>{w.metrics.completed}</dd></div><div><dt>Improvements</dt><dd>{w.findings.length}</dd></div><div><dt>Saved drafts</dt><dd>{w.content.length}</dd></div></dl></div>
+                  <div className="report-overview"><div><h3>{p!.brand}</h3><p>Your saved workspace, ready to share or back up. Reports use the current evidence; backups also preserve earlier checks and draft versions.</p></div><dl className="evidence-summary" aria-label="Current workspace evidence"><div><dt>Audited pages</dt><dd>{w.presentation.audit.pages}</dd></div><div><dt>Answers in current check</dt><dd>{w.metrics.completed}</dd></div><div><dt>Improvements</dt><dd>{w.findingCounts.total}</dd></div><div><dt>Saved drafts</dt><dd>{w.content.length}</dd></div></dl></div>
                   <div className="report-grid">
                     <div>
                       <FileText size={25} />
@@ -747,7 +748,7 @@ export function App() {
           close={() => { setJobDialog(null); setRevision(null); setContentFinding(null); setJobTopic(null); }}
         />
       )}
-      {topicEditor && p && w && <TopicDialog project={p} pages={w.pages} topic={topicEditor.topic} initialPrompts={topicEditor.prompts} close={() => setTopicEditor(null)} saved={async (id) => {
+      {topicEditor && p && w && <TopicDialog project={p} auditId={w.auditId} revision={w.revision} pageCount={w.presentation.audit.pages} topic={topicEditor.topic} initialPrompts={topicEditor.prompts} close={() => setTopicEditor(null)} saved={async (id) => {
         await refresh(); setTopicEditor(null);
         if (!id) setTopicPage(null);
         else if (!topicEditor.topic && lensPage) setScope(id);

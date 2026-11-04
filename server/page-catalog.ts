@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import type { PageEvidence, PageSummary } from './contracts.js';
+import type { Finding, PageEvidence, PageSummary } from './contracts.js';
 import { pageAvailable, pageFolder, pageSearchExclusion, pageType } from './page-classification.js';
 
 export type PageQuery = {
@@ -55,6 +55,32 @@ export class PageCatalog {
       };
   }
 
+  suggestions(projectId: string, jobId: string, query: string): PageSummary[] {
+    return (this.db.prepare(`SELECT summary FROM page_catalog WHERE project_id=? AND job_id=?
+      AND available=1 AND excluded IS NULL AND instr(search_text,?)>0
+      GROUP BY url ORDER BY MAX(source_order) DESC LIMIT 40`).all(projectId, jobId, query.trim().toLowerCase()) as { summary: string }[])
+      .map(row => JSON.parse(row.summary));
+  }
+
+  page(projectId: string, jobId: string, pageId: string): PageSummary | undefined {
+    const row = this.db.prepare('SELECT summary FROM page_catalog WHERE project_id=? AND job_id=? AND id=?').get(projectId, jobId, pageId) as { summary: string } | undefined;
+    return row ? JSON.parse(row.summary) : undefined;
+  }
+
+  findingCounts(projectId: string, jobId?: string) {
+    return this.db.prepare(`SELECT COUNT(*) AS total, COALESCE(SUM(json_extract(f.body,'$.status')='done'),0) AS done
+      FROM artifacts f JOIN jobs j ON j.id=f.job_id WHERE f.project_id=? AND f.kind='finding'
+      AND json_extract(j.body,'$.kind')='audit' AND json_extract(f.body,'$.kind')!='visibility'
+      AND (f.job_id=? OR json_extract(f.body,'$.status')!='open')`).get(projectId, jobId ?? null) as { total: number; done: number };
+  }
+
+  findings(projectId: string, jobId: string, url: string): Finding[] {
+    return (this.db.prepare(`SELECT f.body FROM artifacts f JOIN jobs j ON j.id=f.job_id
+      WHERE f.project_id=? AND f.kind='finding' AND CAST(json_extract(f.body,'$.targetUrl') AS TEXT)=?
+      AND json_extract(j.body,'$.kind')='audit' AND json_extract(f.body,'$.kind')!='visibility'
+      AND (f.job_id=? OR json_extract(f.body,'$.status')!='open') ORDER BY f.rowid DESC`).all(projectId, url, jobId) as { body: string }[]).map(row => JSON.parse(row.body));
+  }
+
   /** Count and page against one SQLite snapshot; accepted work from older audits keeps its original URL association. */
   list(projectId: string, jobId: string, input: PageQuery) {
     if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 50 ||
@@ -81,9 +107,12 @@ export class PageCatalog {
       SELECT
         (SELECT json_object('allPages',COUNT(*),'attention',COALESCE(SUM(attention),0),
           'unavailable',COALESCE(SUM(1-available),0),'excluded',COALESCE(SUM(excluded IS NOT NULL),0)) FROM pages) AS counts,
-        (SELECT json_group_array(json_object('name',name,'count',count)) FROM (
+        (SELECT json_group_array(json_object('name',name,'count',count,'rows',json((
+          SELECT json_group_array(json_object('page',json(summary),'openChecks',open_checks)) FROM (
+            SELECT summary,open_checks FROM filtered WHERE ${groupColumn}=g.name ORDER BY source_order DESC,id LIMIT 10
+          ))))) FROM (
           SELECT ${groupColumn} AS name,COUNT(*) AS count FROM filtered GROUP BY ${groupColumn}
-          ORDER BY MAX(source_order) DESC,name LIMIT 20 OFFSET ?)) AS groups,
+          ORDER BY MAX(source_order) DESC,name LIMIT 20 OFFSET ?) g) AS groups,
         (SELECT COUNT(*) FROM (SELECT ${groupColumn} FROM filtered GROUP BY ${groupColumn})) AS groupCount,
         (SELECT COUNT(*) FROM narrowed) AS total,
         (SELECT json_group_array(json_object('page',json(summary),'openChecks',open_checks)) FROM (
@@ -94,7 +123,7 @@ export class PageCatalog {
         };
       return {
         counts: JSON.parse(result.counts) as { allPages: number; attention: number; unavailable: number; excluded: number },
-        groups: JSON.parse(result.groups) as { name: string; count: number }[], groupCount: result.groupCount,
+        groups: JSON.parse(result.groups) as { name: string; count: number; rows: { page: PageSummary; openChecks: number }[] }[], groupCount: result.groupCount,
         total: result.total, offset: input.offset, limit: input.limit,
         rows: JSON.parse(result.rows) as { page: PageSummary; openChecks: number }[],
       };

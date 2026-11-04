@@ -1,17 +1,8 @@
-import type { Finding, PageSummary } from '../server/contracts';
-import { pageSearchExclusion } from '../server/page-classification';
+import type { Finding } from '../server/contracts';
 
 const priority = { high: 0, medium: 1, low: 2 };
 
 export const opportunityFindings = (findings: Finding[]) => findings.filter(finding => ['analysis', 'console'].includes(finding.kind));
-export const auditFindings = (findings: Finding[]) => findings.filter(finding => !['analysis', 'console', 'visibility'].includes(finding.kind));
-
-/** Join once by URL: a large crawl must not scan every page again for every finding. */
-export function visibleAuditFindings(findings: Finding[], pages: PageSummary[]): Finding[] {
-  const exclusions = new Map<string, boolean>();
-  for (const page of pages) if (!exclusions.has(page.url)) exclusions.set(page.url, !!pageSearchExclusion(page));
-  return auditFindings(findings).filter(finding => !exclusions.get(finding.targetUrl ?? ''));
-}
 
 /** Related page findings share a heading while retaining their own evidence and status. */
 export function findingGroups(findings: Finding[]) {

@@ -28,7 +28,7 @@ export async function api<T = any>(
       : "The workspace did not confirm this schedule. Check your schedules or retry with the same settings."
     : "Your local workspace could not be reached. Keep the application running and try again.";
   let response: Response;
-  const workspaceRead = method === 'GET' && /^\/projects\/[^/]+\/workspace$/.test(path);
+  const workspaceRead = method === 'GET' && /^\/projects\/[^/]+\/workspace(?:\?pages=lazy)?$/.test(path);
   const cached = workspaceRead && workspaceCache?.path === path ? workspaceCache : undefined;
   const generation = sessionGeneration;
   const options: RequestInit = {

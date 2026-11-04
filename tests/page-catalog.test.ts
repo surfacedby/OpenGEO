@@ -19,12 +19,13 @@ test('bounded page navigation preserves full totals, search, scopes and older ac
   const { app } = await createApp(store, vault, 'page-catalog-session');
   try {
     const project = store.createProject(projectInput.parse({ domain: 'example.com', brand: 'Example' }));
+    const older = store.enqueue(jobInput.parse({ projectId: project.id, kind: 'audit' }), randomUUID());
+    store.updateJob(older.id, { status: 'completed' });
     const audit = store.enqueue(jobInput.parse({ projectId: project.id, kind: 'audit' }), randomUUID());
     const pages = Array.from({ length: 101 }, (_, index) => parsePage(`https://example.com/folder-${index}/page`, index === 0 ? 404 : 200,
       `<title>Page ${index}</title><h1>Guide</h1>${index === 1 ? '<meta name="robots" content="noindex">' : ''}<p>${'Useful explanation. '.repeat(100)}</p>`));
     store.db.transaction(() => { for (const page of pages) store.put('page', project.id, audit.id, page); })();
     store.updateJob(audit.id, { status: 'completed' });
-    const older = store.enqueue(jobInput.parse({ projectId: project.id, kind: 'audit' }), randomUUID());
     const finding = auditFindings(project, older.id, [pages[2]])[0];
     store.put('finding', project.id, older.id, finding);
     store.updateJob(older.id, { status: 'completed' });
@@ -52,6 +53,26 @@ test('bounded page navigation preserves full totals, search, scopes and older ac
     assert.equal((await app.inject({ url: path + '?limit=51', headers })).statusCode, 422);
     const response = await app.inject({ url: path + '?query=Page%2099', headers });
     assert.equal(response.statusCode, 200); assert.equal(response.json().rows[0].page.id, pages[99].id);
+    assert.equal(response.json().groups[0].rows[0].page.id, pages[99].id);
+    const full = await app.inject({ url: `/api/projects/${project.id}/workspace`, headers });
+    const readPages = store.pageSummaries, readFindings = store.findings;
+    store.pageSummaries = () => { throw new Error('Lazy workspace must not load the crawl'); };
+    store.findings = () => { throw new Error('Lazy workspace must not load every audit finding'); };
+    const lazy = await app.inject({ url: `/api/projects/${project.id}/workspace?pages=lazy`, headers: { ...headers, 'if-none-match': String(full.headers.etag) } });
+    store.pageSummaries = readPages; store.findings = readFindings;
+    assert.equal(lazy.statusCode, 200, 'Different representations cannot share a validator');
+    assert.equal(lazy.json().auditId, audit.id);
+    assert.equal(full.json().pages.length, 101);
+    assert.deepEqual(lazy.json().pages, []);
+    assert.deepEqual(lazy.json().presentation.audit, full.json().presentation.audit);
+    assert.deepEqual(lazy.json().findingCounts, full.json().findingCounts);
+    const detail = await app.inject({ url: path + '/' + pages[2].id, headers });
+    assert.equal(detail.statusCode, 200);
+    assert.equal(detail.json().page.id, pages[2].id);
+    assert.equal(detail.json().findings[0].id, finding.id);
+    assert.equal(detail.json().findings[0].status, 'done', 'Historical completed work remains available in the page drawer');
+    const suggestions = await app.inject({ url: path.replace('/pages', '/page-suggestions') + '?query=Page%2099', headers });
+    assert.deepEqual(suggestions.json().pages.map((page: any) => page.id), [pages[99].id]);
     const other = store.createProject(projectInput.parse({ domain: 'other.example', brand: 'Other' }));
     assert.equal((await app.inject({ url: path.replace(project.id, other.id), headers })).statusCode, 404);
     assert.equal((await app.inject({ url: path, headers: { host: headers.host } })).statusCode, 401);

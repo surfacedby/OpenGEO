@@ -141,10 +141,10 @@ export function topicView(store: Store, project: Project, topic: Topic) {
 /** The list and the topic selectors need only each topic's latest covering check. */
 export function topicSummaries(store: Store, project: Project, jobs: Job[]) {
   if (!project.topics.length) return [];
-  const read = reader(store, project), pages = latestAuditPages(store, project, jobs);
+  const read = reader(store, project);
   return project.topics.map((topic) => {
     const latest = covering(topic, jobs, read)[0];
-    const cited = latest ? targets(topic, latest.observations, pages).filter((target) => target.answersCiting > 0).length : null;
+    const cited = latest ? targets(topic, latest.observations, []).filter((target) => target.answersCiting > 0).length : null;
     return {
       id: topic.id,
       name: topic.name,
