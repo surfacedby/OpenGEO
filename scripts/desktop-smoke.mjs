@@ -32,7 +32,7 @@ try {
   await page
     .getByRole("heading", { name: "Power your AI visibility workspace", exact: true })
     .waitFor({ timeout: 30000 });
-  await page.getByRole("button", { name: phase === 'seed' ? "Use local audits only" : "Continue without AI", exact: true }).click();
+  await page.getByRole("button", { name: "Continue without AI", exact: true }).click();
   await page
     .getByRole("textbox", { name: "Website", exact: true })
     .fill("example.com");
@@ -48,7 +48,7 @@ try {
   await page.getByRole("checkbox", { name: "Help improve OpenGEO by sharing usage", exact: true }).uncheck();
   const saved = await savedPreference;
   if (!saved.ok() || (await saved.json()).enabled !== false) throw new Error('Usage sharing withdrawal was not saved');
-  await page.getByRole("button", { name: phase === 'seed' ? "Open workspace & audit" : "Check website health", exact: true }).click();
+  await page.getByRole("button", { name: "Check website health", exact: true }).click();
   }
   await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();
   const runtime = JSON.parse(readFileSync(join(directory, "runtime.json"), "utf8"));
