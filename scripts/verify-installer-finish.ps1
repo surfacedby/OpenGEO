@@ -65,6 +65,29 @@ try {
     if ([IO.Path]::GetFullPath($target) -ne [IO.Path]::GetFullPath((Join-Path $Installation 'OpenGEO.exe'))) { throw 'Shortcut points to a different installation.' }
     @{finishScreen=$true; launchCheckbox=$true; shortcutCheckbox=$true; shortcutTargetVerified=$true; installerExit=$process.ExitCode} | ConvertTo-Json | Set-Content -LiteralPath $Receipt -Encoding utf8
 } finally {
-    @{finishObserved=$finishVerified; controls=$observed} | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath ($Receipt + '.diagnostic.json') -Encoding utf8
+    # Preserve the actual stalled phase and owned process tree before cleanup.
+    # Command lines and unrelated runner processes are deliberately not retained.
+    $processEvidence = @(); $observationError = $null
+    try {
+        $allProcesses = @(Get-CimInstance Win32_Process -OperationTimeoutSec 5)
+        $ownedIds = [Collections.Generic.HashSet[uint32]]::new()
+        $null = $ownedIds.Add([uint32]$process.Id)
+        $installationPrefix = [IO.Path]::GetFullPath($Installation).TrimEnd('\') + '\'
+        foreach ($entry in $allProcesses) {
+            if ($entry.ExecutablePath -and $entry.ExecutablePath.StartsWith($installationPrefix, [StringComparison]::OrdinalIgnoreCase)) { $null = $ownedIds.Add([uint32]$entry.ProcessId) }
+        }
+        do {
+            $added = $false
+            foreach ($entry in $allProcesses) {
+                if ($ownedIds.Contains([uint32]$entry.ParentProcessId) -and $ownedIds.Add([uint32]$entry.ProcessId)) { $added = $true }
+            }
+        } while ($added)
+        $processEvidence = @($allProcesses | Where-Object { $ownedIds.Contains([uint32]$_.ProcessId) } | Select-Object ProcessId, ParentProcessId, Name, ExecutablePath, CreationDate, KernelModeTime, UserModeTime, ReadTransferCount, WriteTransferCount, ThreadCount)
+    } catch { $observationError = $_.Exception.Message }
+    $installedFiles = @('OpenGEO.exe', 'Uninstall OpenGEO.exe', 'resources\app.asar') | ForEach-Object {
+        $file = Get-Item -LiteralPath (Join-Path $Installation $_) -ErrorAction SilentlyContinue
+        @{path=$_; exists=($null -ne $file); bytes=if ($file) {$file.Length} else {$null}; modified=if ($file) {$file.LastWriteTimeUtc} else {$null}}
+    }
+    @{finishObserved=$finishVerified; controls=$observed; processes=$processEvidence; installedFiles=$installedFiles; observationError=$observationError} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath ($Receipt + '.diagnostic.json') -Encoding utf8
     if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
 }

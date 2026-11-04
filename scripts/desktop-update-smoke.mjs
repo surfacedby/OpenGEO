@@ -4,7 +4,8 @@ import { createServer } from 'node:http';
 import { createReadStream, statSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { basename, dirname, relative, resolve, isAbsolute, join } from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import { promisify } from 'node:util';
 import { once } from 'node:events';
 
@@ -33,6 +34,7 @@ const server = createServer((request, response) => {
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const environmentNames = new Set(['PATH', 'PATHEXT', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'TEMP', 'TMP', 'USERPROFILE', 'HOME', 'APPDATA', 'LOCALAPPDATA', 'PROGRAMDATA', 'PROGRAMFILES', 'PROGRAMFILES(X86)', 'SYSTEMDRIVE']);
 let application;
+let exitObserver;
 try {
   application = await electron.launch({ executablePath: executable, env: { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => environmentNames.has(name.toUpperCase()))), OPENGEO_DESKTOP_DATA_DIR: profile }, timeout: 30000 });
   const page = await application.firstWindow();
@@ -59,16 +61,28 @@ try {
   await page.evaluate(() => window.opengeoDesktop.setDraftProtectionPending(true));
   assert.match((await page.evaluate(() => window.opengeoDesktop.updates('install'))).message, /Save your changes/);
   await page.evaluate(() => window.opengeoDesktop.setDraftProtectionPending(false));
-  // The installer can inherit output handles. Process exit proves shutdown without
-  // waiting for stream closure, which cannot happen until its Finish screen closes.
-  const exited = once(application.process(), 'exit', { signal: AbortSignal.timeout(30000) });
+  // Playwright launches through cmd.exe on Windows. Observe the actual Electron
+  // process handle, not that launcher or pipes inherited by the installer.
+  const applicationPid = await application.evaluate(() => process.pid);
+  exitObserver = spawn('pwsh', ['-NoProfile', '-File', 'scripts/observe-process-exit.ps1', '-ObservedProcessId', String(applicationPid), '-Executable', executable], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const observations = [];
+  const observerLines = createInterface({ input: exitObserver.stdout });
+  observerLines.on('line', line => observations.push(JSON.parse(line)));
+  let observerError = '';
+  exitObserver.stderr.on('data', bytes => { observerError += bytes.toString(); });
+  const observerClosed = once(exitObserver, 'close');
+  const observerReady = await once(observerLines, 'line', { signal: AbortSignal.timeout(10000) });
+  assert.deepEqual(JSON.parse(observerReady[0]), { state: 'watching', processId: applicationPid });
   await page.evaluate(() => { setTimeout(() => void window.opengeoDesktop.updates('install'), 100); });
-  const [exitCode, exitSignal] = await exited;
-  assert.equal(exitCode, 0); assert.equal(exitSignal, null);
+  const [exitCode, exitSignal] = await observerClosed;
+  writeFileSync(receipt + '.exit.json', JSON.stringify({ applicationPid, observations, observerExit: exitCode, observerError }, null, 2));
+  assert.equal(exitCode, 0, observerError); assert.equal(exitSignal, null);
+  assert.deepEqual(observations[1], { state: 'exited', processId: applicationPid, exitCode: 0 });
   application = null;
   await promisify(execFile)('pwsh', ['-NoProfile', '-File', 'scripts/verify-installer-finish.ps1', '-Installer', downloaded, '-Installation', dirname(executable), '-Receipt', receipt + '.finish.json', '-Attach'], { windowsHide: true, timeout: 240000 });
-  writeFileSync(receipt, JSON.stringify({ packagedUpdateDownload: true, downloadSha512: sha512, completeDownloads, explicitInstallRequired: true, unsavedWorkBlockedInstall: true, actualInstallerCompleted: true, transport: 'isolated loopback feed serving the exact candidate', comparisonVersion: '0.0.0', relaunchedBySeparateWorkspaceVerification: true }, null, 2));
+  writeFileSync(receipt, JSON.stringify({ packagedUpdateDownload: true, downloadSha512: sha512, completeDownloads, explicitInstallRequired: true, unsavedWorkBlockedInstall: true, applicationProcessExit: observations[1], actualInstallerCompleted: true, transport: 'isolated loopback feed serving the exact candidate', comparisonVersion: '0.0.0', relaunchedBySeparateWorkspaceVerification: true }, null, 2));
 } finally {
+  if (exitObserver && exitObserver.exitCode === null) exitObserver.kill();
   // Failed verification must not hang cleanup on the same inherited installer handles.
   if (application?.process().exitCode === null) application.process().kill();
   server.closeAllConnections();
