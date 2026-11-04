@@ -7,7 +7,8 @@ import { crawl, auditFindings } from "./audit.js";
 import { renderedFetch } from "./render.js";
 import { crawlFetch } from "./network.js";
 import { scheduledBudgetCeiling } from "./scheduler.js";
-import { completedMeasurement } from "./portable-results.js";
+import { completedBrandMeasurement, completedMeasurement } from "./portable-results.js";
+import { campaignScope } from "./campaigns.js";
 import { evidenceBatches, contentSources } from "./evidence-context.js";
 import {
   presence,
@@ -222,7 +223,7 @@ export class Runner {
       const saved = this.store.step(job.id, "project");
       const project: Project = saved?.body
         ? JSON.parse(saved.body)
-        : this.store.project(job.projectId);
+        : campaignScope(this.store.project(job.projectId), job.campaignId);
       if (!saved) this.store.setStep(job.id, "project", "done", project);
       if (["measure", "recheck"].includes(job.kind) && job.requestedAnswers === undefined)
         this.store.updateJob(job.id, { requestedAnswers: project.prompts.length });
@@ -417,7 +418,7 @@ export class Runner {
         let evidence;
         if (priorEvidence?.body) evidence = JSON.parse(priorEvidence.body);
         else {
-          const latest = this.store.jobs(project.id).find(completedMeasurement);
+          const latest = this.store.jobs(project.id).find(completedBrandMeasurement);
           if (!latest) throw new ProviderError("evidence", "Collect visibility evidence first.");
           const audit = this.store.jobs(project.id).find(item => item.kind === "audit" && item.status === "completed");
           const pages = audit ? this.store.pages(project.id, audit.id) : [];

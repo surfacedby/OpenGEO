@@ -38,6 +38,16 @@ Question coverage uses the saved request plan. Editing today's questions does no
 
 Even comparable checks are samples. They can show a change worth investigating, but cannot isolate its cause.
 
+## Campaigns
+
+A campaign groups some of a brand's questions toward one goal, with optional target pages and a choice of the brand's competitors. A question can belong to several campaigns and still counts once in the brand's totals.
+
+A campaign reads every check that asked all of its questions: a check of the whole question list, or a check limited to the campaign. Its rates use only the answers to its own questions. Its trend compares checks with the same answer settings and the same campaign questions, so adding or removing a campaign question starts a new comparison.
+
+A check limited to a campaign asks only that campaign's questions, so providers collect and price only those answers. Its answers count in the campaign. The brand's totals stay on the latest check of every question, and the brand's history shows the campaign check as a gap named after the campaign rather than as a reading.
+
+A target page is cited when an answer links to it. Each answer counts once per page. Fragments, a trailing slash, a leading `www.` and `utm_` tracking parameters (ChatGPT adds `utm_source=openai` to the links it cites) are ignored; any other difference in path or query is a different page.
+
 ## Read source coverage
 
 Each answer counts once for a domain or page, even if it cites it repeatedly. Page fragments are combined; different paths and queries remain distinct. A source's coverage cannot exceed 100%, but coverage across sources can add up to more than 100% because one answer may cite several sites. Unsafe or credential-bearing links are excluded from source tables.

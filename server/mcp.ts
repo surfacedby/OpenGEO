@@ -59,6 +59,7 @@ server.registerTool(
       auditJobId: z.string().uuid().optional(),
       revisionInstructions: z.string().min(3).max(2000).optional(),
       webSearch: z.boolean().optional(),
+      campaignId: z.string().uuid().optional(),
     },
     annotations: { readOnlyHint: false, openWorldHint: true },
   },
