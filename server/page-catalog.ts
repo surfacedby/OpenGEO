@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { Finding, PageEvidence, PageSummary } from './contracts.js';
-import { pageAvailable, pageFolder, pageSearchExclusion, pageType } from './page-classification.js';
+import { pageAvailable, pageFolder, pageIdentity, pageSearchExclusion, pageType } from './page-classification.js';
 
 export type PageQuery = {
   query: string; tab: 'all' | 'attention' | 'unavailable' | 'excluded';
@@ -60,6 +60,18 @@ export class PageCatalog {
       AND available=1 AND excluded IS NULL AND instr(search_text,?)>0
       GROUP BY url ORDER BY MAX(source_order) DESC LIMIT 40`).all(projectId, jobId, query.trim().toLowerCase()) as { summary: string }[])
       .map(row => JSON.parse(row.summary));
+  }
+
+  /** Topic targets need only a few summaries. Scan URL metadata without materializing the entire saved crawl. */
+  targets(projectId: string, jobId: string, urls: string[]): PageSummary[] {
+    const remaining = new Set(urls.map(pageIdentity)), ids: string[] = [];
+    if (!remaining.size) return [];
+    const rows = this.db.prepare('SELECT id,url FROM page_catalog WHERE project_id=? AND job_id=? ORDER BY source_order DESC').iterate(projectId, jobId) as Iterable<{ id: string; url: string }>;
+    for (const row of rows) {
+      if (remaining.delete(pageIdentity(row.url))) ids.push(row.id);
+      if (!remaining.size) break;
+    }
+    return ids.map(id => this.page(projectId, jobId, id)!);
   }
 
   page(projectId: string, jobId: string, pageId: string): PageSummary | undefined {

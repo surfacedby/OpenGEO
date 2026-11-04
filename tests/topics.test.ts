@@ -16,6 +16,7 @@ import { Providers } from '../server/providers.js';
 import { ProviderError, jobInput, projectInput } from '../server/contracts.js';
 import { exportProject } from '../server/export.js';
 import { importProject } from '../server/import.js';
+import { parsePage } from '../server/audit.js';
 
 const prompts = ['Which example tools publish reports?', 'How do teams share example reports?', 'What is the best example dashboard?'];
 const session = 'synthetic-topic-session';
@@ -27,6 +28,30 @@ function fixture() {
   const vault = new Vault(dir, { encrypt: text => Buffer.from(text), decrypt: bytes => bytes.toString() });
   return { dir, store, vault, close() { store.close(); rmSync(dir, { recursive: true, force: true }); } };
 }
+
+test('topic targets load only matching page summaries while preserving whole-crawl totals and URL identity', async () => {
+  const f = fixture();
+  const { app } = await createApp(f.store, f.vault, session);
+  try {
+    const tracked = topic('Documentation', [prompts[0]], { targetUrls: ['https://www.example.com/docs/target/?utm_source=topic&plan=pro', 'https://example.com/docs/target?plan=basic'] });
+    const project = f.store.createProject(projectInput.parse({ domain: 'example.com', brand: 'Example', prompts, topics: [tracked] }));
+    const audit = f.store.enqueue(jobInput.parse({ projectId: project.id, kind: 'audit' }), randomUUID());
+    for (let index = 0; index < 100; index++) f.store.put('page', project.id, audit.id, parsePage(`https://example.com/docs/${index}`, 200, '<title>Guide</title>'));
+    f.store.put('page', project.id, audit.id, parsePage('https://example.com/docs/target?plan=pro', 200, '<title>Original</title>'));
+    f.store.put('page', project.id, audit.id, parsePage('https://example.com/docs/target/?plan=pro&utm_source=crawl', 200, '<title>Latest</title>'));
+    f.store.updateJob(audit.id, { status: 'completed' });
+    f.store.pageSummaries = () => { throw new Error('Topic views must not load the entire catalog'); };
+    f.store.pages = () => { throw new Error('Topic views must not load full page evidence'); };
+    const response = await app.inject({ url: `/api/projects/${project.id}/topics/${tracked.id}`, headers });
+    assert.equal(response.statusCode, 200);
+    const view = response.json();
+    assert.equal(view.presentation.audit.pages, 102);
+    assert.equal(view.presentation.audit.titles, 102);
+    assert.equal(view.targets[0].page.title, 'Latest', 'Newest matching saved page retains original lookup precedence');
+    assert.equal(view.targets[1].page, null, 'Meaningful query parameters must not collapse different pages');
+    assert.deepEqual(view.targets.map((target: any) => target.answersCollected), [0, 0]);
+  } finally { await app.close(); f.close(); }
+});
 test('tracking suggestions appends to current prompts without replacing topics or duplicating retries', async () => {
   const f = fixture();
   const { app } = await createApp(f.store, f.vault, session);

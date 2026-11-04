@@ -6,6 +6,15 @@ export const pageTypeLabels = {
 } as const;
 export type PageType = keyof typeof pageTypeLabels;
 
+/** Tracking tags do not identify a different cited page; meaningful query parameters still do. */
+export function pageIdentity(value: string): string {
+  try {
+    const url = new URL(value);
+    for (const name of [...url.searchParams.keys()]) if (name.toLowerCase().startsWith('utm_')) url.searchParams.delete(name);
+    return url.hostname.replace(/^www\./, '') + url.pathname.replace(/\/+$/, '') + url.search;
+  } catch { return value; }
+}
+
 export function pageAvailable(page: Pick<PageSummary, 'status'>): boolean {
   return page.status >= 200 && page.status < 300;
 }

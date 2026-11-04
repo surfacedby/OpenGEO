@@ -5,6 +5,7 @@ import { completedMeasurement, measurementTime, portableJobResult } from "./port
 import type { Store } from "./storage.js";
 import { z } from "zod";
 import { publicUrl, sameSiteHost } from "./network.js";
+import { pageIdentity as pageKey } from './page-classification.js';
 
 /** Topics point at the brand's own questions and competitors, so editing those lists never leaves a topic asking something the brand no longer tracks. */
 export function normalizeTopics(project: ProjectInput) {
@@ -30,17 +31,6 @@ export function topicScope(project: Project, topicId?: string): Project {
   if (!topic) throw new ProviderError("setup", "This topic is not part of this brand.");
   if (!topic.prompts.length) throw new ProviderError("setup", "Add at least one question to this topic before checking it.");
   return { ...project, prompts: topic.prompts, competitors: topic.competitors.length ? topic.competitors : project.competitors };
-}
-
-/** Answer engines tag the links they cite (ChatGPT adds utm_source=openai), so a tracking parameter never makes a cited page a different page. */
-function pageKey(value: string) {
-  try {
-    const url = new URL(value);
-    for (const name of [...url.searchParams.keys()]) if (name.toLowerCase().startsWith("utm_")) url.searchParams.delete(name);
-    return url.hostname.replace(/^www\./, "") + url.pathname.replace(/\/+$/, "") + url.search;
-  } catch {
-    return value;
-  }
 }
 
 /** Plans and answers are read once per check, so summaries for every topic stay cheap on each workspace refresh. */
@@ -95,11 +85,6 @@ function targets(topic: Topic, observations: Observation[], pages: PageSummary[]
   });
 }
 
-function latestAuditPages(store: Store, project: Project, jobs: Job[]) {
-  const audit = jobs.find((job) => job.kind === "audit" && job.status === "completed");
-  return audit ? store.pageSummaries(project.id, audit.id) : [];
-}
-
 /** One topic's evidence, read from every check that asked all of its questions, with a trend that compares only like with like. */
 export function topicView(store: Store, project: Project, topic: Topic) {
   const jobs = store.jobs(project.id), read = reader(store, project);
@@ -116,13 +101,16 @@ export function topicView(store: Store, project: Project, topic: Topic) {
     })
     .sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || a.jobId.localeCompare(b.jobId));
   const observations = latest?.observations ?? [];
-  const pages = latestAuditPages(store, project, jobs);
+  const audit = jobs.find(job => job.kind === 'audit' && job.status === 'completed');
+  const pages = audit ? store.pageCatalog.targets(project.id, audit.id, topic.targetUrls) : [];
+  const presentation = workspacePresentation([], latest?.job, observations, topic.prompts, requested);
+  if (audit) presentation.audit = store.pageCatalog.summary(project.id, audit.id);
   return {
     topic,
     measurement: latest?.job ?? null,
     observations,
     metrics: summarize(observations, latest ? requested : 0),
-    presentation: { ...workspacePresentation([], latest?.job, observations, topic.prompts, requested, pages), history, historyScopeAvailable: !!current },
+    presentation: { ...presentation, history, historyScopeAvailable: !!current },
     competitors: competitorEvidence({ ...project, competitors: topic.competitors.length ? topic.competitors : project.competitors }, observations),
     targets: targets(topic, observations, pages),
     checks: checks.map((check) => ({
