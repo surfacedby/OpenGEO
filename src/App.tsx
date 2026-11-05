@@ -869,7 +869,7 @@ function Jobs({
             event.preventDefault(); const data = new FormData(event.currentTarget); setResuming(true); setReviewError("");
             void run(async () => { try { await api("/jobs/" + j.id + "/resume", { reviewed: review.reason === "approval" || data.get("reviewed") === "on", ...(data.has("budget") ? { maxCostUsd: Number(data.get("budget")) } : {}) }); setReview(null); } catch (failure) { setReviewError((failure as Error).message); } }).finally(() => setResuming(false));
           }}><h3>{review.reason === "approval" ? "Approve this run" : "Resume this run"}</h3><p>{review.reason === "approval" ? j.progress : review.uncertainRequests ? "A previous request may have completed. Check your provider's activity before allowing another attempt." : j.error === "quota" ? "Resume when your provider's limits allow requests again. Saved results will be kept." : "Saved results will be kept. Resolve the issue shown above before continuing."}</p>
-            {review.reason === "approval" && review.provider === "console" && <p className="hint">Up to {usd(Math.floor(review.maxCostUsd * 10 + 1e-9) / 10)} will be held from your balance. Unused funds are returned when the run ends.</p>}
+            {review.reason === "approval" && review.provider === "console" && <p className="hint">Your spending limit is {usd(review.maxCostUsd)}. SurfacedBy reserves credits within this limit and returns unused credits when the run ends.</p>}
             {review.uncertainRequests > 0 && <label className="checkbox-field"><input type="checkbox" name="reviewed" required />I reviewed provider activity and approve retrying uncertain requests.</label>}
             {review.reason === "budget" && review.provider !== "chatgpt" && <label>New approved total budget (USD)<input name="budget" type="number" min={Math.max(review.spentUsd, review.maxCostUsd)} max={review.scheduledBudgetCeilingUsd ?? 10000} step="0.01" defaultValue={Math.max(review.spentUsd, review.maxCostUsd)} required /><small>Includes ${review.spentUsd.toFixed(3)} already committed. Increasing this amount approves additional provider spending.</small>{review.scheduledBudgetCeilingUsd !== undefined && <small>Schedule allowance for this run: ${review.scheduledBudgetCeilingUsd.toFixed(2)}.</small>}</label>}
             {reviewError && <p className="inline-error" role="alert">{reviewError}</p>}<div className="button-row"><button className="primary" disabled={resuming}>{resuming ? "Starting..." : review.reason === "approval" ? "Approve and start" : "Resume run"}</button><button type="button" className="secondary" disabled={resuming} onClick={() => setReview(null)}>Keep paused</button></div>
@@ -922,7 +922,6 @@ function JobDialog({
     [model, setModel] = useState(""),
     [platform, setPlatform] = useState(baseline?.platform ?? "chat_gpt"),
     [consolePlatforms, setConsolePlatforms] = useState<{ key: string; name: string; enabled: boolean }[]>([]),
-    [selectedQuestionPlatforms, setSelectedQuestionPlatforms] = useState<string[]>([]),
     [loading, setLoading] = useState(false),
     [budget, setBudget] = useState(0),
     [contentMode, setContentMode] = useState<'article' | 'page_update'>(finding && finding.opportunity?.type !== 'new_content' ? 'page_update' : 'article'),
@@ -943,7 +942,6 @@ function JobDialog({
     setModels([]);
     setModel("");
     setConsolePlatforms([]);
-    setSelectedQuestionPlatforms([]);
     setDiscoveryError("");
     setLoading(false);
     if (kind === "audit" || !connected[provider])
@@ -960,7 +958,6 @@ function JobDialog({
         }
         const enabled = (capability.platforms ?? []).filter((p: any) => p.enabled === true);
         setConsolePlatforms(enabled);
-        setSelectedQuestionPlatforms(capability.operations?.includes('measurement') ? capability.selected_question_platforms ?? [] : []);
         if (!enabled.some((p: any) => p.key === platform)) setPlatform(baseline ? '' : enabled[0]?.key ?? '');
         if (!enabled.length) setDiscoveryError('No answer platforms are available on this connection.');
       }).catch((e) => { if (!stopped) setDiscoveryError(e.message); }).finally(() => { if (!stopped) setLoading(false); });
@@ -1091,9 +1088,7 @@ function JobDialog({
             </p>
             {topic && <p className="small" role="note">Asks this topic's {topic.prompts.length} {topic.prompts.length === 1 ? 'question' : 'questions'}. Your other {project.prompts.length - topic.prompts.length} are not asked. The answers count in this topic and in your brand's check history, where this check shows as a partial check.</p>}
             {provider === 'console' && ['measure', 'recheck'].includes(kind) && !loading && !discoveryError && <p className="small">
-              {selectedQuestionPlatforms.includes(platform === 'chat_gpt' ? 'chatgpt' : platform)
-                ? 'Checks your selected questions with fresh answers. Review the estimate before any paid work starts.'
-                : 'Runs a full managed check using your questions. The displayed estimate covers the full check.'}
+              Runs a managed visibility check with answers and analysis for your selected questions. The estimate covers the full check.
             </p>}
             {!connected[provider] && (
               <p role="alert">{baseline ? 'The previous connection is unavailable. Reconnect it in Settings or choose another connection.' : 'Connect this provider in Settings first.'}</p>

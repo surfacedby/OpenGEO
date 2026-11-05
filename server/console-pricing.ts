@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { ProviderError } from './contracts.js';
+import { USD_SCALE, usdMicros } from './usd.js';
 
-const scale = 1_000_000;
+const scale = USD_SCALE;
 export const usdString = z.string().regex(/^\d{1,9}(?:\.\d{1,6})?$/)
   .refine(value => Number.isSafeInteger(Math.round(Number(value) * scale)));
 
@@ -34,7 +35,8 @@ export function creditsUsd(credits: number, unitUsd: number): number {
 /** Floor the monetary approval: converting a limit must never authorize an extra credit. */
 export function creditsWithinBudget(budgetUsd: number, unitUsd: number): number {
   creditsUsd(0, unitUsd);
-  if (!Number.isFinite(budgetUsd) || budgetUsd < 0 || budgetUsd > 1000000)
+  const budgetMicros = usdMicros(budgetUsd, 'floor');
+  if (budgetMicros === null || budgetUsd > 1000000)
     throw new ProviderError('budget', 'Choose a valid spending limit.');
-  return Math.floor(Math.floor(budgetUsd * scale + 1e-7) / Math.round(unitUsd * scale));
+  return Math.floor(budgetMicros / Math.round(unitUsd * scale));
 }

@@ -8,10 +8,11 @@ import type { Providers } from "./providers.js";
 import type { Store } from "./storage.js";
 import type { Vault } from "./vault.js";
 import type { Runner } from "./workflows.js";
-import { askShare } from "./ask-scope.js";
+import { askFit } from "./ask-scope.js";
 import { consolePlatformKey, localPlatformKey, platformName } from './platforms.js';
 import { publicObservation } from './public-results.js';
 import { quotedCreditUsd, usdString } from './console-pricing.js';
+import { sumUsd } from './usd.js';
 
 /** Direct connections have implemented adapters; managed engines come from Console's live contract. */
 const directEngines = {
@@ -43,10 +44,11 @@ function askIdFor(projectId: string, key: string) {
   return h.slice(0, 8) + "-" + h.slice(8, 12) + "-4" + h.slice(13, 16) + "-" + (8 | (parseInt(h[16], 16) & 3)).toString(16) + h.slice(17, 20) + "-" + h.slice(20, 32);
 }
 
-async function surfacedByPlatforms(deps: AskDeps): Promise<{ platforms: { key: string; name: string; enabled: boolean }[]; selected: string[]; reason?: string }> {
+async function surfacedByPlatforms(deps: AskDeps): Promise<{ platforms: { key: string; name: string; enabled: boolean }[]; selected: string[];
+  pricing?: ReturnType<typeof consoleCapabilities>['pricing']; reason?: string }> {
   try {
     const capability = consoleCapabilities((await deps.providers.console("/capabilities", undefined, undefined, AbortSignal.timeout(15000))).data);
-    return { platforms: capability.platforms, selected: capability.selected_question_platforms };
+    return { platforms: capability.platforms, selected: capability.selected_question_platforms, pricing: capability.pricing };
   } catch {
     return { platforms: [], selected: [], reason: "SurfacedBy availability could not be verified. Try again shortly." };
   }
@@ -69,9 +71,12 @@ export async function engineCatalog(deps: AskDeps) {
     else if (engine.provider === "console" && !surfacedBy.selected.includes(consolePlatformKey(engine.platform)))
       reason = "Single-question checks are not available for this engine on your SurfacedBy connection";
     else if (engine.provider === "dataforseo" && requestEstimate <= 0) reason = "Set a DataForSEO request estimate in Settings";
+    const menu = engine.provider === 'console' && !reason
+      ? surfacedBy.pricing?.measurement?.platforms.find(row => row.platform === consolePlatformKey(engine.platform)) : undefined;
     return { id, ...engine, available: !reason, ...(reason ? { reason } : {}),
       price: engine.provider === "chatgpt" ? "free" as const : engine.provider === "console" ? "quote" as const : "per_request" as const,
-      ...(engine.provider === "dataforseo" && requestEstimate > 0 ? { estimateUsd: requestEstimate } : {}) };
+      ...(engine.provider === "dataforseo" && requestEstimate > 0 ? { estimateUsd: requestEstimate } : {}),
+      ...(menu ? { estimateUsd: Number(menu.one_answer_usd) } : {}) };
   });
   return { engines, availabilityNote: surfacedBy.reason ?? (!connected.console ? 'Connect SurfacedBy to see its available engines.' : undefined),
     defaultLimitUsd: deps.store.setting<number>("askLimitUsd", defaultLimitUsd) };
@@ -105,25 +110,31 @@ export async function estimateAsk(deps: AskDeps, projectId: string, body: unknow
   const input = z.object({ question, engines: engineList }).strict().parse(body);
   const project = deps.store.project(projectId);
   const catalog = await engineCatalog(deps);
-  const requestEstimate = deps.store.setting<number>("measurementRequestEstimateUsd", 0);
   const engines = await Promise.all(input.engines.map(async id => {
     const engine = catalog.engines.find(row => row.id === id);
     if (!engine?.available) return { id, estimateUsd: null, note: engine?.reason ?? 'This engine is not available on your connection.' };
-    if (engine.provider === "chatgpt") return { id, estimateUsd: 0 };
-    if (engine.provider === "dataforseo") return { id, estimateUsd: requestEstimate > 0 ? requestEstimate : null };
-    try { return { id, ...await surfacedByQuote(deps, project, input.question, engine.platform) }; }
-    catch { return { id, estimateUsd: null, note: "SurfacedBy did not return a price. It is checked again when the ask starts." }; }
+    return { id, ...await quoteEngine(deps, project, input.question, engine) };
   }));
   const known = engines.every(row => row.estimateUsd !== null);
   const expiries = engines.flatMap(row => 'expiresAt' in row && typeof row.expiresAt === 'string' ? [row.expiresAt] : []);
   return { engines, expiresAt: expiries.length ? expiries.sort((a, b) => Date.parse(a) - Date.parse(b))[0] : null,
-    totalUsd: known ? Math.round(engines.reduce((sum, row) => sum + (row.estimateUsd ?? 0), 0) * 1_000_000) / 1_000_000 : null };
+    totalUsd: known ? sumUsd(engines.map(row => row.estimateUsd ?? 0)) : null };
 }
 
-/** Split the approval across engines. Quoted providers enforce it; metered providers can report costs above their estimate. */
+async function quoteEngine(deps: AskDeps, project: Project, text: string, engine: EngineDefinition) {
+  if (engine.provider === 'chatgpt') return { estimateUsd: 0 };
+  if (engine.provider === 'dataforseo') {
+    const estimate = deps.store.setting<number>('measurementRequestEstimateUsd', 0);
+    return { estimateUsd: estimate > 0 ? estimate : null };
+  }
+  try { return await surfacedByQuote(deps, project, text, engine.platform); }
+  catch { return { estimateUsd: null, note: 'SurfacedBy did not return a price. It is checked again when the ask starts.' }; }
+}
+
+/** Recheck estimates before atomically saving the shared approval. Execution still enforces each saved limit. */
 export async function createAsk(deps: AskDeps, projectId: string, body: unknown, key: string) {
   const input = askInput.parse(body);
-  deps.store.project(projectId);
+  const project = deps.store.project(projectId);
   const askId = askIdFor(projectId, key);
   const inputHash = createHash('sha256').update(JSON.stringify({ ...input, engines: [...input.engines].sort() })).digest('hex');
   const previous = deps.store.askRequest(askId, inputHash);
@@ -138,11 +149,13 @@ export async function createAsk(deps: AskDeps, projectId: string, body: unknown,
   if (unavailable) throw new ProviderError("capability", unavailable.label + " (" + unavailable.detail + "): " + unavailable.reason + ".");
   const paid = chosen.filter(engine => engine.price !== "free");
   if (paid.length && input.maxCostUsd <= 0) throw new ProviderError("budget", "Set a spending limit to ask paid engines. Nothing was started.");
-  const share = askShare(input.maxCostUsd, paid.length);
-  if (paid.length && share <= 0) throw new ProviderError("budget", "This limit is too small to share across the paid engines. Nothing was started.");
+  const quotes = await Promise.all(paid.map(engine => quoteEngine(deps, project, input.question, engine)));
+  const fit = askFit(input.maxCostUsd, quotes.map(quote => quote.estimateUsd));
+  if (fit.overLimit) throw new ProviderError('budget', 'The selected engines exceed your spending limit. Review the estimates or choose fewer engines. Nothing was started.');
+  const limits = new Map(paid.map((engine, index) => [engine.id, fit.limitsUsd[index]]));
   const result = deps.store.enqueueAsk(askId, projectId, inputHash, chosen.map(engine => jobInput.parse({
     projectId, kind: "ask", askId, question: input.question, provider: engine.provider, platform: engine.platform,
-    maxCostUsd: engine.price === "free" ? 0 : share, webSearch: true,
+    maxCostUsd: engine.price === "free" ? 0 : limits.get(engine.id), webSearch: true,
   })));
   if (paid.length) deps.store.set("askLimitUsd", input.maxCostUsd);
   return result;
@@ -172,6 +185,15 @@ function engineState(store: Store, job: Job) {
   return { answer, state };
 }
 
+/** History and detail share the saved billing state; a held reservation is not a final charge. */
+function askTotals(jobs: Job[]) {
+  return {
+    limitUsd: sumUsd(jobs.map(job => job.maxCostUsd)),
+    spentUsd: sumUsd(jobs.map(job => job.spentUsd)),
+    costBasis: jobs.some(job => job.costBasis === 'includes_estimates') ? 'includes_estimates' as const : 'reported' as const,
+  };
+}
+
 export function listAsks(store: Store, projectId: string) {
   const groups = new Map<string, Job[]>();
   for (const job of askJobs(store, projectId)) groups.set(job.askId!, [...(groups.get(job.askId!) ?? []), job]);
@@ -184,7 +206,7 @@ export function listAsks(store: Store, projectId: string) {
   return {
     asks: [...groups.entries()].map(([askId, jobs]) => ({
       askId, question: jobs[0].question!, createdAt: jobs.map(job => job.createdAt).sort()[0],
-      spentUsd: jobs.reduce((sum, job) => sum + job.spentUsd, 0),
+      ...askTotals(jobs),
       engines: jobs.slice().reverse().map(job => { const { answer, state } = engineState(store, job);
         return { engine: engineOf(job), platform: job.platform, label: savedEngineName(store, job.platform), state, mentioned: answer?.mentioned ?? null, cited: answer?.cited ?? null }; }),
     })),
@@ -214,8 +236,7 @@ export function readAsk(store: Store, projectId: string, askId: string) {
   return {
     askId, question: text, createdAt: jobs.map(job => job.createdAt).sort()[0], locale: context.locale,
     brand: context.brand, domain: context.domain,
-    limitUsd: Math.round(jobs.reduce((sum, job) => sum + job.maxCostUsd, 0) * 100) / 100,
-    spentUsd: jobs.reduce((sum, job) => sum + job.spentUsd, 0),
+    ...askTotals(jobs),
     tracked: project.prompts.some(prompt => sameQuestion(prompt, text)),
     topics: project.topics.filter(topic => topic.status === "active")
       .map(topic => ({ id: topic.id, name: topic.name, tracked: topic.prompts.some(prompt => sameQuestion(prompt, text)) })),

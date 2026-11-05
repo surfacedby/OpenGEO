@@ -4,6 +4,7 @@ import { z } from "zod";
 import { Store } from "./storage.js";
 import { jobInput, ProviderError, type Job } from "./contracts.js";
 import { topicScope } from "./topics.js";
+import { remainingUsd, withinUsdBudget } from './usd.js';
 export const scheduleInput = z
   .object({
     job: jobInput,
@@ -43,8 +44,8 @@ export function scheduledBudgetCeiling(store: Store, job: Job) {
       if (!ids.includes(job.id)) continue;
       const budget = approvals[key] ?? schedules.find((schedule) => key.startsWith(schedule.id + ":"))?.monthlyBudgetUsd;
       if (budget === undefined) throw new Error("The spending approval for this scheduled run is missing. Review the schedule before resuming.");
-      const otherCommitted = ids.filter((id) => id !== job.id).reduce((total, id) => total + committedCost(store.job(id)), 0);
-      ceilings.push(Math.max(0, budget - otherCommitted));
+      const otherCommitted = ids.filter((id) => id !== job.id).map(id => committedCost(store.job(id)));
+      ceilings.push(remainingUsd(budget, otherCommitted));
   }
   return ceilings.length ? Math.min(...ceilings) : undefined;
 }
@@ -116,19 +117,13 @@ export class Scheduler {
         .filter(([key]) => key.startsWith(s.id + ":"))
         .flatMap(([, runIds]) => runIds)
         .some((id) => ["queued", "running", "paused"].includes(this.store.job(id).status));
-      const committed = jobs.reduce(
-        (n, j) =>
-          n +
-          committedCost(j),
-        0,
-      );
-      const remaining = s.monthlyBudgetUsd - committed;
+      const committed = jobs.map(committedCost);
       const due = s.nextAt;
       s.nextAt = nextRun(s, now);
       if (
         s.job.provider &&
         s.job.provider !== "chatgpt" &&
-        remaining < s.job.maxCostUsd
+        !withinUsdBudget(s.monthlyBudgetUsd, [...committed, s.job.maxCostUsd])
       ) {
         s.lastError = "Monthly budget is insufficient for the next run.";
       } else if (outstanding) {

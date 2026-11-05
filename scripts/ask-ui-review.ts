@@ -10,21 +10,30 @@ import { navigate } from "./ui-navigation.js";
 
 // Labelled synthetic review data on example domains. Providers are answered in process, so no request leaves this machine.
 const directory = mkdtempSync(join(tmpdir(), "opengeo-ask-ui-"));
-const output = join(process.env.LOCALAPPDATA ?? tmpdir(), "OpenGEO", "ask-ux-review");
-mkdirSync(output, { recursive: true });
+const outputRoot = join(process.env.LOCALAPPDATA ?? tmpdir(), "OpenGEO");
+mkdirSync(outputRoot, { recursive: true });
+const output = mkdtempSync(join(outputRoot, "ask-price-review-"));
 const original = globalThis.fetch;
 let providerRequests = 0;
-let quoteLifetime = 3600000, quoteRequests = 0;
+let quoteLifetime = 3600000, quoteRequests = 0, geminiCredits = 1, externalRequests = 0;
 globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
   const address = new URL(String(url));
-  if (address.hostname !== "api.surfacedby.com") return original(url, init);
+  if (address.hostname !== "api.surfacedby.com") {
+    if (['127.0.0.1', 'localhost', '[::1]'].includes(address.hostname)) return original(url, init);
+    externalRequests++;
+    throw new Error('Unexpected external request in isolated UI review');
+  }
   providerRequests++;
   const path = address.pathname.replace("/api/v1/console", "");
   if (path.endsWith('/measurement/estimate')) quoteRequests++;
+  const credits = init?.body && JSON.parse(String(init.body)).platform === 'gemini' ? geminiCredits : 1;
   const data = path === "/capabilities" ? { platforms: [{ key: "chatgpt", name: "ChatGPT", enabled: true }, { key: "gemini", name: "Gemini", enabled: true }],
-      operations: ["measurement"], content_available: false, models: [], selected_question_platforms: ["chatgpt", "gemini"] }
+      operations: ["measurement"], content_available: false, models: [], selected_question_platforms: ["chatgpt", "gemini"],
+      pricing: { credit_usd: .1, measurement: { estimates_free: true, estimate_validity_seconds: 900,
+        credit_increment: 1, rounding: 'up_to_whole_credit_per_request', settlement: 'actual_usage_up_to_estimate',
+        platforms: ['chatgpt', 'gemini'].map(platform => ({ platform, one_answer_credits: 1, one_answer_usd: '0.10' })) } } }
     : path === "/domains" ? [{ id: "00000000-0000-4000-8000-000000000001", domain: "example.com" }]
-    : path.endsWith("/measurement/estimate") ? { id: randomUUID(), domain_id: "00000000-0000-4000-8000-000000000001", operation: "measurement", estimated_credits: 1, estimated_usd: '0.10', expires_at: new Date(Date.now() + quoteLifetime).toISOString() }
+    : path.endsWith("/measurement/estimate") ? { id: randomUUID(), domain_id: "00000000-0000-4000-8000-000000000001", operation: "measurement", estimated_credits: credits, estimated_usd: (credits / 10).toFixed(2), expires_at: new Date(Date.now() + quoteLifetime).toISOString() }
     : null;
   if (!data) throw new Error("Unexpected review request " + path);
   return new Response(JSON.stringify({ data, meta: {} }), { headers: { "Content-Type": "application/json" } });
@@ -64,7 +73,11 @@ try {
     citations: [{ url: "https://example.com/reports" }], surface: "api", mentioned: true, cited: true, costUsd: 0 } satisfies Observation);
   runtime.store.updateJob(check0.id, { status: "completed", requestedAnswers: 1, result: { metrics: { requested: 1, completed: 1, missing: 0, mentionRate: 100, citationRate: 100 }, collectionCompletedAt: "2026-10-30T10:00:00.000Z" } });
 
-  const page = await browser.newPage({ viewport: { width: 1360, height: 900 }, deviceScaleFactor: 1 });
+  const page = await browser.newPage({ viewport: { width: 1360, height: 900 }, deviceScaleFactor: 2 });
+  await page.route('**/*', async route => {
+    if (['127.0.0.1', 'localhost', '[::1]'].includes(new URL(route.request().url()).hostname)) await route.continue();
+    else { externalRequests++; await route.abort(); }
+  });
   page.on("pageerror", (error) => failures.push(error.message));
   await page.goto("http://127.0.0.1:" + (runtime.app.server.address() as any).port);
   await page.locator(".topbar").waitFor();
@@ -75,6 +88,19 @@ try {
     await navigate(page, "Ask history");
     await page.getByRole("heading", { name: "Ask a question the way a person would search it" }).waitFor();
     await check(page, "ask-empty", width);
+  }
+
+  // Public prices are available without typing a question or requesting a quote.
+  for (const width of [1360, 760, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 780 : 900 });
+    await page.locator(width > 900 ? '.ask-settings-button' : '.ask-mobile-trigger').first().click();
+    const drawer = page.locator('#ask-settings');
+    await drawer.getByText('Up to $0.10 per answer', { exact: true }).first().waitFor();
+    assert.equal(await drawer.getByRole('textbox', { name: 'Question', exact: true }).inputValue(), '');
+    assert.equal(quoteRequests, 0);
+    await check(page, 'ask-price-menu', width);
+    await page.keyboard.press('Escape');
+    await drawer.waitFor({ state: 'hidden' });
   }
 
   // Settings drawer: the search moves into it; paid engines priced; then over the limit.
@@ -120,8 +146,29 @@ try {
   quoteLifetime = 3600000;
   await modal.getByRole('button', { name: 'Refresh prices', exact: true }).click();
   await modal.getByText('est. $0.10').first().waitFor();
+  geminiCredits = 3;
+  await modal.getByRole('textbox', { name: 'Question', exact: true }).fill(question + ' Different engine prices.');
+  await modal.getByText('est. $0.30', { exact: true }).waitFor();
+  await modal.getByRole('textbox', { name: /Spending limit/ }).fill('0.40');
+  for (const width of [1360, 760, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 780 : 900 });
+    assert.equal(await modal.getByRole('button', { name: 'Ask 3 engines', exact: true }).isEnabled(), true);
+    assert.equal(await modal.getByRole('alert').count(), 0);
+    await check(page, 'ask-unequal-prices', width);
+    if (width === 390) {
+      const submit = modal.getByRole('button', { name: 'Ask 3 engines', exact: true });
+      await submit.scrollIntoViewIfNeeded();
+      const bounds = await submit.boundingBox();
+      assert.ok(bounds && bounds.y >= 0 && bounds.y + bounds.height <= 780, 'Mobile approval remains reachable');
+      await check(page, 'ask-mobile-approval', width);
+    }
+  }
+  geminiCredits = 1;
+  await page.setViewportSize({ width: 1360, height: 900 });
+  await modal.getByRole('textbox', { name: /Spending limit/ }).fill('1.00');
   await modal.getByRole('textbox', { name: 'Question', exact: true }).fill(question);
-  await modal.getByText('est. $0.10').first().waitFor();
+  await modal.getByText('est. $0.30', { exact: true }).waitFor({ state: 'hidden' });
+  await modal.getByText('est. $0.10').nth(1).waitFor();
   await modal.locator('button[type="submit"]').focus();
   await page.keyboard.press('Tab');
   assert.equal(await modal.evaluate(element => element.contains(document.activeElement)), true, 'Ask keeps keyboard focus inside the modal');
@@ -147,11 +194,13 @@ try {
       citations: [{ url: cited ? "https://example.com/reports" : "https://example.org/reports", title: "Free example reports" }, { url: "https://example.net/compare", title: "Comparing example tools" }],
       surface, retrieval: surface === "api" ? "web_search" : undefined, webSearchConfirmed: surface === "api" ? true : undefined,
       searchQueries: surface === "api" ? ["free example report tools", "example tools publish reports"] : undefined, mentioned: cited, cited, costUsd: 0 } as Observation);
-    runtime.store.updateJob(job.id, { status: "completed", progress: "Complete", spentUsd: surface === "api" ? 0 : .1 });
+    runtime.store.updateJob(job.id, { status: "completed", progress: "Complete", spentUsd: surface === "api" ? 0 : .1, costBasis: 'reported' });
   };
   answer(jobs[0], "**Yes.** Several example tools publish free reports:\n\n| Need | Tool |\n|---|---|\n| Share a report | Example Reports |\n| Compare tools | Example Compare |\n\nMost of them need an account.", "api", false);
+  runtime.store.updateJob(jobs[1].id, { spentUsd: .5, costBasis: 'includes_estimates' });
   runtime.store.updateJob(jobs[2].id, { status: "completed", progress: "Complete" });
   await page.waitForTimeout(3500);
+  await page.getByText('$0.50 recorded, including reserved or estimated charges', { exact: false }).waitFor();
   for (const width of [1360, 760, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 780 : 900 });
     await page.getByText("No answer collected").first().waitFor();
@@ -166,8 +215,11 @@ try {
   for (const width of [1360, 760, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 780 : 900 });
     await page.locator(".ask-history").waitFor();
+    await page.locator('.ask-history').getByText('$0.50 including estimates', { exact: false }).waitFor();
     await check(page, "ask-history", width);
   }
+  answer(jobs[1], 'Example Reports publishes free reports with source links.', 'consumer_interface', true);
+  await page.locator('.ask-history').getByText('$0.10 charged', { exact: false }).waitFor();
 
   // Accept the request at the server but lose its response. Retrying the same form must not buy a second group.
   await page.setViewportSize({ width: 1360, height: 900 });
@@ -200,8 +252,25 @@ try {
   await page.locator('.activity-notice').filter({ hasText: retryQuestion }).waitFor();
   await page.locator('.activity-notice').filter({ hasText: retryQuestion }).getByRole('button', { name: 'View progress' }).click();
   await page.getByRole('heading', { name: retryQuestion, exact: true }).waitFor();
+
+  // The approval screen displays the saved dollar limit without inventing a credit conversion.
+  const pending = runtime.store.enqueue(jobInput.parse({ projectId: project.id, kind: 'content', provider: 'console',
+    topic: 'Synthetic price approval', maxCostUsd: 0.75 }), randomUUID());
+  runtime.store.updateJob(pending.id, { status: 'paused', error: 'approval', progress: 'Estimated maximum: $0.50. Approve to start.' });
+  await navigate(page, 'Content');
+  await page.getByRole('button', { name: 'Review price', exact: true }).click();
+  const approval = page.locator('.resume-review');
+  await approval.getByText('Your spending limit is $0.75.', { exact: false }).waitFor();
+  for (const width of [1360, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 780 : 900 });
+    await approval.scrollIntoViewIfNeeded();
+    await check(page, 'managed-price-approval', width);
+  }
+  await approval.getByRole('button', { name: 'Keep paused', exact: true }).click();
+  assert.equal(runtime.store.job(pending.id).status, 'paused');
   assert.deepEqual(failures, []);
-  console.log(JSON.stringify({ output, screenshots: shots.length, providerRequests, externalRequests: 0, rendererErrors: failures.length }));
+  assert.equal(externalRequests, 0);
+  console.log(JSON.stringify({ output, screenshots: shots.length, providerRequests, externalRequests, rendererErrors: failures.length }));
 } finally {
   globalThis.fetch = original;
   await browser.close();

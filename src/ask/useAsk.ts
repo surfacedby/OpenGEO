@@ -45,7 +45,7 @@ export function useAskController(projectId: string | undefined, onAsked: (askId:
         cache.current = { scope, value: next, expires: Date.now() + 30000 };
         setCatalog(next);
         if (first) {
-          setLimit(next.defaultLimitUsd.toFixed(2));
+          setLimit(String(next.defaultLimitUsd));
           setChoice(preselected.current?.scope === scope
             ? preselected.current.engines.filter(id => next.engines.some(engine => engine.id === id && engine.available)) : freeOf(next));
           preselected.current = null;

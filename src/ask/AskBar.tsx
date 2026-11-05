@@ -43,6 +43,9 @@ export function AskDrawer({ ask, brand, domain, locale }: {
     const engine = ask.catalog!.engines.find(row => row.id === id)!;
     if (engine.price === 'free') return 'Uses your ChatGPT plan';
     const value = ask.priceOf(id);
+    if (value === null && engine.estimateUsd !== undefined &&
+        (ask.question.trim().length < 3 || !ask.choice.includes(id)))
+      return (engine.provider === 'console' ? 'Up to ' : 'est. ') + usd(engine.estimateUsd) + ' per answer';
     return value === null ? (ask.estimating ? 'Checking price...' : 'Estimate unavailable') : 'est. ' + usd(value);
   };
   const askLabel = 'Ask ' + engineCount(ask.choice.length);
@@ -61,6 +64,8 @@ export function AskDrawer({ ask, brand, domain, locale }: {
         </label>
         <fieldset className="ask-engines" disabled={ask.busy}>
           <legend>Engines</legend>
+          {available.some(engine => engine.provider === 'console' && engine.estimateUsd !== undefined) &&
+            <p className="ask-muted">SurfacedBy estimates are free. Unused reserved credits are returned.</p>}
           {!ask.catalog && <p className="ask-muted" role="status">Checking your connections...</p>}
           {ask.catalog?.availabilityNote && <p className="ask-muted" role="status">{ask.catalog.availabilityNote}</p>}
           <div className="ask-engine-grid">
@@ -81,10 +86,10 @@ export function AskDrawer({ ask, brand, domain, locale }: {
         </fieldset>
         {ask.paid.length > 0 && ask.priced && ask.fit.overLimit && <div className="ask-over-limit" role="alert">
           <AlertTriangle size={18} />
-            <div><strong>An engine's estimate exceeds its share of your limit</strong>
-            <span>Each paid engine gets an equal share ({usd(ask.fit.shareUsd)}). Nothing has run and nothing was charged.</span>
+            <div><strong>The selected engines exceed your spending limit</strong>
+            <span>Your limit covers all selected engines together. Nothing has run and nothing was charged.</span>
             <div className="button-row">
-              {ask.fit.suggestedLimitUsd !== null && <button type="button" className="secondary" onClick={() => ask.setLimit(ask.fit.suggestedLimitUsd!.toFixed(2))}>Raise limit to {usd(ask.fit.suggestedLimitUsd)}</button>}
+              {ask.fit.suggestedLimitUsd !== null && <button type="button" className="secondary" onClick={() => ask.setLimit(String(ask.fit.suggestedLimitUsd))}>Raise limit to {usd(ask.fit.suggestedLimitUsd)}</button>}
               {ask.freeChoice.length > 0 && <button type="button" className="secondary" disabled={ask.busy} onClick={() => void ask.submit(ask.freeChoice)}>Use ChatGPT plan only</button>}
             </div>
           </div>
@@ -95,9 +100,9 @@ export function AskDrawer({ ask, brand, domain, locale }: {
             <span><span aria-hidden="true">$</span><input disabled={ask.busy} inputMode="decimal" value={ask.limit} onChange={event => ask.setLimit(event.target.value)} aria-describedby="ask-estimate" /></span>
           </label>}
           <span id="ask-estimate" className="ask-estimate">{ask.paid.length
-            ? <>{ask.totalUsd === null ? <>A complete estimate is unavailable. SurfacedBy checks its quote against each engine's share before starting.</> : <>Estimated <strong>{usd(ask.totalUsd)}</strong>. Each paid engine receives an equal share of the limit.</>} {ask.paid.some(engine => engine.provider === 'dataforseo') && <>DataForSEO uses your saved estimate; its actual charge may differ. </>}Provider charges and refunds apply. No paid fallback.</>
+            ? <>{ask.totalUsd === null ? <>Some prices are unavailable. SurfacedBy rechecks each quote before work starts.</> : <>Estimated <strong>{usd(ask.totalUsd)}</strong> total. Your limit covers all selected engines.</>} {ask.paid.some(engine => engine.provider === 'dataforseo') && <>DataForSEO uses your saved estimate; its actual charge may differ.</>}</>
             : <>Uses your ChatGPT plan. Your plan limits apply.</>}
-            {ask.estimateExpiresAt && <> Price valid until {new Date(ask.estimateExpiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}. Prices refresh automatically; your spending limit still applies.</>}
+            {ask.estimateExpiresAt && <> Quote expires at {new Date(ask.estimateExpiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}. Refreshed automatically.</>}
           </span>
           {ask.paid.length > 0 && ask.totalUsd === null && !ask.estimating && ask.question.trim().length >= 3 && <button type="button" className="secondary" disabled={ask.busy} onClick={ask.refreshPrices}>Refresh prices</button>}
           <button type="submit" className="primary" disabled={ask.busy || !ask.choice.length || (ask.paid.length > 0 && (!ask.priced || ask.fit.overLimit))}><Search size={15} />{ask.busy ? 'Starting...' : askLabel}</button>

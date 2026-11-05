@@ -13,7 +13,7 @@ import { Providers } from "../server/providers.js";
 import { Runner } from "../server/workflows.js";
 import { jobInput, projectInput } from "../server/contracts.js";
 
-for (const scenario of ["lost_ack", "changed_receipt", "foreign_question", "cancel", "cancel_receipt", "cancel_completed"] as const) {
+for (const scenario of ["lost_ack", "changed_receipt", "foreign_question", "cancel", "cancel_receipt", "cancel_completed", "subcredit_budget"] as const) {
   test("selected-question measurement preserves approval and evidence: " + scenario, async () => {
     const directory = mkdtempSync(join(tmpdir(), "opengeo-managed-measurement-")), store = new Store(directory);
     const vault = new Vault(directory, { encrypt: text => Buffer.from(text), decrypt: bytes => bytes.toString() });
@@ -70,10 +70,19 @@ for (const scenario of ["lost_ack", "changed_receipt", "foreign_question", "canc
     globalThis.fetch = ((url, init) => { const address = new URL(String(url)); return original("http://127.0.0.1:" +
       (server.address() as any).port + address.pathname.replace("/api/v1/console", "") + address.search, init); }) as typeof fetch;
     try {
-      const job = store.enqueue(jobInput.parse({ projectId: project.id, kind: "measure", provider: "console", maxCostUsd: 0.5 }), "selected");
+      const job = store.enqueue(jobInput.parse({ projectId: project.id, kind: "measure", provider: "console", maxCostUsd: scenario === 'subcredit_budget' ? 0.39999999999999997 : 0.5 }), "selected");
       // Installed selected-question checks retain their original operation on resume.
       store.setStep(job.id, 'console-measurement-profile', 'done', 'selected_questions');
-      await runner.tick(); assert.equal(store.job(job.id).error, "approval"); assert.equal(purchases, 0);
+      await runner.tick();
+      if (scenario === 'subcredit_budget') {
+        assert.equal(store.job(job.id).error, 'budget');
+        assert.equal(purchases, 0);
+        assert.equal(store.observations(project.id).length, 0);
+        assert.equal(store.step(job.id, 'console-measurement-approval'), undefined);
+        assert.equal(store.step(job.id, 'console-measurement-submission'), undefined);
+        return;
+      }
+      assert.equal(store.job(job.id).error, "approval"); assert.equal(purchases, 0);
       assert.equal(store.observations(project.id).length, 0);
       store.updateProject(project.id, { ...project, prompts: ["A later project edit must not change this check."] });
       runner.resume(job.id, true); await runner.tick();

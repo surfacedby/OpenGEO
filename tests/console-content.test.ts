@@ -71,7 +71,7 @@ test("lost managed submissions recover their approved identity for collection an
       assert.equal(store.job(job.id).status, "paused");
       assert.equal(store.step(job.id, "console-content-job")?.state, "started");
       const approved = JSON.parse(store.step(job.id, "console-content-submission")!.body!);
-      assert.deepEqual(approved, { estimate_id: quotes.get(job.id + ":estimate"), request_key: job.id, approved_credits: 5 });
+      assert.deepEqual(approved, { estimate_id: quotes.get(job.id + ":estimate"), request_key: job.id, approved_credits: 3 });
       const quote = JSON.parse(store.step(job.id, "console-content-estimate")!.body!);
       store.setStep(job.id, "console-content-estimate", "done", { ...quote, expires_at: new Date(Date.now() - 1000).toISOString() });
       const reads = capabilityReads, bought = purchases; available = false;
@@ -116,8 +116,8 @@ test("managed drafts preserve approved quotes, survive interrupted collection, s
   const requests: { path: string; body: any; identity?: string }[] = [];
   let finished = false, cancelling = false, available = true, expired = false;
   const remote = () => ({ id: remoteId, status: finished ? cancelling ? "cancelled" : "completed" : "waiting_reconciliation",
-    estimated_credits: 4, approved_credits: 6, cancel_requested: cancelling,
-    receipt: finished ? { status: cancelling ? "cancelled" : "completed", charged_credits: 2, refunded_credits: 4 } : null });
+    estimated_credits: 4, approved_credits: 4, cancel_requested: cancelling,
+    receipt: finished ? { status: cancelling ? "cancelled" : "completed", charged_credits: 2, refunded_credits: 2 } : null });
   const server = createServer(async (request, response) => {
     let body = "";
     for await (const chunk of request) body += chunk;
@@ -160,11 +160,11 @@ test("managed drafts preserve approved quotes, survive interrupted collection, s
     assert.equal(requests.filter(request => request.path === "/content/jobs").length, 0);
     runner.resume(job.id, true); await runner.tick();
     assert.equal(store.job(job.id).error, "waiting");
-    assert.equal(store.job(job.id).spentUsd, 0.6, "the full approved reservation is held until settlement");
+    assert.equal(store.job(job.id).spentUsd, 0.4, "the quoted maximum is held until settlement");
     assert.equal(store.job(job.id).costBasis, "includes_estimates");
     const submission = requests.find(request => request.path === "/content/jobs")!;
     assert.equal(submission.identity, job.id);
-    assert.deepEqual(submission.body, { estimate_id: quoteId, request_key: job.id, approved_credits: 6 });
+    assert.deepEqual(submission.body, { estimate_id: quoteId, request_key: job.id, approved_credits: 4 });
     finished = true; available = false; runner.resume(job.id, false); await runner.tick();
     assert.equal(store.job(job.id).status, "completed");
     assert.equal(store.job(job.id).spentUsd, 0.2);
@@ -191,7 +191,7 @@ test("managed drafts preserve approved quotes, survive interrupted collection, s
     const cancelled = store.enqueue(jobInput.parse({ projectId: project.id, kind: "content", provider: "console", topic: "How can I share reports?", maxCostUsd: 0.6 }), "cancelled-managed-draft");
     finished = false; await runner.tick(); runner.resume(cancelled.id, true); await runner.tick(); await runner.cancel(cancelled.id);
     assert.equal(store.job(cancelled.id).error, "cancel_remote");
-    assert.equal(store.job(cancelled.id).spentUsd, 0.6);
+    assert.equal(store.job(cancelled.id).spentUsd, 0.4);
     finished = true; await runner.cancel(cancelled.id);
     assert.equal(store.job(cancelled.id).error, null);
     assert.equal(store.job(cancelled.id).spentUsd, 0.2);
@@ -239,9 +239,9 @@ test("managed page improvements send their task and target, and revisions send t
     if (path === "/capabilities") data = { platforms: [], operations: ["content"], content_available: true, models: [{ id: "managed-model", operations: ["content"] }] };
     else if (path === "/domains") data = [{ id: domainId, domain: project.domain }];
     else if (path.includes("/estimates/")) { estimates.push(JSON.parse(body)); data = { id: randomUUID(), domain_id: domainId, operation: "content", estimated_credits: 3, estimated_usd: '0.30', expires_at: new Date(Date.now() + 3600000).toISOString() }; quote++; }
-    else if (path === "/content/jobs") { remoteId = randomUUID(); data = { id: remoteId, status: "completed", estimated_credits: 3, approved_credits: 5, cancel_requested: false, receipt: { status: "completed", charged_credits: 3, refunded_credits: 2 } }; }
-    else if (path === "/content/jobs/" + remoteId) data = { id: remoteId, status: "completed", estimated_credits: 3, approved_credits: 5, cancel_requested: false, receipt: { status: "completed", charged_credits: 3, refunded_credits: 2 } };
-    else if (path.endsWith("/results")) data = { job: { id: remoteId, status: "completed", estimated_credits: 3, approved_credits: 5, cancel_requested: false, receipt: { status: "completed", charged_credits: 3, refunded_credits: 2 } },
+    else if (path === "/content/jobs") { remoteId = randomUUID(); assert.equal(JSON.parse(body).approved_credits, 3); data = { id: remoteId, status: "completed", estimated_credits: 3, approved_credits: 3, cancel_requested: false, receipt: { status: "completed", charged_credits: 3, refunded_credits: 0 } }; }
+    else if (path === "/content/jobs/" + remoteId) data = { id: remoteId, status: "completed", estimated_credits: 3, approved_credits: 3, cancel_requested: false, receipt: { status: "completed", charged_credits: 3, refunded_credits: 0 } };
+    else if (path.endsWith("/results")) data = { job: { id: remoteId, status: "completed", estimated_credits: 3, approved_credits: 3, cancel_requested: false, receipt: { status: "completed", charged_credits: 3, refunded_credits: 0 } },
       brief: "Sharing", draft: { title: "Reports", markdown: "# Sharing reports\n\nVersion " + quote + "." }, review: { requires_human_review: true, claim_scope: "numeric_and_absolute_statements", coverage_complete: true, issues: [] },
       sources: [{ url: "https://example.com/reports", title: "Shared reports" }] };
     else { response.writeHead(404); response.end(); return; }

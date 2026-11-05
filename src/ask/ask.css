@@ -19,6 +19,7 @@
 .ask-question-field textarea { resize: none; width: 100%; box-sizing: border-box; padding: 12px 14px; font-size: 17px; line-height: 1.4; font-weight: 400; border-color: var(--primary-200); }
 .ask-engines { border: 0; margin: 0; padding: 0; min-width: 0; }
 .ask-engines legend { padding: 0; margin-bottom: 10px; font-size: 13px; font-weight: 600; color: var(--ink); }
+.ask-engines > .ask-muted { margin-bottom: var(--space-3); }
 .ask-engine-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
 .ask-engine { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); cursor: pointer; }
 .ask-engine input { margin: 2px 0 0; accent-color: var(--primary); }

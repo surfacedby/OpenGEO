@@ -26,6 +26,10 @@ test('brand journey separates prompts and results, saves edits and confirms dele
     page.on('pageerror', error => errors.push(error.message));
     await page.goto('http://127.0.0.1:' + address.port);
     await page.getByRole('button', { name: 'Prompts', exact: true }).click();
+    await expect(page.getByRole('tab', { name: /Tracked prompts/ })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('button', { name: 'Topics', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('tab', { name: /^Topics/ })).toBeVisible();
+    await page.getByRole('tab', { name: 'Suggested by AI', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Connect AI to discover prompts' })).toBeVisible();
     await page.getByRole('tab', { name: /Tracked prompts/ }).click();
     await page.getByRole('button', { name: 'Add a question', exact: true }).click();
@@ -63,6 +67,19 @@ test('brand journey separates prompts and results, saves edits and confirms dele
         await page.evaluate(() => document.fonts.ready);
         await page.locator('.shell').screenshot({ path: join(process.env.OPENGEO_REVIEW_SCREENSHOTS, name.toLowerCase() + '.png') });
       }
+    }
+    vault.set('dataforseo', { login: 'synthetic@example.com', password: 'synthetic-browser-test' });
+    store.set('measurementRequestEstimateUsd', 0.000001);
+    for (const limit of [0.005, 0.000002]) {
+      store.set('askLimitUsd', limit);
+      await page.reload();
+      await page.getByRole('button', { name: /^Ask settings/ }).click();
+      const ask = page.getByRole('dialog', { name: 'Ask a question', exact: true });
+      await ask.getByRole('checkbox', { name: /^ChatGPT/ }).check();
+      await expect(ask.getByRole('textbox', { name: 'Spending limit', exact: true })).toHaveValue(String(limit));
+      assert.equal(store.setting('askLimitUsd', 0), limit);
+      assert.equal(store.jobs(project.id).length, 0);
+      await page.keyboard.press('Escape');
     }
     await page.getByRole('button', { name: 'Brand', exact: true }).click();
     await page.getByRole('button', { name: 'Delete brand', exact: true }).click();

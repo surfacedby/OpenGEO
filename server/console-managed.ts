@@ -156,16 +156,17 @@ export async function consoleManaged<I, O extends { job: z.infer<typeof managedJ
     return fresh;
   }));
   const unitUsd = savedUnitPrice(runner, job), creditUsd = (value: number) => creditsUsd(value, unitUsd);
+  const approvedCredits = creditsWithinBudget(job.maxCostUsd, unitUsd);
   if (quote.domain_id !== domainId)
     throw new ProviderError("invalid_response", "The estimate does not belong to this website. No work was submitted.");
   if (!submitted) {
     if (Date.parse(quote.expires_at) <= Date.now())
       throw new ProviderError("estimate_expired", "This estimate has expired. Start a new run for a current price; no work was submitted.");
-    if (!quote.estimated_credits || creditUsd(quote.estimated_credits) > job.maxCostUsd + 1e-9)
+    if (!quote.estimated_credits || quote.estimated_credits > approvedCredits)
       throw new ProviderError("budget", "Estimated maximum: $" + creditUsd(quote.estimated_credits).toFixed(2) + ". Increase your approved maximum or choose another connection.");
     const recurringCeiling = scheduledBudgetCeiling(runner.store, job);
     if (recurringCeiling !== undefined) {
-      if (creditUsd(quote.estimated_credits) > recurringCeiling + 1e-9)
+      if (quote.estimated_credits > creditsWithinBudget(recurringCeiling, unitUsd))
         throw new ProviderError("budget", "This run exceeds the remaining schedule allowance. No work was submitted.");
       runner.store.setStep(job.id, step("approval"), "done", quote.id);
     }
@@ -174,10 +175,12 @@ export async function consoleManaged<I, O extends { job: z.infer<typeof managedJ
     if (runner.store.step(job.id, step("approval"))?.body !== JSON.stringify(quote.id))
       throw new ProviderError("approval", "Estimated maximum: $" + creditUsd(quote.estimated_credits).toFixed(2) + ". Approve to start. Completed work is charged and unused credits returned.");
   }
-  const approvedCredits = creditsWithinBudget(job.maxCostUsd, unitUsd);
   const savedSubmission = runner.store.step(job.id, step("submission"));
+  // The spending limit is permission, not a wallet hold. Reserve the quote's
+  // maximum so a cheaper request does not require the whole limit in credit.
+  // Existing submissions retain their original reservation for receipt recovery.
   const request = submission.parse(savedSubmission?.body ? JSON.parse(savedSubmission.body) : {
-    estimate_id: quote.id, request_key: job.id, approved_credits: approvedCredits });
+    estimate_id: quote.id, request_key: job.id, approved_credits: quote.estimated_credits });
   if (request.estimate_id !== quote.id || request.request_key !== job.id || request.approved_credits > approvedCredits)
     throw new ProviderError("invalid_response", "The saved approval does not match this budget. No new request was submitted.");
   if (!savedSubmission) runner.store.setStep(job.id, step("submission"), "done", request);

@@ -25,6 +25,7 @@ import { consoleOpportunities } from "./console-opportunities.js";
 import { consoleMeasurement, collectCancelledMeasurement } from "./console-measurement.js";
 import { cancelConsoleManaged, managedStep } from "./console-managed.js";
 import { creditUnitUsd, creditsUsd, creditsWithinBudget } from './console-pricing.js';
+import { multiplyUsd, sumUsd, withinUsdBudget } from './usd.js';
 import {
   ProviderError,
   jobInput,
@@ -217,7 +218,7 @@ export class Runner {
       other.id !== id && other.kind === 'audit' && other.background && ['queued', 'running', 'paused'].includes(other.status)))
       throw new ProviderError('in_progress', 'Another website discovery is saved for this brand. Follow it in Scans before resuming this one.');
     const scheduledCeiling = scheduledBudgetCeiling(this.store, job);
-    if (scheduledCeiling !== undefined && Math.max(maxCostUsd ?? job.maxCostUsd, job.spentUsd) > scheduledCeiling + 1e-9)
+    if (scheduledCeiling !== undefined && Math.max(maxCostUsd ?? job.maxCostUsd, job.spentUsd) > scheduledCeiling)
       throw new ProviderError("budget", "This run would exceed its approved monthly schedule budget. Keep it paused or start a separately approved manual run.");
     for (const row of this.store.db
       .prepare("SELECT step FROM steps WHERE job_id=? AND state='started'")
@@ -442,7 +443,7 @@ export class Runner {
             "estimate",
             "Set a conservative measurement request estimate in Settings before paid measurements. DataForSEO does not expose a per-request dollar ceiling.",
           );
-        if (live.spentUsd + estimate > job.maxCostUsd)
+        if (!withinUsdBudget(job.maxCostUsd, [live.spentUsd, estimate]))
           throw new ProviderError(
             "budget",
             "The approved measurement budget is insufficient for the next request.",
@@ -482,7 +483,7 @@ export class Runner {
             this.store.put(answerKind(job), project.id, job.id, observation);
             this.store.updateJob(job.id, {
               spentUsd:
-                this.store.job(job.id).spentUsd + (result.costUsd ?? estimate),
+                sumUsd([this.store.job(job.id).spentUsd, result.costUsd ?? estimate]),
               costBasis: result.costUsd === null ? 'includes_estimates' : this.store.job(job.id).costBasis ?? 'reported',
             });
             this.store.setStep(job.id, "measure:" + i, "done", observation);
@@ -942,7 +943,7 @@ export class Runner {
       const name = "measure:" + index;
       if (this.store.step(job.id, name)?.state === "done") continue;
       const prompt = project.prompts[index], tokenUpper = Buffer.byteLength(instructions + prompt, "utf8") + 1000,
-        estimate = tokenUpper * model.inputUsd + cap * model.outputUsd;
+        estimate = sumUsd([multiplyUsd(model.inputUsd, tokenUpper), multiplyUsd(model.outputUsd, cap)]);
       this.store.updateJob(job.id, { progress: "Collecting answer " + (index + 1) + " of " + project.prompts.length });
       await this.once(job, name, async () => {
         const completion = await this.providers.complete(provider, model.id, instructions, prompt, signal, cap, provider === "chatgpt" && job.webSearch !== false, model);
@@ -957,7 +958,7 @@ export class Runner {
         };
         this.store.db.transaction(() => {
           this.store.put(answerKind(job), project.id, job.id, observation);
-          this.store.updateJob(job.id, { spentUsd: this.store.job(job.id).spentUsd + (completion.costUsd ?? estimate),
+          this.store.updateJob(job.id, { spentUsd: sumUsd([this.store.job(job.id).spentUsd, completion.costUsd ?? estimate]),
             costBasis: completion.costUsd === null ? "includes_estimates" : this.store.job(job.id).costBasis ?? "reported" });
           this.store.setStep(job.id, name, "done", observation);
         })();
@@ -966,7 +967,7 @@ export class Runner {
         return observation;
       }, () => {
         if (tokenUpper + cap > model.contextLength) throw new ProviderError("context", "Choose a model with a larger context window.");
-        if (this.store.job(job.id).spentUsd + estimate > job.maxCostUsd) throw new ProviderError("budget", "The approved budget is insufficient for the next answer.");
+        if (!withinUsdBudget(job.maxCostUsd, [this.store.job(job.id).spentUsd, estimate])) throw new ProviderError("budget", "The approved budget is insufficient for the next answer.");
       });
     }
     const collection = this.checkpointApiMeasurement(job, project);
@@ -1045,7 +1046,7 @@ export class Runner {
     const text = JSON.stringify(input),
       cap = Math.min(4096, model.maxOutputTokens ?? 4096),
       tokenUpper = Buffer.byteLength(text + prompts[name], "utf8") + 1000,
-      estimate = tokenUpper * model.inputUsd + cap * model.outputUsd;
+      estimate = sumUsd([multiplyUsd(model.inputUsd, tokenUpper), multiplyUsd(model.outputUsd, cap)]);
     return this.once(job, receiptKey, async () => {
       const completion = await this.providers.complete(
         job.provider!,
@@ -1060,8 +1061,8 @@ export class Runner {
       this.store.db.transaction(() => {
         this.store.updateJob(job.id, {
           spentUsd:
-            this.store.job(job.id).spentUsd +
-            (completion.costUsd ?? (job.provider === "chatgpt" ? 0 : estimate)),
+            sumUsd([this.store.job(job.id).spentUsd,
+              completion.costUsd ?? (job.provider === "chatgpt" ? 0 : estimate)]),
           costBasis: completion.costUsd === null && job.provider !== 'chatgpt' ? 'includes_estimates' : this.store.job(job.id).costBasis ?? 'reported',
         });
         this.store.put("pass", job.projectId, job.id, {
@@ -1091,7 +1092,7 @@ export class Runner {
     }, () => {
       if (tokenUpper + cap > model.contextLength)
         throw new ProviderError('context', 'This model cannot hold the evidence. Select a model with a larger context window.');
-      if (this.store.job(job.id).spentUsd + estimate > job.maxCostUsd)
+      if (!withinUsdBudget(job.maxCostUsd, [this.store.job(job.id).spentUsd, estimate]))
         throw new ProviderError('budget', 'The approved budget is insufficient for the next analysis pass.');
     });
   }
