@@ -868,7 +868,7 @@ export class Runner {
         model: model.id,
       };
       this.store.db.transaction(() => {
-        for (const r of result.recommendations) {
+        for (const [planOrder, r] of result.recommendations.entries()) {
           this.store.put("finding", project.id, job.id, {
             id: randomUUID(),
             projectId: project.id,
@@ -882,6 +882,7 @@ export class Runner {
             confidence: "inferred",
             status: "open",
             kind: "analysis",
+            planOrder,
             ...(r.opportunity ? { opportunity: r.opportunity } : {}),
           });
         }

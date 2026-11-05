@@ -14,6 +14,12 @@ export function findingGroups(findings: Finding[]) {
     if (priority[finding.priority] < priority[group.priority]) group.priority = finding.priority;
     groups.set(key, group);
   }
+  for (const group of groups.values()) {
+    // Keep newer checks ahead of retained work, then honor each check's chosen starting page.
+    const jobs = new Map([...new Set(group.findings.map(finding => finding.jobId))].map((id, index) => [id, index]));
+    group.findings.sort((a, b) => jobs.get(a.jobId)! - jobs.get(b.jobId)! ||
+      (a.planOrder ?? Number.MAX_SAFE_INTEGER) - (b.planOrder ?? Number.MAX_SAFE_INTEGER));
+  }
   return [...groups.values()].sort((a, b) => priority[a.priority] - priority[b.priority] || a.title.localeCompare(b.title));
 }
 

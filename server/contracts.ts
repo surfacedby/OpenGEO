@@ -143,6 +143,8 @@ export type Finding = {
   confidence: "known" | "inferred";
   status: "open" | "doing" | "done";
   kind: string;
+  /** The reviewed action plan's page order, independent of database insertion or export order. */
+  planOrder?: number;
   /** SurfacedBy's identifier for an opportunity it produced. */
   remoteId?: string;
   opportunity?: z.infer<typeof opportunityDetails>;

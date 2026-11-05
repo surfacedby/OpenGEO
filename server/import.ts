@@ -79,6 +79,7 @@ const finding = z
     confidence: z.enum(["known", "inferred"]),
     status: z.enum(["open", "doing", "done"]),
     kind: z.string(),
+    planOrder: z.number().int().nonnegative().optional(),
     opportunity: opportunityDetails.optional(),
     remoteId: id.optional(),
     evidenceAsOf: z.string().nullable().optional(),

@@ -16,6 +16,7 @@ import { contentSources } from '../server/evidence-context.js';
 import { exportProject } from '../server/export.js';
 import { importProject, previewImport } from '../server/import.js';
 import { withoutEvidenceList } from '../server/finding-text.js';
+import { findingGroups } from '../src/finding-groups.js';
 
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), 'opengeo-evidence-')), store = new Store(directory);
@@ -103,7 +104,7 @@ test('related same-page tasks merge evidence and instructions without merging di
 
 test('large audits are fully analyzed in durable batches across quota and later site changes', async () => {
   const f=fixture(), original=globalThis.fetch, reviewed=new Set<string>();
-  let calls=0, quota=true;
+  let calls=0, quota=true, primaryTarget='';
   globalThis.fetch=(async (url,init) => {
     if(String(url).endsWith('/models')) return json({models:[{slug:'fixture',display_name:'Fixture',visibility:'list',context_window:32768}]});
     calls++;
@@ -120,6 +121,7 @@ test('large audits are fully analyzed in durable batches across quota and later 
     if(request.instructions===prompts.opportunityReview) return stream(JSON.stringify({accepted:input.candidates.map((item:any)=>({index:item.index,targetPageId:item.targetPageId,evidenceIds:item.evidenceIds,title:item.title,description:item.description,steps:item.steps,opportunity:{type:'page_update',pageLabel:'Resource',pageTitle:'Support workspace',benefit:'Explain the workflow relevant to the saved customer question.'}}))}));
     if(request.instructions===prompts.consolidate) {
       assert.equal(input.candidates.length,100);
+      primaryTarget=input.candidates[0].target;
       return stream(JSON.stringify({groups:[{primaryIndex:0,indices:input.candidates.map((item:any)=>item.index)}]}));
     }
     for(const page of input.pages) {assert.ok(!reviewed.has(page.id),'Completed batches cannot replay');reviewed.add(page.id);}
@@ -140,6 +142,9 @@ test('large audits are fully analyzed in durable batches across quota and later 
     assert.equal(new Set(findings.flatMap(item=>item.evidenceIds)).size,101);
     assert.ok(findings.every(item => item.evidenceIds.includes(f.store.observations(f.project.id, f.measurement.id)[0].id)), 'Every accepted opportunity links its page change to a saved answer');
     assert.equal(findings.reduce((total,item)=>total+item.steps.length,0),100);
+    assert.equal(findingGroups(findings)[0].findings[0].targetUrl,primaryTarget,'The chosen starting page must survive newest-first storage reads');
+    const restored=importProject(f.store,exportProject(f.store,f.project.id));
+    assert.equal(findingGroups(f.store.findings(restored.project.id))[0].findings[0].targetUrl,primaryTarget,'Export/import must preserve the same starting page');
     const count=f.store.findings(f.project.id).length;
     await f.runner.execute(f.store.job(job.id),f.project,new AbortController().signal);
     assert.equal(f.store.findings(f.project.id).length,count);
