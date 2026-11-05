@@ -20,7 +20,9 @@ The interface uses Inter, Lucide icons, quiet borders and a pale canvas. Cards g
 | `Toolbar` | Search or context on the left, related list actions on the right |
 | `Tabs` | Shared tab navigation with arrow-key, Home and End support |
 | `ActionCard` | A small set of distinct workflows with a description and an explicit next action |
-| `Dialog` | Confirmations and task forms; `variant="drawer"` for full answer evidence |
+| `Dialog` | Confirmations and task forms; `variant="drawer"` for full answer evidence and Ask settings |
+| `Disclosure` | Expandable sources, searches and supporting details with consistent icons |
+| `ActivityNotice` | Persistent progress and attention states when work continues on another screen |
 | `Select` | Searchable keyboard selection, including inside native dialogs |
 | `LanguageSelect` | The same language choices in setup and brand settings, preserving imported locales |
 
@@ -58,6 +60,6 @@ Traffic attribution, market-wide rankings, outreach and sentiment scores require
 
 ## Local verification
 
-Build before browser checks. `scripts/analytics-ui-review.ts` covers all thirteen screens at desktop, tablet and mobile widths, each topic tab, the topic selector over Visibility, Responses, Sources and Competitors, and grouped prompts, then checks header clipping, chart labels, evidence navigation, filters, answer drawers and saved draft navigation. `scripts/workflow-ui-review.ts` checks task dialogs, dropdowns, keyboard isolation, submission safety and a check limited to one topic. Connection and recheck review scripts cover provider availability and retained run settings.
+Build before browser checks. `scripts/analytics-ui-review.ts` covers all fourteen screens at desktop, tablet and mobile widths, each topic tab, the topic selector over Visibility, Responses, Sources and Competitors, and grouped prompts, then checks header clipping, chart labels, evidence navigation, filters, answer drawers and saved draft navigation. `scripts/ask-ui-review.ts` checks Ask results and settings at the same widths, keyboard focus, dismissal, lost-response retries and progress across screens. `scripts/workflow-ui-review.ts` checks task dialogs, dropdowns, keyboard isolation, submission safety and a check limited to one topic. Connection and recheck review scripts cover provider availability and retained run settings.
 
 These scripts use isolated local test records and keep paid work stopped. Their labelled screenshots are regression evidence, not public product claims. Public screenshots follow `SCREENSHOT_PROFILE.md`.

@@ -1,9 +1,9 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, ChevronDown, ExternalLink, Flag, Search } from 'lucide-react';
 import type { Topic, Project } from '../server/contracts';
 import type { TopicSummary, TopicView } from '../server/topics';
 import { completedMeasurement } from '../server/portable-results';
-import { api } from './api';
+import { useApiResource } from './useApiResource';
 import { Select } from './Select';
 import { CitationComparison, PromptTable, RateBar, SourcesTable, VisibilityChart } from './DataPresentation';
 import { EmptyState, MetricCard, Section, Tabs } from './ui/Primitives';
@@ -14,20 +14,8 @@ type Evidence = (ids: string[], label: string) => void;
 
 /** A topic's evidence refreshes on the workspace's rhythm, so scoped screens never lag the brand view. */
 export function useTopicView(projectId: string | undefined, topicId: string | null, version: string) {
-  const [snapshot, setSnapshot] = useState<{ projectId: string; view: TopicView } | null>(null), [error, setError] = useState('');
-  useEffect(() => {
-    if (!projectId || !topicId) { setSnapshot(null); setError(''); return; }
-    let stopped = false;
-    let timer: ReturnType<typeof setTimeout>;
-    setSnapshot(null); setError('');
-    const load = () => api<TopicView>('/projects/' + projectId + '/topics/' + topicId)
-      .then(next => { if (!stopped) { setSnapshot({ projectId, view: next }); setError(''); } })
-      .catch(failure => { if (!stopped) setError((failure as Error).message); })
-      .finally(() => { if (!stopped) timer = setTimeout(load, 3000); });
-    void load();
-    return () => { stopped = true; clearTimeout(timer); };
-  }, [projectId, topicId, version]);
-  return { view: snapshot && snapshot.projectId === projectId && snapshot.view.topic.id === topicId ? snapshot.view : null, error };
+  const result = useApiResource<TopicView>(projectId && topicId ? '/projects/' + projectId + '/topics/' + topicId : null, version);
+  return { view: result.data, error: result.error };
 }
 
 const today = () => new Date().toLocaleDateString('en-CA');

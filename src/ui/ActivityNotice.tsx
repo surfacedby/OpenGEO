@@ -6,6 +6,6 @@ export function ActivityNotice({ title, detail, paused, open }: { title: string;
   return <aside className="activity-notice" aria-label="Current activity">
     <Icon size={17} className={paused ? '' : 'loading-spin'} aria-hidden="true" />
     <div><strong>{title}</strong><span role="status">{detail}</span></div>
-    <button className="text-button" onClick={open}>{paused ? 'Review check' : 'View progress'}<ArrowRight size={14} /></button>
+    <button className="text-button" onClick={open}>{paused ? 'Review' : 'View progress'}<ArrowRight size={14} /></button>
   </aside>;
 }

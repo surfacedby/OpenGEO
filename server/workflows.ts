@@ -210,6 +210,8 @@ export class Runner {
       throw new ProviderError("review", "Approve the displayed estimate before starting paid work.");
     if (maxCostUsd !== undefined && (!Number.isFinite(maxCostUsd) || maxCostUsd < Math.max(job.maxCostUsd, job.spentUsd) || maxCostUsd > 10000))
       throw new ProviderError("budget", "The new budget must cover the current ceiling and completed work.");
+    if (job.kind === 'ask' && maxCostUsd !== undefined && maxCostUsd !== job.maxCostUsd)
+      throw new ProviderError('budget', 'This engine shares the original ask limit. Start a new ask to approve a different limit.');
     return this.store.db.transaction(() => {
     if (job.kind === 'audit' && job.background && this.store.jobs(job.projectId).some(other =>
       other.id !== id && other.kind === 'audit' && other.background && ['queued', 'running', 'paused'].includes(other.status)))

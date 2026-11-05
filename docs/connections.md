@@ -43,7 +43,9 @@ OpenGEO checks the connected server's capabilities before offering managed work.
 
 ## Spending, pauses and cancellation
 
-An ask uses ChatGPT on your plan by default. Paid engines are chosen for each ask and share its spending limit evenly, rounded down to the cent, so together they cannot spend more than the limit. A SurfacedBy price must fit its engine's share before anything is submitted; the limit you set for the ask is its approval. DataForSEO uses the saved per-request estimate. After every ask the choice returns to the free engine.
+An ask uses ChatGPT on your plan by default; your plan limits apply. Choose paid engines explicitly for each ask. They share the spending approval evenly, rounded down to the cent. SurfacedBy checks its current quote against that engine's share before submitting work. DataForSEO uses your saved per-request estimate, so its actual charge can differ; OpenGEO records the reported cost and stops further work if it exceeds the limit. Provider charges and refunds apply. After an ask, selection returns to ChatGPT on your plan.
+
+If a response is lost, retry with the same settings. OpenGEO keeps the original request key and returns the same Ask instead of starting it twice. A request key cannot add engines or raise an existing Ask's approval. One-off answers remain in Ask history even after you track the question; future visibility checks collect their own answers.
 
 OpenGEO never silently substitutes a paid provider. If access expires or a quota is reached, affected work pauses with its progress preserved. A reset time is shown only when the service supplies one.
 

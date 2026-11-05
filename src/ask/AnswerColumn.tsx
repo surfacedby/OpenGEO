@@ -6,6 +6,7 @@ import { targetDomain } from '../finding-groups';
 import { usd } from '../format';
 import { ProviderIcon, retrievalLabel } from '../provider-ui';
 import { SiteIcon } from '../SiteIcon';
+import { Disclosure } from '../ui/Primitives';
 import type { AskEngine } from './useAsk';
 
 const via = (provider?: string) => provider === 'console' ? 'SurfacedBy' : provider === 'dataforseo' ? 'DataForSEO' : 'ChatGPT';
@@ -24,7 +25,9 @@ export function AnswerColumn({ row, projectId, brand, domain, reload, askAgain }
   const answer = row.answer;
   const sources = answer?.citations.filter(citation => targetDomain(citation.url)) ?? [];
   const app = row.surface === 'consumer_interface';
-  const status = row.state === 'answered' ? { tone: 'completed', text: 'Answered, ' + usd(row.spentUsd) }
+  const recordedCost = row.costBasis === 'includes_estimates' ? 'Estimated ' + usd(row.spentUsd)
+    : row.spentUsd > 0 ? 'Recorded charge ' + usd(row.spentUsd) : 'No charge recorded';
+  const status = row.state === 'answered' ? { tone: 'completed', text: row.provider === 'chatgpt' ? 'Answered' : 'Answered, ' + usd(row.spentUsd) + (row.costBasis === 'includes_estimates' ? ' est.' : '') }
     : row.state === 'collecting' ? { tone: 'running', text: 'Collecting' }
     : row.state === 'paused' ? { tone: 'paused', text: 'Paused' }
     : row.state === 'skipped' ? { tone: 'cancelled', text: 'Skipped' }
@@ -50,18 +53,16 @@ export function AnswerColumn({ row, projectId, brand, domain, reload, askAgain }
         <div className={answer.cited ? 'ask-mark cited' : 'ask-mark missing'}><span>{domain}</span><strong>{answer.cited ? 'Cited' : 'Not cited'}</strong></div>
       </div>
       <div className="ask-answer-text" lang={answer.locale} dangerouslySetInnerHTML={{ __html: markdownHtml(answer.answer) }} />
-      <details className="ask-fold" open>
-        <summary>Sources ({sources.length})</summary>
+      <div className="ask-fold"><Disclosure label={`Sources (${sources.length})`} defaultOpen>
         {sources.length ? <ul className="ask-sources">{sources.map((citation, index) => <li key={index}>
           <a href={citation.url} target="_blank" rel="noreferrer"><SiteIcon projectId={projectId} domain={targetDomain(citation.url)!} size={16} />
             <span><strong>{targetDomain(citation.url)}</strong>{citation.title && <small>{citation.title}</small>}</span><ExternalLink size={11} /></a>
         </li>)}</ul> : <p className="ask-muted">This answer has no source links.</p>}
-      </details>
-      <details className="ask-fold">
-        <summary>Searches it ran ({answer.searchQueries?.length ?? 0})</summary>
+      </Disclosure></div>
+      <div className="ask-fold"><Disclosure label={`Searches it ran (${answer.searchQueries?.length ?? 0})`}>
         {answer.searchQueries?.length ? <ul className="ask-searches">{answer.searchQueries.map(query => <li key={query}><Search size={12} /><code>{query}</code></li>)}</ul>
           : <p className="ask-muted">{answer.provider === 'chatgpt' ? 'No searches were reported for this answer.' : 'This engine does not report its searches.'}</p>}
-      </details>
+      </Disclosure></div>
       <p className="ask-provenance">{answer.provider === 'chatgpt' ? retrievalLabel(answer) + '. ' : ''}Collected {new Date(answer.observedAt).toLocaleString()}.</p>
     </>}
 
@@ -81,8 +82,9 @@ export function AnswerColumn({ row, projectId, brand, domain, reload, askAgain }
           : <button type="button" className="secondary ask-column-action" disabled={busy} onClick={() => reviewFirst.has(row.error ?? '') ? setReview(true) : void act(() => api('/jobs/' + row.jobId + '/resume', {}))}>Resume</button>}
     </>}
 
-    {row.state === 'no_answer' && <p className="ask-note">{row.engine === 'chatgpt' || row.provider === 'chatgpt' ? 'ChatGPT' : via(row.provider)} did not return an answer. It is left out of every count, so it never reads as not mentioned. {row.spentUsd > 0 ? 'Charged ' + usd(row.spentUsd) + '.' : 'Not charged.'}</p>}
-    {row.state === 'skipped' && <p className="ask-note">Skipped. {row.spentUsd > 0 ? 'Work already started was charged ' + usd(row.spentUsd) + '.' : 'Nothing was charged.'}</p>}
+    {row.state === 'no_answer' && <p className="ask-note">{via(row.provider)} did not return an answer. A missing answer is not counted as an absent mention. {row.provider === 'chatgpt' ? 'Your ChatGPT plan limits apply.' : recordedCost + '. Check provider usage for any unresolved requests.'}</p>}
+    {row.state === 'skipped' && <p className="ask-note">Stopped. {row.provider === 'chatgpt' ? 'Your ChatGPT plan limits apply.' : recordedCost + '. Completed work may still be billable.'}</p>}
+    {row.error === 'cancel_remote' && <div className="ask-review"><p>{row.progress}</p><button className="secondary" disabled={busy} onClick={() => void act(() => api('/jobs/' + row.jobId + '/cancel', {}))}>Check cancellation</button></div>}
     {error && <p className="inline-error" role="alert">{error}</p>}
   </article>;
 }

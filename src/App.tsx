@@ -89,6 +89,7 @@ import type {
 type Workspace = {
   project: Project;
   jobs: Job[];
+  askActivity: ReturnType<typeof import('../server/asks').askActivity>;
   pages: PageSummary[];
   auditId: string | null;
   revision: string;
@@ -258,7 +259,7 @@ export function App() {
   const scoped = p?.topics.some((topic) => topic.id === scope) ? scope : null;
   const viewId = page === "Topics" ? topicPage : lensPage ? scoped : null;
   const viewTopic = p?.topics.find((topic) => topic.id === viewId);
-  const { view: topicView, error: topicError } = useTopicView(p?.id, viewTopic ? viewId : null, JSON.stringify(viewTopic ?? null));
+  const { view: topicView, error: topicError } = useTopicView(p?.id, viewTopic ? viewId : null, w?.revision ?? '');
   const lens = lensPage && scoped ? topicView : null, lensLoading = lensPage && !!scoped && !lens;
   const showLens = !!w && lensPage && w.project.topics.some((topic) => topic.status === "active" || topic.id === scoped);
   const chooseScope = (id: string | null) => { setScope(id); setEvidenceFilter(null); };
@@ -287,7 +288,7 @@ export function App() {
     if (page === label) { mainRef.current?.scrollTo(0, 0); setTopicPage(null); setAskId(null); }
     else navigate(() => { setPage(label); setQuery(""); setAnswerStatus('all'); setEvidenceFilter(null); setTopicPage(null); setAskId(null); if (label === 'Content') setSelectedContent(''); });
   };
-  const ask = useAskController(selected || undefined, (id) => navigate(() => { setPage("Ask history"); setAskId(id); }));
+  const ask = useAskController(selected || undefined, (id) => navigate(() => { setPage("Ask history"); setAskId(id); }), JSON.stringify(connected) + profiles.active);
   const openConnections = () => navigate(() => { setPage("Settings"); setQuery(""); setEvidenceFilter(null); setConnectionsRequest(value => value + 1); });
   const openEvidence = (ids: string[], label: string) => navigate(() => {
     setPage("Responses"); setQuery(""); setAnswerStatus('all'); setEvidenceFilter({ ids, label });
@@ -392,7 +393,7 @@ export function App() {
           </button>
           </div>
         </header>
-        {ask.open && p && page !== 'Settings' && <AskDrawer ask={ask} brand={p.brand} domain={p.domain} locale={p.locale} behind={mainRef} settingsButton={askSettings} />}
+        {ask.open && p && page !== 'Settings' && <AskDrawer ask={ask} brand={p.brand} domain={p.domain} locale={p.locale} />}
         <DesktopUpdates compact />
         {w && page !== 'Settings' && (() => {
           const active = w.jobs.find(job => ['measure', 'recheck'].includes(job.kind) && ['queued', 'running', 'paused'].includes(job.status));
@@ -400,6 +401,9 @@ export function App() {
           const topic = p?.topics.find(topic => topic.id === active.topicId);
           return <ActivityNotice title={topic ? topic.name + ' visibility check' : 'Visibility check'} detail={active.progress || 'Waiting to start'} paused={active.status === 'paused'} open={() => { chooseScope(active.topicId ?? null); changePage('Visibility'); }} />;
         })()}
+        {w && page !== 'Settings' && w.askActivity?.filter(active => page !== 'Ask history' || askId !== active.askId).slice(0, 1).map(active =>
+          <ActivityNotice key={active.askId} title={active.question} detail={active.paused ? 'Ask needs your attention' : `Ask: ${active.collecting} collecting${active.needsAttention ? `, ${active.needsAttention} need attention` : ''}`}
+            paused={active.paused} open={() => navigate(() => { setPage('Ask history'); setAskId(active.askId); })} />)}
         <main ref={mainRef} id="main-content" tabIndex={-1}>
           {profiles.welcome && page === 'Overview' && <section className="plan-welcome" aria-label="ChatGPT plan usage"><ProviderIcon provider="chatgpt" size={20} /><div><h2>Your ChatGPT plan is connected</h2><p>Your plan limits apply.</p></div><a href="https://chatgpt.com/settings/usage" target="_blank" rel="noreferrer">Manage usage <ArrowUpRight size={14} /></a><button className="icon-button" aria-label="Dismiss ChatGPT connection notice" onClick={() => void run(() => api("/connections/chatgpt/acknowledge-plan", {}))}><X size={16} /></button></section>}
           <PageHeader title={openTopic?.name ?? page} description={openTopic ? openTopic.goal || "Questions checked together toward one goal." : page === 'Overview' ? identity.tagline : descriptions[page]} icon={navigation.find(([label]) => label === page)?.[1] ?? LayoutDashboard}>
@@ -438,7 +442,7 @@ export function App() {
               {lensLoading ? <div className="workspace-loading" role="status">{topicError ? <p role="alert">{topicError}</p> : <><span className="visually-hidden">Loading this topic</span><div className="panel skeleton tall" aria-hidden="true" /></>}</div>
               : lens?.measurement && ["Visibility", "Responses", "Sources"].includes(page) ? <MeasurementScope measurement={lens.measurement} observations={lens.observations} missing={lens.metrics.missing} />
               : !lens && w.measurement && ["Overview", "Visibility", "Responses", "Sources"].includes(page) && <MeasurementScope measurement={w.measurement} observations={w.observations} missing={w.metrics.missing} />}
-              {page === "Ask history" && <AskPage projectId={p!.id} brand={p!.brand} domain={p!.domain} askId={askId} setAskId={setAskId} ask={ask} refresh={refresh} />}
+              {page === "Ask history" && <AskPage projectId={p!.id} version={w.revision} askId={askId} setAskId={setAskId} ask={ask} refresh={refresh} />}
               {page === "Overview" && (
                 <>
                   <OverviewSummary brand={p!.brand} presentation={w.presentation} collected={w.metrics.completed} missing={w.metrics.missing} active={activeScan} onAnswers={() => changePage('Responses')} onCheck={measurementAction.action} />
@@ -666,7 +670,7 @@ export function App() {
                   <div className="panel-heading">
                     <h2>Export your work</h2>
                   </div>
-                  <div className="report-overview"><div><h3>{p!.brand}</h3><p>Your saved workspace, ready to share or back up. Reports use the current evidence; backups also preserve earlier checks and draft versions.</p></div><dl className="evidence-summary" aria-label="Current workspace evidence"><div><dt>Audited pages</dt><dd>{w.presentation.audit.pages}</dd></div><div><dt>Answers in current check</dt><dd>{w.metrics.completed}</dd></div><div><dt>Improvements</dt><dd>{w.findingCounts.total}</dd></div><div><dt>Saved drafts</dt><dd>{w.content.length}</dd></div></dl></div>
+                  <div className="report-overview"><div><h3>{p!.brand}</h3><p>Reports use your current visibility results. Project exports also preserve earlier checks and draft versions. One-off Ask history stays on this device and is not included.</p></div><dl className="evidence-summary" aria-label="Current workspace evidence"><div><dt>Audited pages</dt><dd>{w.presentation.audit.pages}</dd></div><div><dt>Answers in current check</dt><dd>{w.metrics.completed}</dd></div><div><dt>Improvements</dt><dd>{w.findingCounts.total}</dd></div><div><dt>Saved drafts</dt><dd>{w.content.length}</dd></div></dl></div>
                   <div className="report-grid">
                     <div>
                       <FileText size={25} />

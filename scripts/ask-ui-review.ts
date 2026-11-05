@@ -99,9 +99,21 @@ try {
     await drawer.waitFor({ state: "hidden" });
   }
 
+  await page.setViewportSize({ width: 1360, height: 900 });
+  await page.locator('.ask-settings-button').click();
+  const modal = page.getByRole('dialog', { name: 'Ask a question', exact: true });
+  await modal.locator('button[type="submit"]').focus();
+  await page.keyboard.press('Tab');
+  assert.equal(await modal.evaluate(element => element.contains(document.activeElement)), true, 'Ask keeps keyboard focus inside the modal');
+  await page.mouse.click(100, 300);
+  await modal.waitFor({ state: 'hidden' });
+  assert.equal(await page.locator('.ask-settings-button').evaluate(element => element === document.activeElement), true, 'Closing Ask returns focus to its opener');
+
   // Asking from the drawer navigates to the result; with the runner stopped every engine is collecting.
   await page.setViewportSize({ width: 1360, height: 900 });
-  await page.locator(".ask-settings-button").click();
+  await page.locator('.ask-bar button[type="submit"]').click();
+  await modal.waitFor();
+  assert.equal(runtime.store.jobs(project.id).filter(job => job.kind === 'ask').length, 0, 'Header submissions must show paid approval again after the drawer was dismissed');
   await page.locator("#ask-settings").getByRole("button", { name: "Ask 3 engines" }).click();
   await page.getByRole("heading", { name: question }).waitFor();
   assert.equal(await page.locator(".ask-settings-button").innerText(), "1 engine");
@@ -136,6 +148,38 @@ try {
     await page.locator(".ask-history").waitFor();
     await check(page, "ask-history", width);
   }
+
+  // Accept the request at the server but lose its response. Retrying the same form must not buy a second group.
+  await page.setViewportSize({ width: 1360, height: 900 });
+  await page.getByRole('textbox', { name: 'Find an ask' }).fill('a question that is not saved');
+  await page.getByRole('heading', { name: 'No matching questions' }).waitFor();
+  await page.getByRole('button', { name: 'Clear search', exact: true }).click();
+  assert.equal(await page.locator('.ask-history li').count(), 1);
+  const beforeRetry = runtime.store.jobs(project.id).filter(job => job.kind === 'ask').length;
+  const keys: string[] = [];
+  const retryQuestion = 'Synthetic review: can an accepted ask be retried safely?';
+  const routePattern = '**/api/projects/' + project.id + '/asks';
+  await page.route(routePattern, async route => {
+    if (route.request().method() !== 'POST') { await route.continue(); return; }
+    keys.push(route.request().headers()['idempotency-key']);
+    const response = await route.fetch();
+    if (keys.length === 1) await route.abort('failed');
+    else await route.fulfill({ response });
+  });
+  await page.getByRole('textbox', { name: 'Ask every engine', exact: true }).fill(retryQuestion);
+  await page.locator('.ask-bar button[type="submit"]').click();
+  await page.locator('#ask-settings').getByRole('alert').waitFor();
+  assert.equal(runtime.store.jobs(project.id).filter(job => job.kind === 'ask').length, beforeRetry + 1);
+  await page.locator('#ask-settings').getByRole('button', { name: 'Ask 1 engine', exact: true }).click();
+  await page.getByRole('heading', { name: retryQuestion, exact: true }).waitFor();
+  assert.equal(keys.length, 2);
+  assert.equal(keys[0], keys[1], 'An uncertain retry keeps the original request key');
+  assert.equal(runtime.store.jobs(project.id).filter(job => job.kind === 'ask').length, beforeRetry + 1);
+  await page.unroute(routePattern);
+  await navigate(page, 'Prompts');
+  await page.locator('.activity-notice').filter({ hasText: retryQuestion }).waitFor();
+  await page.locator('.activity-notice').filter({ hasText: retryQuestion }).getByRole('button', { name: 'View progress' }).click();
+  await page.getByRole('heading', { name: retryQuestion, exact: true }).waitFor();
   assert.deepEqual(failures, []);
   console.log(JSON.stringify({ output, screenshots: shots.length, providerRequests, externalRequests: 0, rendererErrors: failures.length }));
 } finally {

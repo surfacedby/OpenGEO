@@ -13,6 +13,7 @@ OpenGEO is a free, open-source app for website owners and agencies. Find out whe
 ## What you can do
 
 - **Check your AI visibility.** Choose the questions your customers ask. See which answers mention your brand and which link to your website. Open the full answers and citations behind the numbers.
+- **Ask once, compare answers.** Type a single question and read the available engines side by side. Keep these answers separate from your tracked results, or add the question to a Topic for future checks.
 - **Organize questions into Topics.** Track a product, service or customer need separately, with its own prompts, checks and results. Keep suggested prompts and the searches AI actually reported in separate views.
 - **Check your website's health.** Find concrete improvements to titles, descriptions, headings, indexing and structured data. Run this optional scan with or without an AI connection.
 - **Find your next improvement.** Review suggested page updates, new resources and site changes alongside the evidence behind them.
@@ -28,9 +29,9 @@ The desktop app includes its runtime and browser. You do not need Node.js, Docke
 
 | Your computer | Download |
 | --- | --- |
-| Windows x64 | [Windows installer](https://github.com/surfacedby/OpenGEO/releases/download/v0.1.0-beta.5/OpenGEO-0.1.0-beta.5-windows-x64.exe) |
-| Mac with an Apple M-series chip | [Apple Silicon DMG](https://github.com/surfacedby/OpenGEO/releases/download/v0.1.0-beta.5/OpenGEO-0.1.0-beta.5-macos-arm64.dmg) |
-| Mac with an Intel processor | [Intel DMG](https://github.com/surfacedby/OpenGEO/releases/download/v0.1.0-beta.5/OpenGEO-0.1.0-beta.5-macos-x64.dmg) |
+| Windows x64 | [Windows installer](https://github.com/surfacedby/OpenGEO/releases/download/v0.1.0-beta.6/OpenGEO-0.1.0-beta.6-windows-x64.exe) |
+| Mac with an Apple M-series chip | [Apple Silicon DMG](https://github.com/surfacedby/OpenGEO/releases/download/v0.1.0-beta.6/OpenGEO-0.1.0-beta.6-macos-arm64.dmg) |
+| Mac with an Intel processor | [Intel DMG](https://github.com/surfacedby/OpenGEO/releases/download/v0.1.0-beta.6/OpenGEO-0.1.0-beta.6-macos-x64.dmg) |
 
 **This is a public beta.** Windows is unsigned; Mac downloads are ad hoc signed and not notarized. Your computer may show a warning or block installation. Both Mac versions were tested on macOS 15. Read the [installation guide](docs/distribution.md) for checksums, first-launch instructions and current limitations. Linux users can [run from source or use Docker](docs/distribution.md#docker).
 

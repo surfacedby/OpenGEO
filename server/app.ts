@@ -36,7 +36,7 @@ import {
   competitorEvidence,
 } from "./analysis.js";
 import { exportProject, reportMarkdown } from "./export.js";
-import { registerAsks } from "./asks.js";
+import { askActivity, registerAsks } from "./asks.js";
 import { htmlDocument } from "./markdown.js";
 import { RemoteAccess, securityHeaders, type RemoteConfig } from "./remote-access.js";
 import {
@@ -372,6 +372,7 @@ export async function createApp(
     return {
       project,
       jobs: jobs.filter((job) => job.kind !== "ask"),
+      askActivity: askActivity(jobs),
       auditCoverage: coverage.success ? coverage.data : null,
       pages,
       pageMode,

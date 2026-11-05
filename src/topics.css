@@ -42,7 +42,7 @@
 .topic-form-actions .danger-text { margin-right: auto; }
 .prompt-groups { display: grid; gap: var(--space-3); }
 .prompt-group-card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
-.prompt-group-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; padding: 10px var(--panel-space); }
+.prompt-group-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; padding: 10px var(--panel-space); background: var(--surface-2); }
 .prompt-group-toggle { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; text-align: left; color: var(--ink); }
 .prompt-group-toggle svg { color: var(--muted); transition: transform .15s; transform: rotate(-90deg); }
 .prompt-group-toggle[aria-expanded="true"] svg { transform: none; }
@@ -50,7 +50,7 @@
 .prompt-group-toggle span, .prompt-group-rates { font-size: 12px; color: var(--muted); }
 .prompt-group-rates { display: flex; gap: 12px; }
 .prompt-group-head .button-row { margin-left: auto; }
-.prompt-group-card .tracked-prompt-list { margin: 0; padding: 0 var(--panel-space) 14px; font-size: 13px; line-height: 1.5; border-top: 1px solid var(--divider); }
+.prompt-group-card .tracked-prompt-list { margin: 0; padding: 0 var(--panel-space) 14px calc(var(--panel-space) + var(--space-6)); font-size: 13px; line-height: 1.5; border-top: 1px solid var(--divider); }
 .topic-lens.in-page { display: none; }
 @media (max-width: 1100px) {
   .topic-lens > .choice { max-width: 200px; }

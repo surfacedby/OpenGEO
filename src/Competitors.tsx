@@ -51,6 +51,7 @@ export function Competitors({ project, jobs, review, run, activity, scope }: {
   const analysis = jobs.find(job => job.kind === 'competitors' && job.measurementJobId === check?.id && job.status === 'completed');
   const pending = jobs.find(job => job.kind === 'competitors' && job.measurementJobId === check?.id && ['queued', 'running', 'paused'].includes(job.status));
   const result = (analysis ?? check)?.result as { competitors?: DiscoveredWebsite[]; references?: DiscoveredWebsite[] } | null;
+  const rolesReviewed = Array.isArray(result?.competitors) && Array.isArray(result?.references);
   const cited = new Map<string, Set<string>>();
   for (const answer of answers) for (const citation of answer.citations) {
     const domain = hostname(citation.url);
@@ -66,7 +67,7 @@ export function Competitors({ project, jobs, review, run, activity, scope }: {
   const alternatives = new Map(discovered.map(site => [hostname(site.domain), site]));
   for (const domain of tracked) if (domain && !alternatives.has(domain) && references.get(domain)?.role !== 'reference')
     alternatives.set(domain, { name: domain, domain, observationIds: [], reason: 'Added to your comparison. Its role has not been confirmed in this check.' });
-  const reviewedDomains = [hostname(project.domain), ...alternatives.keys(), ...references.keys()];
+  const reviewedDomains = [hostname(project.domain), ...discovered.map(site => hostname(site.domain)), ...references.keys()];
   for (const domain of cited.keys()) if (!reviewedDomains.some(known => domain === known || domain.endsWith('.' + known)))
     unreviewed.set(domain, { name: domain, domain, observationIds: coverage(domain), reason: 'Cited in this check. Review its role to distinguish a reference from a competing offering.' });
   const candidates = discovered.filter(site => !tracked.has(hostname(site.domain)));
@@ -84,7 +85,7 @@ export function Competitors({ project, jobs, review, run, activity, scope }: {
   const inspected = rows.find(site => site.domain === detail);
   return <div className="competitor-workspace">
     <section className="panel competitor-summary" aria-label="Comparison summary">
-      <div className="competitor-metrics" aria-busy={loading}><div><Users size={19} /><strong>{loading ? '...' : discovered.length}</strong><span>Discovered alternatives</span></div><div><BookOpen size={19} /><strong>{loading ? '...' : references.size}</strong><span>Cited reference sites</span></div><div><Globe size={19} /><strong>{loading ? '...' : answers.length}</strong><span>Answers in this check</span></div></div>
+      <div className="competitor-metrics" aria-busy={loading}><div><Users size={19} /><strong>{loading ? '...' : rolesReviewed ? discovered.length : 'Not reviewed'}</strong><span>Discovered alternatives</span></div><div><BookOpen size={19} /><strong>{loading ? '...' : rolesReviewed ? references.size : 'Not reviewed'}</strong><span>Cited reference sites</span></div><div><Globe size={19} /><strong>{loading ? '...' : answers.length}</strong><span>Answers in this check</span></div></div>
       <div className="competitor-check"><span>Visibility check</span><Select label="Comparison check" compact searchable={false} value={check?.id ?? ''} onChange={setCheckId} options={checks.map(job => ({ value: job.id, label: dateTime(measurementTime(job)), detail: completedMeasurement(job) ? 'Completed check' : 'Partial check' }))} placeholder="No saved checks" /></div>
     </section>
     {error && <div className="inline-error" role="alert">{error}<button className="secondary compact" onClick={() => setRetry(value => value + 1)}>Try again</button></div>}

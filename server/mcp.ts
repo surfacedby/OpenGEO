@@ -114,7 +114,7 @@ server.registerTool(
 server.registerTool(
   "estimate_ask",
   {
-    description: "Price one question on the chosen engines without running it. ChatGPT is free on the connected plan; SurfacedBy returns a quote; DataForSEO uses the saved per-request estimate.",
+    description: "Estimate one question on the chosen engines without running it. ChatGPT uses the connected plan and its limits; SurfacedBy returns a quote; DataForSEO uses the saved per-request estimate and its actual charge can differ.",
     inputSchema: { projectId: z.string().uuid(), question: z.string().min(3).max(500), engines: z.array(askEngines).min(1) },
     annotations: { readOnlyHint: true, openWorldHint: true },
   },

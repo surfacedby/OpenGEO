@@ -1,13 +1,13 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react';
-import { ChartColumn, Check, ChevronDown, ChevronLeft, ChevronRight, FileText, Lightbulb, Link, MessagesSquare, Minus, ScanSearch, Search, TrendingDown, TrendingUp, type LucideIcon } from 'lucide-react';
+import { ChartColumn, Check, ChevronDown, ChevronLeft, ChevronRight, FileText, Globe, Lightbulb, Link, MessagesSquare, Minus, ScanSearch, Search, Target, TrendingDown, TrendingUp, type LucideIcon } from 'lucide-react';
 import { pointChange, shortDate } from '../format';
 
 export function PageHeader({ title, description, icon: Icon, children }: { title: string; description: string; icon: LucideIcon; children?: ReactNode }) {
   return <div className="page-heading"><div className="page-heading-copy"><span className="page-icon"><Icon size={22} aria-hidden="true" /></span><div><h1>{title}</h1><p>{description}</p></div></div>{children}</div>;
 }
 
-export function Disclosure({ label, children, onOpenChange }: { label: string; children: ReactNode; onOpenChange?: (open: boolean) => void }) {
-  return <details className="disclosure" onToggle={event => { if (event.target === event.currentTarget) onOpenChange?.(event.currentTarget.open); }}><summary>{label}<ChevronDown size={16} aria-hidden="true" /></summary><div className="disclosure-content">{children}</div></details>;
+export function Disclosure({ label, children, onOpenChange, defaultOpen = false }: { label: string; children: ReactNode; onOpenChange?: (open: boolean) => void; defaultOpen?: boolean }) {
+  return <details className="disclosure" open={defaultOpen || undefined} onToggle={event => { if (event.target === event.currentTarget) onOpenChange?.(event.currentTarget.open); }}><summary>{label}<ChevronDown size={16} aria-hidden="true" /></summary><div className="disclosure-content">{children}</div></details>;
 }
 
 export function EmptyState({ title, children, icon: Icon = Search, action }: { title: string; children: ReactNode; icon?: LucideIcon; action?: ReactNode }) {
@@ -61,7 +61,7 @@ export function Tabs<T extends string>({ label, value, items, onChange, panelId 
   })}</div>;
 }
 
-const metricIcons: Record<string, LucideIcon> = { 'Brand mentions': MessagesSquare, 'Website citations': Link, 'Answers collected': Check, Opportunities: Lightbulb, 'Answers remaining': MessagesSquare };
+const metricIcons: Record<string, LucideIcon> = { 'Brand mentions': MessagesSquare, 'Website citations': Link, 'Answers collected': Check, Opportunities: Lightbulb, 'Answers remaining': MessagesSquare, 'Cited websites': Globe, 'Your cited pages': FileText, 'Answers citing you': Link, 'Target pages cited': Target };
 
 /** Deltas come from the server's same-scope comparison, not adjacent check values. */
 export function MetricCard({ title, value, detail, points, since, tone = 'mention' }: { title: string; value: string; detail: string; points?: number | null; since?: string; tone?: 'mention' | 'citation' }) {

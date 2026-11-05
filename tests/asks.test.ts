@@ -140,6 +140,90 @@ test('an ask collects each engine once and keeps its answers out of the website\
   } finally { await f.close(); }
 });
 
+test('the whole ask request is immutable across concurrent retries and unavailable connections', async () => {
+  const f = await fixture();
+  try {
+    const input = { question, engines: ['chatgpt', 'surfacedby-chatgpt'], maxCostUsd: 1 };
+    const responses = await Promise.all([f.ask(input, 'stable-request'), f.ask(input, 'stable-request')]);
+    assert.deepEqual(responses.map(row => row.statusCode), [200, 200]);
+    assert.deepEqual(responses[0].json(), responses[1].json());
+    assert.equal(f.store.jobs(f.project.id).length, 2);
+    for (const change of [
+      { engines: ['chatgpt', 'surfacedby-chatgpt', 'surfacedby-gemini'] },
+      { engines: ['chatgpt'] }, { maxCostUsd: 2 }, { question: 'A different question for the engines?' },
+    ]) {
+      const refused = await f.ask({ ...input, ...change }, 'stable-request');
+      assert.equal(refused.statusCode, 409);
+      assert.equal(refused.json().code, 'idempotency');
+    }
+    f.state.platforms = [];
+    assert.deepEqual((await f.ask(input, 'stable-request')).json(), responses[0].json());
+    assert.equal(f.store.jobs(f.project.id).length, 2);
+    assert.equal(f.state.purchases.length, 0);
+  } finally { await f.close(); }
+});
+
+test('deleting an ask leaves a content-free retry tombstone and deleting its brand removes it', async () => {
+  const f = await fixture();
+  try {
+    const input = { question, engines: ['chatgpt'] };
+    const { askId } = (await f.ask(input, 'delete-retry')).json();
+    await f.runner.tick();
+    f.store.deleteAsk(f.project.id, askId);
+    assert.equal((await f.ask(input, 'delete-retry')).statusCode, 409);
+    assert.equal(f.store.jobs(f.project.id).length, 0);
+    const receipt = f.store.db.prepare('SELECT * FROM ask_requests WHERE id=?').get(askId);
+    assert.ok(receipt);
+    assert.ok(!JSON.stringify(receipt).includes(question));
+    f.store.deleteProject(f.project.id, f.project.domain);
+    assert.equal(f.store.db.prepare('SELECT * FROM ask_requests WHERE id=?').get(askId), undefined);
+  } finally { await f.close(); }
+});
+
+test('resuming one engine cannot raise the original group approval', async () => {
+  const f = await fixture();
+  try {
+    const { jobs } = (await f.ask({ question, engines: ['surfacedby-chatgpt', 'surfacedby-gemini'], maxCostUsd: 1 })).json();
+    f.store.updateJob(jobs[0], { status: 'paused', error: 'budget' });
+    assert.throws(() => f.runner.resume(jobs[0], true, 2), /original ask limit/);
+    assert.equal(f.store.job(jobs[0]).maxCostUsd, .5);
+    assert.equal(f.store.job(jobs[0]).status, 'paused');
+  } finally { await f.close(); }
+});
+
+test('all engines retain the brand and language approved at submission even if the brand changes before collection', async () => {
+  const f = await fixture();
+  try {
+    const { askId, jobs } = (await f.ask({ question, engines: ['chatgpt', 'surfacedby-chatgpt'], maxCostUsd: 1 })).json();
+    const { id, createdAt, ...settings } = f.project;
+    f.store.updateProject(id, projectInput.parse({ ...settings, brand: 'Another name', locale: 'fr-FR' }));
+    await f.runner.tick();
+    for (const id of jobs) {
+      const frozen = JSON.parse(f.store.step(id, 'project')!.body!);
+      assert.equal(frozen.brand, f.project.brand);
+      assert.equal(frozen.locale, f.project.locale);
+      assert.deepEqual(frozen.prompts, [question]);
+    }
+    const result = await f.read(askId);
+    assert.equal(result.brand, f.project.brand);
+    assert.equal(result.locale, f.project.locale);
+    assert.equal(result.engines[0].answer.mentioned, true);
+  } finally { await f.close(); }
+});
+
+test('estimates refuse unavailable engines without submitting quotes', async () => {
+  const f = await fixture({ platforms: [] });
+  try {
+    const response = await f.app.inject({ method: 'POST', url: `/api/projects/${f.project.id}/asks/estimate`, headers,
+      payload: { question, engines: ['surfacedby-chatgpt'] } });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().totalUsd, null);
+    assert.match(response.json().engines[0].note, /Not available/);
+    assert.equal(f.state.estimates.length, 0);
+    assert.equal(f.state.purchases.length, 0);
+  } finally { await f.close(); }
+});
+
 test('an ask refuses paid engines without a limit and never buys more than an engine\'s share', async () => {
   const f = await fixture({ credits: 4 });
   try {
@@ -273,4 +357,36 @@ test('the limit is shared so paid engines can never spend more than it, and the 
   assert.equal(askFit(1, [null, .4]).overLimit, false);
   assert.equal(askFit(0, [null]).overLimit, true);
   assert.deepEqual(askFit(1, []), { shareUsd: 0, overLimit: false, suggestedLimitUsd: null });
+});
+
+test('a fork ask without a saved approval cannot buy more work on retry', async () => {
+  const f = await fixture();
+  try {
+    const input = { question, engines: ['chatgpt'], maxCostUsd: 0 };
+    const { askId, jobs } = (await f.ask(input, 'fork-request')).json();
+    f.store.db.prepare('DELETE FROM ask_requests WHERE id=?').run(askId);
+    const retried = await f.ask({ ...input, engines: ['chatgpt', 'surfacedby-chatgpt'], maxCostUsd: 1 }, 'fork-request');
+    assert.equal(retried.statusCode, 409);
+    assert.equal(retried.json().code, 'idempotency');
+    assert.deepEqual(f.store.jobs(f.project.id).map(job => job.id), jobs);
+    assert.equal((await f.read(askId)).engines.length, 1);
+    assert.equal(f.state.purchases.length, 0);
+  } finally { await f.close(); }
+});
+
+test('workspace activity follows asks without adding them to visibility and retains unresolved cancellation', async () => {
+  const f = await fixture();
+  try {
+    const { askId, jobs } = (await f.ask({ question, engines: ['chatgpt', 'surfacedby-chatgpt'], maxCostUsd: 1 })).json();
+    const workspace = async () => (await f.app.inject({ url: `/api/projects/${f.project.id}/workspace`, headers })).json();
+    assert.deepEqual((await workspace()).askActivity, [{ askId, question, collecting: 2, needsAttention: 0, paused: false }]);
+    f.store.updateJob(jobs[0], { status: 'completed' });
+    f.store.updateJob(jobs[1], { status: 'cancelled', error: 'cancel_remote' });
+    const unresolved = await workspace();
+    assert.deepEqual(unresolved.askActivity, [{ askId, question, collecting: 0, needsAttention: 1, paused: true }]);
+    assert.deepEqual(unresolved.jobs, []);
+    assert.equal(unresolved.metrics.completed, 0);
+    f.store.updateJob(jobs[1], { error: null });
+    assert.deepEqual((await workspace()).askActivity, []);
+  } finally { await f.close(); }
 });

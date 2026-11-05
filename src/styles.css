@@ -204,7 +204,7 @@ nav button.active > svg { color: var(--primary); }
 .topbar-actions { display: flex; align-items: center; gap: 8px; }
 .activity-notice { display: flex; align-items: center; gap: 12px; padding: 10px 28px; background: var(--primary-50); border-bottom: 1px solid var(--primary-100); color: var(--primary-text); flex-shrink: 0; }
 .activity-notice > div { display: flex; flex: 1; align-items: baseline; gap: 12px; flex-wrap: wrap; min-width: 0; }
-.activity-notice strong { font-size: 13px; }
+.activity-notice strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .activity-notice span { font-size: 12px; overflow-wrap: anywhere; }
 @media (max-width: 640px) { .activity-notice { padding: 10px 12px; align-items: flex-start; } .activity-notice > div { gap: 2px; flex-direction: column; } }
 .connection-shortcut { display: flex; align-items: center; gap: 7px; min-height: 34px; border: 1px solid var(--border); background: var(--surface); padding: 5px 10px; border-radius: 999px; font-size: 12px; font-weight: 500; color: var(--text); }

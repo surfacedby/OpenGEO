@@ -10,7 +10,7 @@ import type { Vault } from "./vault.js";
 import type { Runner } from "./workflows.js";
 import { askShare } from "./ask-scope.js";
 
-/** Every engine an ask can use searches the web before answering; a route that answers from model memory is not offered. */
+/** Ask offers search-enabled collection routes; individual answers retain the provider's reported retrieval evidence. */
 export const askEngines = {
   chatgpt: { provider: "chatgpt", platform: "chat_gpt", label: "ChatGPT", detail: "API answer with web search", surface: "api" },
   "surfacedby-chatgpt": { provider: "console", platform: "chat_gpt", label: "ChatGPT app", detail: "As a person sees it, via SurfacedBy", surface: "consumer_interface" },
@@ -75,7 +75,7 @@ const engineList = z.array(z.enum(engineIds)).min(1, "Choose at least one engine
   .refine(list => new Set(list).size === list.length, "Choose each engine once");
 const askInput = z.object({ question, engines: engineList, maxCostUsd: z.number().finite().min(0).max(1000).default(0) }).strict();
 
-/** A SurfacedBy quote is a free price check for the same single question the ask would submit. */
+/** Quote the same single question without submitting a measurement job. */
 async function surfacedByQuote(deps: AskDeps, project: Project, text: string, platform: string) {
   const domains = await deps.runner.consolePages("/domains", AbortSignal.timeout(15000));
   const domain = domains.find((row: any) => row.domain === project.domain);
@@ -91,9 +91,12 @@ async function surfacedByQuote(deps: AskDeps, project: Project, text: string, pl
 export async function estimateAsk(deps: AskDeps, projectId: string, body: unknown) {
   const input = z.object({ question, engines: engineList }).strict().parse(body);
   const project = deps.store.project(projectId);
+  const catalog = await engineCatalog(deps);
   const requestEstimate = deps.store.setting<number>("measurementRequestEstimateUsd", 0);
   const engines = await Promise.all(input.engines.map(async id => {
     const engine = askEngines[id];
+    const available = catalog.engines.find(row => row.id === id)!;
+    if (!available.available) return { id, estimateUsd: null, note: available.reason };
     if (engine.provider === "chatgpt") return { id, estimateUsd: 0 };
     if (engine.provider === "dataforseo") return { id, estimateUsd: requestEstimate > 0 ? requestEstimate : null };
     try { return { id, ...await surfacedByQuote(deps, project, input.question, engine.platform) }; }
@@ -103,10 +106,14 @@ export async function estimateAsk(deps: AskDeps, projectId: string, body: unknow
   return { engines, totalUsd: known ? Math.round(engines.reduce((sum, row) => sum + (row.estimateUsd ?? 0), 0) * 100) / 100 : null };
 }
 
-/** The limit is shared across paid engines by askShare, so together they can never spend more than it. */
+/** Split the approval across engines. Quoted providers enforce it; metered providers can report costs above their estimate. */
 export async function createAsk(deps: AskDeps, projectId: string, body: unknown, key: string) {
   const input = askInput.parse(body);
   deps.store.project(projectId);
+  const askId = askIdFor(projectId, key);
+  const inputHash = createHash('sha256').update(JSON.stringify({ ...input, engines: [...input.engines].sort() })).digest('hex');
+  const previous = deps.store.askRequest(askId, inputHash);
+  if (previous) return previous;
   const catalog = await engineCatalog(deps);
   const chosen = input.engines.map(id => catalog.engines.find(engine => engine.id === id)!);
   const unavailable = chosen.find(engine => !engine.available);
@@ -115,17 +122,29 @@ export async function createAsk(deps: AskDeps, projectId: string, body: unknown,
   if (paid.length && input.maxCostUsd <= 0) throw new ProviderError("budget", "Set a spending limit to ask paid engines. Nothing was started.");
   const share = askShare(input.maxCostUsd, paid.length);
   if (paid.length && share <= 0) throw new ProviderError("budget", "This limit is too small to share across the paid engines. Nothing was started.");
-  const askId = askIdFor(projectId, key);
-  const jobs = deps.store.db.transaction(() => chosen.map(engine => deps.store.enqueue(jobInput.parse({
+  const result = deps.store.enqueueAsk(askId, projectId, inputHash, chosen.map(engine => jobInput.parse({
     projectId, kind: "ask", askId, question: input.question, provider: engine.provider, platform: engine.platform,
     maxCostUsd: engine.price === "free" ? 0 : share, webSearch: true,
-  }), key + ":" + engine.id)))();
+  })));
   if (paid.length) deps.store.set("askLimitUsd", input.maxCostUsd);
-  return { askId, jobs: jobs.map(job => job.id) };
+  return result;
 }
 
 function askJobs(store: Store, projectId: string, askId?: string) {
   return store.jobs(projectId).filter(job => job.kind === "ask" && (!askId || job.askId === askId));
+}
+
+/** Activity is separate from visibility evidence, so leaving Ask never hides work or changes visibility counts. */
+export function askActivity(jobs: Job[]) {
+  const pending = jobs.filter(job => job.kind === 'ask' &&
+    (['queued', 'running', 'paused'].includes(job.status) || job.error === 'cancel_remote'));
+  const ids = [...new Set(pending.map(job => job.askId!))];
+  return ids.map(askId => {
+    const active = pending.filter(job => job.askId === askId);
+    return { askId, question: active[0].question!, collecting: active.filter(job => ['queued', 'running'].includes(job.status)).length,
+      needsAttention: active.filter(job => !['queued', 'running'].includes(job.status)).length,
+      paused: active.every(job => !['queued', 'running'].includes(job.status)) };
+  });
 }
 
 function engineState(store: Store, job: Job) {
@@ -167,9 +186,11 @@ export function readAsk(store: Store, projectId: string, askId: string) {
   const jobs = askJobs(store, projectId, askId);
   if (!jobs.length) throw new Error("Ask not found");
   const project = store.project(projectId), text = jobs[0].question!;
+  const saved = store.step(jobs[0].id, 'project');
+  const context: Project = saved?.body ? JSON.parse(saved.body) : project;
   return {
-    askId, question: text, createdAt: jobs.map(job => job.createdAt).sort()[0], locale: project.locale,
-    brand: project.brand, domain: project.domain,
+    askId, question: text, createdAt: jobs.map(job => job.createdAt).sort()[0], locale: context.locale,
+    brand: context.brand, domain: context.domain,
     limitUsd: Math.round(jobs.reduce((sum, job) => sum + job.maxCostUsd, 0) * 100) / 100,
     spentUsd: jobs.reduce((sum, job) => sum + job.spentUsd, 0),
     tracked: project.prompts.some(prompt => sameQuestion(prompt, text)),
@@ -193,7 +214,7 @@ export function trackAsk(deps: AskDeps, projectId: string, askId: string, body: 
   const job = askJobs(deps.store, projectId, askId)[0];
   if (!job) throw new Error("Ask not found");
   const project = deps.store.project(projectId), text = job.question!;
-  if (input.topicId && !project.topics.some(topic => topic.id === input.topicId)) throw new Error("Topic not found");
+  if (input.topicId && !project.topics.some(topic => topic.id === input.topicId && topic.status === 'active')) throw new Error("Active topic not found");
   const add = (list: string[]) => list.some(prompt => sameQuestion(prompt, text)) ? list : [...list, text];
   const prompts = add(project.prompts);
   const tracked = prompts.find(prompt => sameQuestion(prompt, text))!;

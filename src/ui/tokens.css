@@ -48,11 +48,11 @@
   --space-8: 32px;
   --panel-space: 24px;
   --page-space: 32px;
-  --section-gap: 20px;
+  --section-gap: 24px;
   --control-height: 38px;
   --text-caption: 12px;
   --text-body: 13px;
-  --text-heading: 15px;
+  --text-heading: 17px;
   --text-title: 26px;
   --text-metric: 32px;
   --shadow-xs: 0 1px 2px rgb(15 23 42 / .04);

@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { ProviderError, contentTask } from "./contracts.js";
 import { topicNames } from "./topic-migration.js";
 import { PageCatalog } from './page-catalog.js';
+import { askScope } from './ask-scope.js';
 import { completedBrandMeasurement, completedMeasurement, analysisInProgress } from './portable-results.js';
 import type {
   Project,
@@ -38,6 +39,7 @@ export class Store {
  CREATE TABLE IF NOT EXISTS steps(job_id TEXT NOT NULL REFERENCES jobs(id),step TEXT NOT NULL,state TEXT NOT NULL,body TEXT,PRIMARY KEY(job_id,step));
  CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,body TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS crawl_cooldowns(host TEXT PRIMARY KEY,retry_at REAL NOT NULL);
+ CREATE TABLE IF NOT EXISTS ask_requests(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,input_hash TEXT NOT NULL,result TEXT);
  INSERT OR IGNORE INTO migrations VALUES(1);`);
     this.db.exec(`CREATE TABLE IF NOT EXISTS content_recovery(content_id TEXT PRIMARY KEY REFERENCES artifacts(id),project_id TEXT NOT NULL REFERENCES projects(id),session TEXT NOT NULL,sequence INTEGER NOT NULL,body TEXT);
  INSERT OR IGNORE INTO migrations VALUES(2);`);
@@ -326,7 +328,36 @@ export class Store {
   answerCount(projectId: string, jobId: string, kind: "observation" | "ask-answer" = "observation") {
     return (this.db.prepare("SELECT COUNT(*) AS count FROM artifacts WHERE project_id=? AND job_id=? AND kind=?").get(projectId, jobId, kind) as { count: number }).count;
   }
-  /** An ask is removed whole: its engine runs, their receipts and their answers. Unfinished work keeps its receipts. */
+  /** The group receipt binds all engines and the approved limit, including concurrent and lost-response retries. */
+  askRequest(askId: string, inputHash: string): { askId: string; jobs: string[] } | null {
+    const row = this.db.prepare('SELECT input_hash,result FROM ask_requests WHERE id=?').get(askId) as { input_hash: string; result: string | null } | undefined;
+    if (!row) {
+      // Older fork builds stored jobs without a group approval. Reusing that key cannot authorize new engines.
+      const existing = this.db.prepare("SELECT 1 FROM jobs WHERE json_extract(body,'$.askId')=? LIMIT 1").get(askId);
+      if (existing) throw new ProviderError('idempotency', 'This ask predates saved request approvals. Open its existing results, or start a new ask.');
+      return null;
+    }
+    if (row.input_hash !== inputHash)
+      throw new ProviderError('idempotency', 'This request was already used with different questions, engines or spending limits. Start a new ask for different settings.');
+    if (!row.result)
+      throw new ProviderError('idempotency', 'This ask was deleted. Start a new ask instead of retrying its original request.');
+    return JSON.parse(row.result);
+  }
+  enqueueAsk(askId: string, projectId: string, inputHash: string, inputs: JobInput[]) {
+    return this.db.transaction(() => {
+      const previous = this.askRequest(askId, inputHash);
+      if (previous) return previous;
+      const project = this.project(projectId);
+      const result = { askId, jobs: inputs.map((input, index) => {
+        const job = this.enqueue(input, `ask:${askId}:${index}`);
+        this.setStep(job.id, 'project', 'done', askScope(project, input.question!));
+        return job.id;
+      }) };
+      this.db.prepare('INSERT INTO ask_requests VALUES(?,?,?,?)').run(askId, projectId, inputHash, JSON.stringify(result));
+      return result;
+    })();
+  }
+  /** Keep a content-free retry tombstone so deleting an ask cannot silently authorize buying it again. */
   deleteAsk(projectId: string, askId: string) {
     return this.db.transaction(() => {
       const jobs = this.jobs(projectId).filter(job => job.kind === "ask" && job.askId === askId);
@@ -339,6 +370,7 @@ export class Store {
         this.db.prepare("DELETE FROM steps WHERE job_id=?").run(job.id);
         this.db.prepare("DELETE FROM jobs WHERE id=?").run(job.id);
       }
+      this.db.prepare('UPDATE ask_requests SET result=NULL WHERE id=? AND project_id=?').run(askId, projectId);
       return { deleted: true };
     })();
   }

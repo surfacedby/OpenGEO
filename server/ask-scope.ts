@@ -5,7 +5,7 @@ export function askScope(project: Project, question: string): Project {
   return { ...project, prompts: [question], topics: [] };
 }
 
-/** Each paid engine gets an even share of the limit, rounded down to the cent, so together they can never spend more than it. */
+/** Divide the spending approval without rounding it up; actual metered-provider charges can differ from estimates. */
 export function askShare(limitUsd: number, paidEngines: number) {
   return paidEngines ? Math.floor((limitUsd / paidEngines) * 100 + 1e-9) / 100 : 0;
 }
