@@ -20,7 +20,8 @@ Local matching uses brand names and aliases with Unicode word boundaries. A cita
 
 - **ChatGPT:** Responses API answers. Web search depends on the chosen model and account permissions.
 - **OpenRouter:** model-only API answers, without a search plugin.
-- **DataForSEO and supported SurfacedBy checks:** consumer-interface answers, labelled with their collection surface.
+- **DataForSEO:** API answers with web search requested through its LLM Responses endpoint.
+- **Supported SurfacedBy checks:** consumer-interface answers, labelled with their collection surface.
 
 API answers can differ from a logged-in consumer chat app. Each observation records its prompt, provider, platform, returned model identity, locale, collection time, answer, citations and retrieval mode.
 
@@ -52,7 +53,7 @@ A target page is cited when an answer links to it. Each answer counts once per p
 
 An ask sends one question, typed as a person would search it, to the engines you choose, and keeps each engine's answer with its surface, model, locale, date, searches and citations. It is scored with the same mention and citation rules as a check.
 
-**Asks are not evidence.** Their answers never enter Responses, Sources, rates, trends, findings or exports, because a question asked once, on engines picked for that moment, has no denominator to compare against. Each answer is one sample: the screen shows earlier answers to the same tracked question beside it so a single reading is not mistaken for a trend.
+**One-off answers stay separate from visibility measurements.** They do not enter Responses, Sources, rates, trends, findings or exports. An Ask uses the engines chosen for that question, rather than the consistent question list and settings needed to compare checks. The screen shows earlier answers to the same tracked question beside it so a single reading is not mistaken for a trend.
 
 An engine that returns no answer is left out of every count rather than read as "not mentioned". Answers from different surfaces are shown side by side and never combined into one score. Tracking an ask adds its question to the website's questions, and to a topic if you choose one; it counts from the next check, and the ask's own answers stay where they are.
 

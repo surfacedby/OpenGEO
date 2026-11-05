@@ -6,7 +6,7 @@ Start with the connection you already have. You can also use local audits and pr
 | --- | --- | --- |
 | ChatGPT | API answer checks, analysis, question suggestions and content | An eligible subscription and the required account permissions. No separate API key; plan limits apply. |
 | OpenRouter | API answer checks, analysis and content with a choice of models | An OpenRouter account with available credit. Connect with OAuth or an existing key. Model usage is billed by OpenRouter. |
-| DataForSEO + OpenRouter | Consumer-interface answer collection, followed by AI analysis and content | Both accounts for the full workflow. Each provider charges for its usage. |
+| DataForSEO + OpenRouter | API answer collection, followed by AI analysis and content | Both accounts for the full workflow. Each provider charges for its usage. |
 | SurfacedBy API | Managed checks and insights; suggestions, reviews and drafts when supported | An account with credit and a server that supports the requested operation. Availability is checked before it is offered. |
 
 ![OpenGEO connection choices, with no accounts connected](../assets/provider-preview.webp)
@@ -29,7 +29,7 @@ OpenRouter bills for the selected model. OpenGEO bounds output and estimates cos
 
 ## DataForSEO with OpenRouter
 
-DataForSEO collects supported AI-platform answers; OpenRouter handles analysis and content. Results keep their original collection surface, model and locale so you can judge what is comparable.
+DataForSEO collects API answers with web search requested; OpenRouter handles analysis and content. These are not recordings of a logged-in consumer chat session. Results keep their original collection surface, model and locale so you can judge what is comparable.
 
 A direct DataForSEO request has no per-request dollar cap. Its actual charge can exceed an estimate. Use conservative estimates in OpenGEO and spending controls in the provider account.
 
