@@ -36,6 +36,7 @@ import {
   competitorEvidence,
 } from "./analysis.js";
 import { exportProject, reportMarkdown } from "./export.js";
+import { publicObservation, publicJob, publicArtifact } from './public-results.js';
 import { askActivity, registerAsks } from "./asks.js";
 import { htmlDocument } from "./markdown.js";
 import { RemoteAccess, securityHeaders, type RemoteConfig } from "./remote-access.js";
@@ -371,7 +372,7 @@ export async function createApp(
     const auditCounts = pageMode === 'lazy' ? store.pageCatalog.findingCounts(id, audit?.id) : { total: 0, done: 0 };
     return {
       project,
-      jobs: jobs.filter((job) => job.kind !== "ask"),
+      jobs: jobs.filter((job) => job.kind !== "ask").map(publicJob),
       askActivity: askActivity(jobs),
       auditCoverage: coverage.success ? coverage.data : null,
       pages,
@@ -379,12 +380,12 @@ export async function createApp(
       auditId: audit?.id ?? null,
       revision,
       findingCounts: { total: findings.length + auditCounts.total, done: findings.filter(finding => finding.status === 'done').length + auditCounts.done },
-      observations,
+      observations: observations.map(publicObservation),
       findings,
-      content: store.artifacts(id, "content"),
+      content: store.artifacts(id, "content").map(publicArtifact),
       metrics,
       presentation: { ...presentation, history: withTopicChecks(presentation.history, jobs, project) },
-      measurement: measure ?? null,
+      measurement: measure ? publicJob(measure) : null,
       comparison: recheckComparison(brandJobs),
       competitors: competitorEvidence(project, observations),
       topics: topicSummaries(store, project, jobs),
@@ -433,7 +434,8 @@ export async function createApp(
     const { id, topic } = req.params as { id: string; topic: string };
     const project = store.project(id), found = project.topics.find((item) => item.id === topic);
     if (!found) throw new Error("Topic not found");
-    return topicView(store, project, found);
+    const view = topicView(store, project, found);
+    return { ...view, observations: view.observations.map(publicObservation), measurement: view.measurement ? publicJob(view.measurement) : null };
   });
   app.get("/api/projects/:id/site-icon", async (req, res) => {
     const id = (req.params as any).id;
@@ -453,7 +455,7 @@ export async function createApp(
     store.project(id);
     const job = store.job(check);
     if (job.projectId !== id || !['measure', 'recheck'].includes(job.kind)) return res.code(404).send();
-    return store.observations(id, check);
+    return store.observations(id, check).map(publicObservation);
   });
   app.patch("/api/projects/:id/findings/:finding", (req) => {
     const status = z
@@ -475,7 +477,7 @@ export async function createApp(
     return {
       pages,
       sources,
-      observations,
+      observations: observations.map(publicObservation),
       missing: row.evidenceIds.filter((key) => !found.has(key)).length,
     };
   });
@@ -488,7 +490,7 @@ export async function createApp(
       .min(8)
       .max(200)
       .parse(req.headers["idempotency-key"]);
-    return store.enqueue(input, key);
+    return publicJob(store.enqueue(input, key));
   });
   app.patch("/api/projects/:id/content/:content", (req) => {
     const input = z
@@ -496,7 +498,7 @@ export async function createApp(
       .strict()
       .parse(req.body);
     const params = req.params as any;
-    return store.editContent(params.id, params.content, input.markdown, input.baseMarkdown, input.recoverySession);
+    return publicArtifact(store.editContent(params.id, params.content, input.markdown, input.baseMarkdown, input.recoverySession));
   });
   app.post("/api/projects/:id/content/:content/recovery", (req) => {
     const { id, content } = req.params as { id: string; content: string };
@@ -512,15 +514,15 @@ export async function createApp(
     return store.discardContentRecovery(id, content);
   });
   registerAsks(app, { store, vault, providers: p, runner, parseProject });
-  app.get("/api/jobs/:id", (req) => store.job((req.params as any).id));
-  app.post("/api/jobs/:id/cancel", (req) =>
-    runner.cancel((req.params as any).id),
+  app.get("/api/jobs/:id", (req) => publicJob(store.job((req.params as any).id)));
+  app.post("/api/jobs/:id/cancel", async (req) =>
+    publicJob(await runner.cancel((req.params as any).id)),
   );
-  app.post("/api/jobs/:id/dismiss", (req) => store.dismissJob((req.params as any).id));
+  app.post("/api/jobs/:id/dismiss", (req) => publicJob(store.dismissJob((req.params as any).id)));
   app.get("/api/jobs/:id/resume-preview", (req) => runner.resumePreview((req.params as any).id));
   app.post("/api/jobs/:id/resume", (req) => {
     const input = z.object({ reviewed: z.boolean().default(false), maxCostUsd: z.number().finite().min(0).max(10000).optional() }).strict().parse(req.body ?? {});
-    return runner.resume((req.params as any).id, input.reviewed, input.maxCostUsd);
+    return publicJob(runner.resume((req.params as any).id, input.reviewed, input.maxCostUsd));
   });
   app.get("/api/providers", () => ({
     connected: vault.status(),
@@ -548,14 +550,16 @@ export async function createApp(
     vault.remove(provider);
     return { disconnected: true };
   });
-  app.get("/api/providers/:provider/models", (req) =>
-    p.models(
-      z.enum(providers).parse((req.params as any).provider),
-      z
-        .enum(["chat_gpt", "gemini", "perplexity"])
-        .parse((req.query as any)?.platform ?? "chat_gpt"),
-    ),
-  );
+  app.get("/api/providers/:provider/models", async (req) => {
+    const provider = z.enum(providers).parse((req.params as any).provider);
+    const { platform, previousCheck } = z.object({ platform: z.enum(['chat_gpt', 'gemini', 'perplexity']).default('chat_gpt'),
+      previousCheck: z.string().uuid().optional() }).parse(req.query);
+    const previous = previousCheck ? store.job(previousCheck) : null;
+    const models = await p.models(provider, platform);
+    // A saved check stays private; its available choice can still be selected in the user's own connection settings.
+    return models.map(model => ({ ...model, previous: !!previous && ['measure', 'recheck'].includes(previous.kind)
+      && previous.provider === provider && previous.platform === platform && previous.model === model.id }));
+  });
   app.get("/api/providers/console/capabilities", async () => {
     const result = await p.console("/capabilities");
     return consoleCapabilities(result.data);

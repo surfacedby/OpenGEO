@@ -1101,7 +1101,7 @@ export class Runner {
       : await this.once(job, "console-measurement-profile", async () => {
         const capability = consoleCapabilities((await this.providers.console("/capabilities", undefined, undefined, signal)).data);
         const platform = job.platform === "chat_gpt" ? "chatgpt" : job.platform;
-        return capability.operations.includes("measurement") && capability.selected_question_platforms.includes(platform as "chatgpt" | "gemini")
+        return capability.operations.includes("measurement") && capability.selected_question_platforms.includes(platform)
           ? "selected_questions" : "full_check";
       });
     if (profile === "selected_questions") return consoleMeasurement(this, job, project, signal);

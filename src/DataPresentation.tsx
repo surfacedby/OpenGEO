@@ -14,7 +14,8 @@ import { SiteIcon } from "./SiteIcon";
 import { markdownHtml, markdownSummary } from '../server/markdown';
 import { targetDomain } from './finding-groups';
 import { FileText, ListChecks, Braces } from "lucide-react";
-import type { Job, Observation } from "../server/contracts";
+import type { Job } from "../server/contracts";
+import type { PublicObservation as Observation } from '../server/public-results';
 import { completedMeasurement, measurementTime, portableJobResult } from "../server/portable-results";
 import type {
   Presentation,
@@ -25,8 +26,6 @@ import {
   platformLabel,
   ProviderIcon,
   providerLabels,
-  retrievalLabel,
-  collectionLabel,
 } from "./provider-ui";
 import "./analytics.css";
 import { Dialog } from './ui/Dialog';
@@ -53,11 +52,6 @@ export function MeasurementScope({
   missing: number;
 }) {
   const latest = observations.at(-1);
-  const models = [
-    ...new Set(observations.map((observation) => observation.model)),
-  ];
-  const retrieval = [...new Set(observations.map(retrievalLabel))];
-  const collection = [...new Set(observations.map(collectionLabel))];
   return (
     <div className="measurement-scope" aria-label="Current measurement scope">
       {measurement.provider &&
@@ -91,14 +85,6 @@ export function MeasurementScope({
           About this check <ChevronDown size={13} />
         </summary>
         <div>
-          <p>
-            Models:{" "}
-            {models.length
-              ? models.join(", ")
-              : (measurement.model ?? "Provider selected")}
-          </p>
-          {retrieval.length > 0 && <p>{retrieval.join(" / ")}</p>}
-          {collection.length > 0 && <p>Collected through: {collection.join(" / ")}</p>}
           {latest?.locale && (
             <p>Answer language: {languageName(latest.locale)}</p>
           )}
@@ -108,7 +94,7 @@ export function MeasurementScope({
           <p>
             Rates use collected answers. Missing answers are not counted as
             absent mentions. Answers vary by time, location and account.
-            Comparisons use the same collection method.
+            Trends compare checks with matching settings.
           </p>
         </div>
       </details>

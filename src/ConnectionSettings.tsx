@@ -4,7 +4,7 @@ import { api } from "./api";
 import { BackupControls, ScheduleControls } from "./WorkflowControls";
 import { Select } from "./Select";
 import { FormFeedback, useFormFeedback } from "./FormFeedback";
-import { Capabilities, ProviderIcon, providerLabels, providerOrder, consolePlatformCatalog } from "./provider-ui";
+import { Capabilities, ProviderIcon, providerLabels, providerOrder } from "./provider-ui";
 import identity from "../brand/identity.json";
 import { version } from '../package.json';
 import { UsagePreference } from "./UsagePreference";
@@ -29,7 +29,7 @@ export function ConnectionSettings({ connected, profiles, run: execute, variant 
     [consolePlatforms, setConsolePlatforms] = useState<{ key: string; name: string }[]>([]), [capabilityError, setCapabilityError] = useState(""),
     [loadingCapabilities, setLoadingCapabilities] = useState(false), [capabilityRevision, setCapabilityRevision] = useState(0), [busy, setBusy] = useState(false),
     [openingProvider, setOpeningProvider] = useState<Provider | null>(null),
-    [showAllPlatforms, setShowAllPlatforms] = useState(false), [consoleContent, setConsoleContent] = useState(false);
+    [consoleContent, setConsoleContent] = useState(false);
   const mutationPending = useRef(false);
   const [remote, setRemote] = useState(false);
   useEffect(() => { void api("/access").then(result => setRemote(result.remote === true)).catch(() => {}); }, []);
@@ -95,8 +95,8 @@ export function ConnectionSettings({ connected, profiles, run: execute, variant 
           <p className="provider-description">{descriptions[provider]}</p>
           <Capabilities provider={provider} consoleContent={consoleContent} />
           <div className="platform-list" aria-label={providerLabels[provider] + " supported platforms"}>
-            {(provider === "chatgpt" ? [{ key: "chat_gpt", name: "ChatGPT only" }] : provider === "dataforseo" ? [{ key: "chat_gpt", name: "ChatGPT" }, { key: "gemini", name: "Gemini" }, { key: "perplexity", name: "Perplexity" }] : provider === "console" ? (connected.console ? consolePlatforms : showAllPlatforms ? consolePlatformCatalog : consolePlatformCatalog.slice(0, 3)) : []).map((platform) => <span key={platform.key}><ProviderIcon provider={platform.key} size={15} />{platform.name}</span>)}
-            {provider === "console" && !connected.console && <button className="platform-more" aria-expanded={showAllPlatforms} onClick={() => setShowAllPlatforms(value => !value)}><Plus size={13} />{showAllPlatforms ? "Show less" : "4 more"}</button>}
+            {(provider === "chatgpt" ? [{ key: "chat_gpt", name: "ChatGPT only" }] : provider === "dataforseo" ? [{ key: "chat_gpt", name: "ChatGPT" }, { key: "gemini", name: "Gemini" }, { key: "perplexity", name: "Perplexity" }] : provider === "console" && connected.console ? consolePlatforms : []).map((platform) => <span key={platform.key}><ProviderIcon provider={platform.key} size={15} />{platform.name}</span>)}
+            {provider === "console" && !connected.console && <span>Connect to see available engines</span>}
             {provider === "console" && connected.console && !consolePlatforms.length && !capabilityError && <span>{loadingCapabilities ? "Checking availability..." : "No platforms are currently enabled"}</span>}
             {provider === "openrouter" && <span><ProviderIcon provider="openrouter" size={15} />Choose from available models after connecting</span>}
           </div>

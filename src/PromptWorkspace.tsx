@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowRight, Flag, Globe, LoaderCircle, MessagesSquare, Plus, Save, Search, Sparkles } from 'lucide-react';
-import type { Topic, Job, Project, Provider, Observation } from '../server/contracts';
+import type { Topic, Job, Project, Provider } from '../server/contracts';
+import type { PublicObservation as Observation } from '../server/public-results';
 import type { TopicSummary } from '../server/topics';
 import { api } from './api';
 import { QuestionRows, type QuestionRow } from './QuestionRows';
@@ -15,14 +16,16 @@ import { dateTime } from './format';
 import { promptResults } from './prompt-results';
 
 type Suggestion = { text: string; sources?: { url: string; title: string }[] };
+export type PromptTab = 'tracked' | 'suggested' | 'searches' | 'topics';
 
 /** The same durable discovery jobs power setup and later prompt selection. */
-export function PromptWorkspace({ project, jobs, connected, refresh, openConnections, runControls, onEditState, topics, checkTopic, editTopic, observations, evidence }: {
+export function PromptWorkspace({ project, jobs, connected, refresh, openConnections, runControls, onEditState, topics, checkTopic, editTopic, observations, evidence, tab, setTab, topicsContent }: {
   project: Project; jobs: Job[]; connected: Record<string, boolean>; refresh: () => Promise<void>;
   openConnections: () => void; runControls: ReactNode;
   onEditState: (state: EditState) => void;
   topics: TopicSummary[]; checkTopic: (id: string) => void; editTopic: (topic: Topic | null, prompts?: string[]) => void;
   observations: Observation[]; evidence: (ids: string[], label: string) => void;
+  tab: PromptTab; setTab: (tab: PromptTab) => void; topicsContent: ReactNode;
 }) {
   const options = providerOptions(connected, ['chatgpt', 'console', 'openrouter']);
   const [provider, setProvider] = useState<Provider>(options[0]?.value as Provider ?? 'chatgpt');
@@ -32,7 +35,6 @@ export function PromptWorkspace({ project, jobs, connected, refresh, openConnect
   const [selected, setSelected] = useState<string[]>([]);
   const [topicSelection, setTopicSelection] = useState<string[]>([]);
   const [suggestionRun, setSuggestionRun] = useState('');
-  const [tab, setTab] = useState<'tracked' | 'suggested' | 'searches'>(project.prompts.length ? 'tracked' : 'suggested');
   const request = useRef<string | null>(null), feedback = useFormFeedback();
   const discovery = jobs.find(job => job.kind === 'discover');
   const completedDiscoveries = jobs.filter(job => job.kind === 'discover' && job.status === 'completed');
@@ -63,10 +65,10 @@ export function PromptWorkspace({ project, jobs, connected, refresh, openConnect
     <Tabs label="Prompts" panelId="prompt-content" value={tab} onChange={value => {
       if (busy || dirty) { feedback.setError('Save or cancel your prompt changes before switching tabs.'); return; }
       setTab(value);
-    }} items={[{ value: 'tracked', label: 'Tracked prompts', count: project.prompts.length }, { value: 'suggested', label: 'Suggested by AI', icon: Sparkles }, { value: 'searches', label: 'AI searches', icon: Search }]} />
+    }} items={[{ value: 'tracked', label: 'Tracked prompts', count: project.prompts.length }, { value: 'topics', label: 'Topics', icon: Flag, count: project.topics.filter(topic => topic.status === 'active').length }, { value: 'suggested', label: 'Suggested by AI', icon: Sparkles }, { value: 'searches', label: 'AI searches', icon: Search }]} />
     <FormFeedback feedback={feedback} />{message && <p role="status" className="save-notice">{message}</p>}
-    <div id="prompt-content" role="tabpanel" aria-label={tab === 'tracked' ? 'Tracked prompts' : tab === 'searches' ? 'AI searches' : 'Suggested by AI'} tabIndex={0}>
-    {tab === 'searches' ? <PromptSearches observations={observations} evidence={evidence} /> : tab === 'tracked' ? <Section className="prompt-panel">
+    <div id="prompt-content" role="tabpanel" aria-label={tab === 'topics' ? 'Topics' : tab === 'tracked' ? 'Tracked prompts' : tab === 'searches' ? 'AI searches' : 'Suggested by AI'} tabIndex={0}>
+    {tab === 'topics' ? topicsContent : tab === 'searches' ? <PromptSearches observations={observations} evidence={evidence} /> : tab === 'tracked' ? <Section className="prompt-panel">
       <Toolbar actions={!editing && <>{project.topics.some(topic => topic.status === 'active') && <Select label="Group prompts" compact searchable={false} value={grouping} onChange={value => setGrouping(value as 'topic' | 'none')} options={[{ value: 'topic', label: 'Group by topic' }, { value: 'none', label: 'No grouping' }]} />}<button className="secondary" disabled={busy} onClick={() => { setRows(project.prompts.map(text => ({ id: crypto.randomUUID(), text, selected: true }))); setEditing(true); }}><Plus size={15} />Add or edit prompts</button></>}>
         {!editing && project.prompts.length > 0 ? <label className="search"><Search size={16} /><input aria-label="Search tracked prompts" placeholder="Find a prompt..." value={query} onChange={event => setQuery(event.target.value)} /></label> : <h2>Your tracked prompts</h2>}
       </Toolbar>

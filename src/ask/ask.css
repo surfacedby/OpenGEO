@@ -79,7 +79,6 @@
 .ask-column-title .badge { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .ask-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .ask-chip { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: var(--radius-pill); background: var(--surface-3); font-size: 12px; color: var(--text); }
-.ask-chip.app { background: var(--violet-50); color: var(--violet); font-weight: 500; }
 .ask-marks { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .ask-mark { display: grid; gap: 1px; padding: 9px 10px; border-radius: var(--radius-sm); min-width: 0; }
 .ask-mark span { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -174,9 +174,9 @@ try {
     /synthetic-ui-model|en-US|API/,
   );
   await page.locator(".measurement-scope summary").click();
-  assert.match(
+  assert.doesNotMatch(
     await page.locator(".measurement-scope").innerText(),
-    /synthetic-ui-model/,
+    /synthetic-ui-model|Models:|Collected through:|Model connection/,
   );
   await page.locator(".measurement-scope summary").click();
   await page
@@ -237,7 +237,7 @@ try {
       "Settings",
     ]) {
       await navigate(page, view);
-      await page.getByRole("heading", { name: view, exact: true }).waitFor();
+      await page.getByRole("heading", { name: view === 'Topics' ? 'Prompts' : view, exact: true }).waitFor();
       await page.waitForFunction(
         () => document.querySelector("main")?.scrollTop === 0,
       );
@@ -341,7 +341,7 @@ try {
     await page.getByRole("heading", { name: topic.name, exact: true }).waitFor();
     for (const tab of ["Results", "Questions", "Target pages", "Competitors", "Checks"]) {
       await page.getByRole("tab", { name: new RegExp("^" + tab) }).click();
-      if (tab === "Target pages") assert.match(await page.getByRole("tabpanel").innerText(), /Cited in 2 of 3 answers/);
+      if (tab === "Target pages") assert.match(await page.locator('#topic-view').innerText(), /Cited in 2 of 3 answers/);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `Topic ${tab} at ${width}px`);
       await page.screenshot({ path: join(output, `topic-${tab.toLowerCase().replaceAll(" ", "-")}-${width}.png`), fullPage: true });
     }
@@ -582,7 +582,7 @@ try {
     await page.getByRole('option', { name: /example.org/ }).click();
     for (const view of ['Overview', 'Visibility', 'Topics', 'Responses', 'Sources', 'Competitors', 'Scans', 'Opportunities', 'Content', 'Reports']) {
       await navigate(page, view);
-      await page.getByRole('heading', { name: view, exact: true }).waitFor();
+      await page.getByRole('heading', { name: view === 'Topics' ? 'Prompts' : view, exact: true }).waitFor();
       await page.locator('.workspace-loading').waitFor({ state: 'hidden' });
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `${view} empty at ${width}px`);
       await page.screenshot({ path: join(output, `${view.toLowerCase()}-empty-${width}.png`) });

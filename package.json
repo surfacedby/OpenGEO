@@ -17,7 +17,7 @@
     "prepare": "node scripts/install-hooks.mjs",
     "dev": "tsx server/main.ts",
     "web": "vite --host 127.0.0.1",
-    "build": "node scripts/sync-identity.mjs && tsc --noEmit && vite build && tsup server/main.ts server/cli.ts server/mcp.ts --format esm --platform node --out-dir dist-server --external better-sqlite3",
+    "build": "node scripts/sync-identity.mjs && tsc --noEmit && vite build && tsup server/main.ts server/cli.ts server/mcp.ts --format esm --platform node --out-dir dist-server --clean --external better-sqlite3",
     "start": "node dist-server/main.js",
     "test": "tsx --test tests/*.test.ts tests/*.test.mjs",
     "test:browser": "tsx --test --test-concurrency=1 tests/*.e2e.ts",

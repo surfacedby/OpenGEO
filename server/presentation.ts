@@ -81,7 +81,7 @@ export function currentFindings(findings: Finding[], jobs: Job[], auditJobId?: s
 }
 
 /** Count answers rather than links: one answer citing a domain repeatedly is one observation. */
-export function sourceCoverage(observations: Observation[]) {
+export function sourceCoverage(observations: Pick<Observation, 'id' | 'citations'>[]) {
   const domains = new Map<
     string,
     { url: string; pages: Set<string>; ids: Set<string> }

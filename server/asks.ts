@@ -9,18 +9,17 @@ import type { Store } from "./storage.js";
 import type { Vault } from "./vault.js";
 import type { Runner } from "./workflows.js";
 import { askShare } from "./ask-scope.js";
+import { consolePlatformKey, localPlatformKey, platformName } from './platforms.js';
+import { publicObservation } from './public-results.js';
 
-/** Ask offers search-enabled collection routes; individual answers retain the provider's reported retrieval evidence. */
-export const askEngines = {
-  chatgpt: { provider: "chatgpt", platform: "chat_gpt", label: "ChatGPT", detail: "API answer with web search", surface: "api" },
-  "surfacedby-chatgpt": { provider: "console", platform: "chat_gpt", label: "ChatGPT app", detail: "As a person sees it, via SurfacedBy", surface: "consumer_interface" },
-  "surfacedby-gemini": { provider: "console", platform: "gemini", label: "Gemini app", detail: "As a person sees it, via SurfacedBy", surface: "consumer_interface" },
-  "dataforseo-chatgpt": { provider: "dataforseo", platform: "chat_gpt", label: "ChatGPT", detail: "API answer with web search, via DataForSEO", surface: "api" },
-  "dataforseo-gemini": { provider: "dataforseo", platform: "gemini", label: "Gemini", detail: "API answer with web search, via DataForSEO", surface: "api" },
-  "dataforseo-perplexity": { provider: "dataforseo", platform: "perplexity", label: "Perplexity", detail: "API answer with web search, via DataForSEO", surface: "api" },
+/** Direct connections have implemented adapters; managed engines come from Console's live contract. */
+const directEngines = {
+  chatgpt: { provider: "chatgpt", platform: "chat_gpt", label: "ChatGPT", detail: "Your ChatGPT connection" },
+  "dataforseo-chatgpt": { provider: "dataforseo", platform: "chat_gpt", label: "ChatGPT", detail: "Your DataForSEO connection" },
+  "dataforseo-gemini": { provider: "dataforseo", platform: "gemini", label: "Gemini", detail: "Your DataForSEO connection" },
+  "dataforseo-perplexity": { provider: "dataforseo", platform: "perplexity", label: "Perplexity", detail: "Your DataForSEO connection" },
 } as const;
-export type AskEngineId = keyof typeof askEngines;
-const engineIds = Object.keys(askEngines) as [AskEngineId, ...AskEngineId[]];
+type EngineDefinition = { id: string; provider: 'chatgpt' | 'dataforseo' | 'console'; platform: string; label: string; detail: string };
 const defaultLimitUsd = 1;
 
 export type AskDeps = {
@@ -32,8 +31,9 @@ export type AskDeps = {
 export const sameQuestion = (a: string, b: string) =>
   a.trim().replace(/\s+/g, " ").toLowerCase() === b.trim().replace(/\s+/g, " ").toLowerCase();
 
-export function engineOf(job: Pick<Job, "provider" | "platform">): AskEngineId | undefined {
-  return engineIds.find(id => askEngines[id].provider === job.provider && askEngines[id].platform === job.platform);
+export function engineOf(job: Pick<Job, "provider" | "platform">): string | undefined {
+  if (job.provider === 'console') return 'surfacedby-' + consolePlatformKey(job.platform);
+  return Object.entries(directEngines).find(([, engine]) => engine.provider === job.provider && engine.platform === job.platform)?.[0];
 }
 
 /** The same request key always names the same ask, so a retried request cannot start a second one. */
@@ -42,36 +42,43 @@ function askIdFor(projectId: string, key: string) {
   return h.slice(0, 8) + "-" + h.slice(8, 12) + "-4" + h.slice(13, 16) + "-" + (8 | (parseInt(h[16], 16) & 3)).toString(16) + h.slice(17, 20) + "-" + h.slice(20, 32);
 }
 
-async function surfacedByPlatforms(deps: AskDeps): Promise<{ platforms: string[]; reason?: string }> {
+async function surfacedByPlatforms(deps: AskDeps): Promise<{ platforms: { key: string; name: string; enabled: boolean }[]; selected: string[]; reason?: string }> {
   try {
     const capability = consoleCapabilities((await deps.providers.console("/capabilities", undefined, undefined, AbortSignal.timeout(15000))).data);
-    return { platforms: capability.operations.includes("measurement") ? capability.selected_question_platforms : [] };
+    return { platforms: capability.platforms, selected: capability.selected_question_platforms };
   } catch {
-    return { platforms: [], reason: "SurfacedBy availability could not be verified. Try again shortly." };
+    return { platforms: [], selected: [], reason: "SurfacedBy availability could not be verified. Try again shortly." };
   }
 }
 
 /** Availability and price kind are decided here; the screen only displays them. */
 export async function engineCatalog(deps: AskDeps) {
   const connected = deps.vault.status() as Record<string, boolean>;
-  const surfacedBy = connected.console ? await surfacedByPlatforms(deps) : { platforms: [] as string[] };
+  const surfacedBy = connected.console ? await surfacedByPlatforms(deps) : { platforms: [], selected: [] as string[] };
+  if (surfacedBy.platforms.length) deps.store.set('consolePlatformNames', Object.fromEntries(surfacedBy.platforms.map(row => [localPlatformKey(row.key), row.name])));
   const requestEstimate = deps.store.setting<number>("measurementRequestEstimateUsd", 0);
-  const engines = engineIds.map(id => {
-    const engine = askEngines[id];
+  const definitions: EngineDefinition[] = [
+    ...Object.entries(directEngines).map(([id, engine]) => ({ id, ...engine })),
+    ...surfacedBy.platforms.map(row => ({ id: 'surfacedby-' + row.key, provider: 'console' as const,
+      platform: localPlatformKey(row.key), label: row.name, detail: 'Your SurfacedBy connection' })),
+  ];
+  const engines = definitions.map(({ id, ...engine }) => {
     let reason: string | undefined;
     if (!connected[engine.provider]) reason = "Not connected";
-    else if (engine.provider === "console" && !surfacedBy.platforms.includes(engine.platform === "chat_gpt" ? "chatgpt" : engine.platform))
-      reason = surfacedBy.reason ?? "Not available on this SurfacedBy connection";
+    else if (engine.provider === "console" && !surfacedBy.selected.includes(consolePlatformKey(engine.platform)))
+      reason = "Single-question checks are not available for this engine on your SurfacedBy connection";
     else if (engine.provider === "dataforseo" && requestEstimate <= 0) reason = "Set a DataForSEO request estimate in Settings";
     return { id, ...engine, available: !reason, ...(reason ? { reason } : {}),
       price: engine.provider === "chatgpt" ? "free" as const : engine.provider === "console" ? "quote" as const : "per_request" as const,
       ...(engine.provider === "dataforseo" && requestEstimate > 0 ? { estimateUsd: requestEstimate } : {}) };
   });
-  return { engines, defaultLimitUsd: deps.store.setting<number>("askLimitUsd", defaultLimitUsd) };
+  return { engines, availabilityNote: surfacedBy.reason ?? (!connected.console ? 'Connect SurfacedBy to see its available engines.' : undefined),
+    defaultLimitUsd: deps.store.setting<number>("askLimitUsd", defaultLimitUsd) };
 }
 
 const question = z.string().trim().min(3, "Ask a question of at least 3 characters").max(500);
-const engineList = z.array(z.enum(engineIds)).min(1, "Choose at least one engine").max(engineIds.length)
+export const askEngineKey = z.string().regex(/^(chatgpt|dataforseo-[a-z][a-z0-9_]{0,63}|surfacedby-[a-z][a-z0-9_]{0,63})$/);
+const engineList = z.array(askEngineKey).min(1, "Choose at least one engine").max(44)
   .refine(list => new Set(list).size === list.length, "Choose each engine once");
 const askInput = z.object({ question, engines: engineList, maxCostUsd: z.number().finite().min(0).max(1000).default(0) }).strict();
 
@@ -94,9 +101,8 @@ export async function estimateAsk(deps: AskDeps, projectId: string, body: unknow
   const catalog = await engineCatalog(deps);
   const requestEstimate = deps.store.setting<number>("measurementRequestEstimateUsd", 0);
   const engines = await Promise.all(input.engines.map(async id => {
-    const engine = askEngines[id];
-    const available = catalog.engines.find(row => row.id === id)!;
-    if (!available.available) return { id, estimateUsd: null, note: available.reason };
+    const engine = catalog.engines.find(row => row.id === id);
+    if (!engine?.available) return { id, estimateUsd: null, note: engine?.reason ?? 'This engine is not available on your connection.' };
     if (engine.provider === "chatgpt") return { id, estimateUsd: 0 };
     if (engine.provider === "dataforseo") return { id, estimateUsd: requestEstimate > 0 ? requestEstimate : null };
     try { return { id, ...await surfacedByQuote(deps, project, input.question, engine.platform) }; }
@@ -115,7 +121,11 @@ export async function createAsk(deps: AskDeps, projectId: string, body: unknown,
   const previous = deps.store.askRequest(askId, inputHash);
   if (previous) return previous;
   const catalog = await engineCatalog(deps);
-  const chosen = input.engines.map(id => catalog.engines.find(engine => engine.id === id)!);
+  const chosen = input.engines.map(id => {
+    const engine = catalog.engines.find(engine => engine.id === id);
+    if (!engine) throw new ProviderError('capability', 'This engine is no longer available. Refresh the engine list before starting. Nothing was started.');
+    return engine;
+  });
   const unavailable = chosen.find(engine => !engine.available);
   if (unavailable) throw new ProviderError("capability", unavailable.label + " (" + unavailable.detail + "): " + unavailable.reason + ".");
   const paid = chosen.filter(engine => engine.price !== "free");
@@ -168,7 +178,7 @@ export function listAsks(store: Store, projectId: string) {
       askId, question: jobs[0].question!, createdAt: jobs.map(job => job.createdAt).sort()[0],
       spentUsd: jobs.reduce((sum, job) => sum + job.spentUsd, 0),
       engines: jobs.slice().reverse().map(job => { const { answer, state } = engineState(store, job);
-        return { engine: engineOf(job), state, mentioned: answer?.mentioned ?? null, cited: answer?.cited ?? null }; }),
+        return { engine: engineOf(job), platform: job.platform, label: savedEngineName(store, job.platform), state, mentioned: answer?.mentioned ?? null, cited: answer?.cited ?? null }; }),
     })),
     suggestions,
   };
@@ -179,7 +189,12 @@ function trackedHistory(store: Store, projectId: string, text: string) {
   return store.jobs(projectId).filter(completedMeasurement)
     .flatMap(job => store.observations(projectId, job.id).filter((row: Observation) => sameQuestion(row.prompt, text)))
     .sort((a, b) => b.observedAt.localeCompare(a.observedAt)).slice(0, 12)
-    .map(row => ({ observedAt: row.observedAt, provider: row.provider, platform: row.platform, surface: row.surface, mentioned: row.mentioned, cited: row.cited }));
+    .map(row => ({ observedAt: row.observedAt, provider: row.provider, platform: row.platform, mentioned: row.mentioned, cited: row.cited }));
+}
+
+function savedEngineName(store: Store, platform: string) {
+  const names = store.setting<Record<string, string>>('consolePlatformNames', {});
+  return Object.hasOwn(names, platform) && typeof names[platform] === 'string' ? names[platform] : platformName(platform);
 }
 
 export function readAsk(store: Store, projectId: string, askId: string) {
@@ -198,11 +213,9 @@ export function readAsk(store: Store, projectId: string, askId: string) {
       .map(topic => ({ id: topic.id, name: topic.name, tracked: topic.prompts.some(prompt => sameQuestion(prompt, text)) })),
     engines: jobs.slice().reverse().map(job => {
       const id = engineOf(job), { answer, state } = engineState(store, job);
-      const meta: { provider: string; platform: string; label: string; detail: string; surface: string } = id ? askEngines[id]
-        : { provider: job.provider ?? "chatgpt", platform: job.platform, label: "Engine", detail: "", surface: "api" };
-      return { engine: id ?? null, provider: meta.provider, platform: meta.platform, label: meta.label, detail: meta.detail, surface: meta.surface,
+      return { engine: id ?? null, provider: job.provider, platform: job.platform, label: savedEngineName(store, job.platform),
         jobId: job.id, state, status: job.status, progress: job.progress, error: job.error,
-        spentUsd: job.spentUsd, maxCostUsd: job.maxCostUsd, costBasis: job.costBasis ?? null, answer };
+        spentUsd: job.spentUsd, maxCostUsd: job.maxCostUsd, costBasis: job.costBasis ?? null, answer: answer ? publicObservation(answer) : null };
     }),
     history: trackedHistory(store, projectId, text),
   };

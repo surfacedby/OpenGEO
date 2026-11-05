@@ -393,7 +393,7 @@ test("Console connection metadata projects only public features and refuses malf
     privatePrompt: "synthetic-private-instruction", supplierCosts: [1, 2] });
   assert.deepEqual(data.platforms, [{ key: "chatgpt", name: "ChatGPT", enabled: true }]);
   assert.deepEqual(data.operations, ["full_check"]);
-  assert.deepEqual(data.models, [{ id: "managed-model", operations: ["research", "content"] }]);
+  assert.equal('models' in data, false);
   assert.ok(!JSON.stringify(data).includes("synthetic-private"));
   assert.throws(() => consoleCapabilities({ platforms: [{ key: "chatgpt", name: "ChatGPT", enabled: "yes" }] }));
 });
@@ -426,7 +426,7 @@ test('website discovery separates substitutes from references and check evidence
     const headers = { host: '127.0.0.1:4318', authorization: 'Bearer synthetic-session' };
     try {
       const response = await app.inject({ url: '/api/projects/' + f.project.id + '/checks/' + job.id + '/answers', headers });
-      assert.deepEqual(response.json(), f.store.observations(f.project.id, job.id));
+      assert.deepEqual(response.json(), f.store.observations(f.project.id, job.id).map(({ model: _model, surface: _surface, ...answer }) => answer));
       const other = f.store.createProject(projectInput.parse({ domain: 'other.example', brand: 'Other' }));
       assert.equal((await app.inject({ url: '/api/projects/' + other.id + '/checks/' + job.id + '/answers', headers })).statusCode, 404);
       assert.equal((await app.inject({ url: '/api/projects/' + f.project.id + '/checks/' + job.id + '/answers', headers: { host: '127.0.0.1:4318' } })).statusCode, 401);

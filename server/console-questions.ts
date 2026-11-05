@@ -13,7 +13,7 @@ const result = z.object({ job: managedJob, review_complete: z.literal(true),
 
 /** Only reviewed suggestions with owned source evidence reach the selection list. */
 export async function consoleQuestions(runner: Runner, job: Job, project: Project, signal: AbortSignal) {
-  const { output, capability } = await consoleManaged(runner, job, project, signal, () => {
+  const { output } = await consoleManaged(runner, job, project, signal, () => {
     const audit = job.auditJobId ? runner.store.job(job.auditJobId) : null;
     if (!audit || audit.projectId !== project.id || audit.kind !== "audit" || audit.status !== "completed" ||
       JSON.parse(runner.store.step(audit.id, "project")?.body ?? "null")?.domain !== project.domain)
@@ -43,5 +43,5 @@ export async function consoleQuestions(runner: Runner, job: Job, project: Projec
   if (output.locale !== project.locale)
     throw new ProviderError("invalid_response", "The suggestions use a different language setting. No questions were selected.");
   return { version: 4, pagesRead: output.pages_read, auditJobId: job.auditJobId,
-    model: capability?.models.find(model => model.operations.includes("questions"))?.id ?? "managed", questions };
+    model: "managed", questions };
 }

@@ -382,7 +382,7 @@ test('topics, actual searches, persistent progress and safe outside dismissal', 
     await navigate(page, 'Topics');
     await page.getByRole('button', { name: 'Documentation', exact: true }).click();
     await page.getByRole('tab', { name: 'Opportunities', exact: true }).click();
-    const topicPanel = page.getByRole('tabpanel');
+    const topicPanel = page.locator('#topic-view');
     await expect(topicPanel).toContainText(topicFinding.title);
     await expect(topicPanel).not.toContainText('Separate brand-wide action');
     await topicPanel.locator('summary').filter({ hasText: topicFinding.title }).click();

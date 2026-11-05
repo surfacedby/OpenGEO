@@ -24,6 +24,7 @@ const answerStream = (text: string, urls: string[], searches: string[]) => new R
 type Fake = {
   credits: number; platforms: string[]; missing: string[]; chatgptFails: boolean; domainKnown: boolean;
   gate?: Promise<void>; gated?: string; estimates: any[]; purchases: any[]; openai: string[];
+  advertised?: { key: string; name: string; enabled: boolean }[]; publicResults?: boolean;
 };
 function fakeProviders(state: Fake) {
   const domain = randomUUID(), quotes = new Map<string, any>(), remote = new Map<string, any>();
@@ -47,7 +48,7 @@ function fakeProviders(state: Fake) {
     }
     assert.equal(address.hostname, 'api.surfacedby.com');
     const path = address.pathname.replace('/api/v1/console', '');
-    if (path === '/capabilities') return json({ data: { platforms: [{ key: 'chatgpt', name: 'ChatGPT', enabled: true }, { key: 'gemini', name: 'Gemini', enabled: true }],
+    if (path === '/capabilities') return json({ data: { platforms: state.advertised ?? [{ key: 'chatgpt', name: 'ChatGPT', enabled: true }, { key: 'gemini', name: 'Gemini', enabled: true }],
       operations: ['measurement'], content_available: false, models: [], selected_question_platforms: state.platforms } });
     if (path === '/domains') return json({ data: state.domainKnown ? [{ id: domain, domain: 'example.com' }] : [], meta: {} });
     if (path.endsWith('/brand')) return json({ data: {} });
@@ -64,7 +65,7 @@ function fakeProviders(state: Fake) {
       const { input } = remote.get(results[1]), row = input.questions[0], collected = !state.missing.includes(input.platform);
       return json({ data: { job: managed(results[1]), profile: 'selected_questions', requested_answers: 1, locale: input.locale, platform: input.platform,
         observations: [{ id: row.id, question: row.question, status: collected ? 'collected' : 'missing_observation', platform: input.platform, locale: input.locale,
-          country: input.country, surface: 'consumer_interface', answer: collected ? 'Try example.com for free reports.' : null, model: collected ? 'fixture-app' : null,
+          country: input.country, ...(state.publicResults ? {} : { surface: 'consumer_interface', model: collected ? 'fixture-app' : null }), answer: collected ? 'Try example.com for free reports.' : null,
           observed_at: new Date().toISOString(), citations: collected ? [{ url: 'https://example.com/reports', title: 'Reports' }] : [] }] } });
     }
     const polled = path.match(/^\/jobs\/([^/]+)$/);
@@ -92,6 +93,33 @@ async function fixture(overrides: Partial<Fake> = {}) {
     async close() { globalThis.fetch = original; await app.close(); store.close(); rmSync(dir, { recursive: true, force: true }); } };
 }
 
+test('Console discovers new engines without a client release and rejects unavailable choices before purchase', async () => {
+  const f = await fixture({ platforms: ['future_engine', 'grok', 'unknown_engine'], publicResults: true,
+    advertised: [{ key: 'future_engine', name: 'Example Engine', enabled: true },
+      { key: 'grok', name: 'Grok', enabled: false }, { key: 'claude', name: 'Claude', enabled: true }] });
+  try {
+    const catalog = (await f.app.inject({ url: `/api/projects/${f.project.id}/asks/engines`, headers })).json();
+    assert.deepEqual(catalog.engines.filter((row: any) => row.provider === 'console').map((row: any) => [row.id, row.label, row.available]),
+      [['surfacedby-future_engine', 'Example Engine', true], ['surfacedby-grok', 'Grok', false], ['surfacedby-claude', 'Claude', false]]);
+    for (const id of ['surfacedby-grok', 'surfacedby-claude', 'surfacedby-unknown_engine', 'dataforseo-future_engine']) {
+      const denied = await f.ask({ question, engines: ['chatgpt', id], maxCostUsd: 1 });
+      assert.equal(denied.json().code, 'capability');
+      assert.equal(f.store.jobs(f.project.id).length, 0);
+    }
+    const { askId, jobs } = (await f.ask({ question, engines: ['surfacedby-future_engine'], maxCostUsd: 1 })).json();
+    await f.runner.tick();
+    assert.equal(f.store.job(jobs[0]).status, 'completed');
+    assert.equal(f.state.purchases.length, 1);
+    assert.equal(f.state.estimates[0].platform, 'future_engine');
+    const result = await f.read(askId);
+    assert.equal(result.engines[0].label, 'Example Engine');
+    assert.equal(result.engines[0].answer.cited, true);
+    assert.equal('model' in result.engines[0].answer, false);
+    assert.equal('surface' in result.engines[0].answer, false);
+    assert.equal(f.store.answers(f.project.id, jobs[0], 'ask-answer')[0].surface, 'unknown');
+  } finally { await f.close(); }
+});
+
 test('an ask collects each engine once and keeps its answers out of the website\'s evidence', async () => {
   const f = await fixture();
   try {
@@ -112,11 +140,13 @@ test('an ask collects each engine once and keeps its answers out of the website\
     const result = await f.read(askId);
     assert.deepEqual(result.engines.map((row: any) => [row.engine, row.state]), [['chatgpt', 'answered'], ['surfacedby-chatgpt', 'answered'], ['surfacedby-gemini', 'answered']]);
     const [api, app] = result.engines;
-    assert.equal(api.answer.surface, 'api');
+    assert.equal('surface' in api.answer, false);
+    assert.equal('model' in api.answer, false);
     assert.deepEqual(api.answer.searchQueries, ['free example report tools']);
     assert.equal(api.answer.mentioned, true);
     assert.equal(api.answer.cited, false);
-    assert.equal(app.answer.surface, 'consumer_interface');
+    assert.equal('surface' in app.answer, false);
+    assert.equal('model' in app.answer, false);
     assert.equal(app.answer.cited, true);
     assert.deepEqual(f.state.purchases.map(row => row.approved_credits), [5, 5]);
     assert.ok(f.state.estimates.every(row => row.questions.length === 1 && row.questions[0].question === question));
@@ -218,7 +248,7 @@ test('estimates refuse unavailable engines without submitting quotes', async () 
       payload: { question, engines: ['surfacedby-chatgpt'] } });
     assert.equal(response.statusCode, 200);
     assert.equal(response.json().totalUsd, null);
-    assert.match(response.json().engines[0].note, /Not available/);
+    assert.equal(response.json().engines[0].note, 'Single-question checks are not available for this engine on your SurfacedBy connection');
     assert.equal(f.state.estimates.length, 0);
     assert.equal(f.state.purchases.length, 0);
   } finally { await f.close(); }
@@ -302,7 +332,7 @@ test('tracking adds the question once, and deleting an ask removes its runs and 
     const catalog = (await f.app.inject({ url: `/api/projects/${f.project.id}/asks/engines`, headers })).json();
     const reason = (id: string) => catalog.engines.find((row: any) => row.id === id).reason;
     assert.equal(reason('chatgpt'), undefined);
-    assert.equal(reason('surfacedby-gemini'), 'Not available on this SurfacedBy connection');
+    assert.equal(reason('surfacedby-gemini'), 'Single-question checks are not available for this engine on your SurfacedBy connection');
     assert.equal(reason('dataforseo-perplexity'), 'Not connected');
     assert.equal(catalog.defaultLimitUsd, 1);
     assert.equal((await f.ask({ question, engines: ['surfacedby-gemini'], maxCostUsd: 1 })).json().code, 'capability');

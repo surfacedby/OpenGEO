@@ -13,7 +13,8 @@ import identity from "../brand/identity.json";
 import { dateTime, shortDate } from "./format";
 import { markdownHtml, htmlDocument } from "../server/markdown";
 import type { Model, Project, Provider } from "../server/contracts";
-import type { Observation, PageEvidence, ManagedSourceEvidence } from "../server/contracts";
+import type { PageEvidence, ManagedSourceEvidence } from "../server/contracts";
+import type { PublicObservation as Observation } from '../server/public-results';
 
 export function FindingEvidence({ projectId, findingId }: { projectId: string; findingId: string }) {
   return <FindingEvidenceContent key={projectId + ":" + findingId} projectId={projectId} findingId={findingId} />;

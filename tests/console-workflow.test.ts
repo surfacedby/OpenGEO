@@ -65,8 +65,9 @@ test("Console check totals and public citations survive project edits, dashboard
     const portable = exportProject(store, project.id);
     assert.equal(JSON.stringify(portable).includes("synthetic-hidden-field"), false);
     assert.deepEqual(portable.observations[0].citations, []);
-    assert.equal(portable.observations[0].surface, "unknown");
-    assert.equal(portable.observations[1].surface, "consumer_interface");
+    assert.equal('surface' in portable.observations[0], false);
+    assert.equal('model' in portable.observations[0], false);
+    assert.equal('surface' in portable.observations[1], false);
     assert.deepEqual(portable.observations[1].citations, [{ url: "https://example.com/" }]);
     const restored = importProject(store, portable).project;
     assert.equal((await workspace(restored.id)).metrics.requested, 3);

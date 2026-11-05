@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { ArrowRight, BookOpen, Check, ExternalLink, Globe, Plus, RefreshCw, Search, Users, X } from 'lucide-react';
-import type { DiscoveredWebsite, Job, Observation, Project } from '../server/contracts';
+import type { DiscoveredWebsite, Job, Project } from '../server/contracts';
+import type { PublicObservation as Observation } from '../server/public-results';
 import { completedBrandMeasurement, completedMeasurement, measurementTime } from '../server/portable-results';
 import { api } from './api';
 import { Select } from './Select';

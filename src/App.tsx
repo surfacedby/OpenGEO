@@ -35,7 +35,6 @@ import {
   Menu,
   ExternalLink,
   Sparkles,
-  Flag,
 } from "lucide-react";
 import { percent, shortDate, relativeTime, dateTime, usd } from "./format";
 import { api } from "./api";
@@ -71,6 +70,7 @@ import { Dialog as Modal } from './ui/Dialog';
 import { completedBrandMeasurement, completedMeasurement, completedAnalysisResult, analysisInProgress, analysisMeasurementId } from "../server/portable-results";
 import type { TopicSummary } from "../server/topics";
 import { TopicLens, Topics, TopicVisibility, useTopicView } from "./Topics";
+import type { PublicObservation as Observation } from '../server/public-results';
 import { TopicDialog } from "./TopicDialog";
 import type { Presentation } from "../server/presentation";
 import identity from "../brand/identity.json";
@@ -78,7 +78,6 @@ import type {
   Topic,
   Project,
   Job,
-  Observation,
   PageSummary,
   Finding,
   Model,
@@ -119,22 +118,12 @@ type Workspace = {
   }[];
   topics: TopicSummary[];
 };
-const navigation = [
-  ["Overview", LayoutDashboard],
-  ["Scans", ScanSearch],
-  ["Ask history", History],
-  ["Prompts", MessagesSquare],
-  ["Topics", Flag],
-  ["Visibility", ChartNoAxesCombined],
-  ["Responses", MessagesSquare],
-  ["Sources", Link],
-  ["Opportunities", Lightbulb],
-  ["Content", FileText],
-  ["Competitors", Users],
-  ["Reports", ChartColumn],
-  ["Brand", Globe],
-  ["Settings", Settings],
+const navigationGroups = [
+  { label: 'Workspace', items: [['Overview', LayoutDashboard], ['Scans', ScanSearch], ['Brand', Globe]] },
+  { label: 'AI visibility', items: [['Ask history', History], ['Prompts', MessagesSquare], ['Visibility', ChartNoAxesCombined], ['Responses', MessagesSquare], ['Sources', Link]] },
+  { label: 'Improve', items: [['Opportunities', Lightbulb], ['Content', FileText], ['Competitors', Users], ['Reports', ChartColumn]] },
 ] as const;
+const navigation = [...navigationGroups.flatMap(group => [...group.items]), ['Settings', Settings] as const];
 function Empty({ title, children }: { title: string; children: ReactNode }) {
   return <EmptyState title={title} icon={emptyIcon(title)}>{children}</EmptyState>;
 }
@@ -142,6 +131,7 @@ export function App() {
   const [projects, setProjects] = useState<Project[]>([]),
     [selected, setSelected] = useState(""),
     [page, setPage] = useState("Overview"),
+    [promptTab, setPromptTab] = useState<'tracked' | 'suggested' | 'searches'>('tracked'),
     [connectionsRequest, setConnectionsRequest] = useState(0),
     [mobileNavigation, setMobileNavigation] = useState(false),
     [workspace, setWorkspace] = useState<Workspace | null>(null),
@@ -355,13 +345,13 @@ export function App() {
           </button>
         </div>
         <nav aria-label="Main navigation">
-          {[{ label: "Workspace", items: [...navigation.slice(0, 2), navigation[12]] }, { label: "AI visibility", items: navigation.slice(2, 8) }, { label: "Improve", items: navigation.slice(8, 12) }].map(group => <div className="nav-group" key={group.label}>
+          {navigationGroups.map(group => <div className="nav-group" key={group.label}>
           {group.label && <p>{group.label}</p>}
           {group.items.map(([label, Icon]) => (
             <button
               key={label}
-              className={page === label ? "active" : ""}
-              aria-current={page === label ? "page" : undefined}
+              className={page === label || page === 'Topics' && label === 'Prompts' ? "active" : ""}
+              aria-current={page === label || page === 'Topics' && label === 'Prompts' ? "page" : undefined}
               aria-label={label}
               onClick={() => changePage(label)}
             >
@@ -406,7 +396,7 @@ export function App() {
             paused={active.paused} open={() => navigate(() => { setPage('Ask history'); setAskId(active.askId); })} />)}
         <main ref={mainRef} id="main-content" tabIndex={-1}>
           {profiles.welcome && page === 'Overview' && <section className="plan-welcome" aria-label="ChatGPT plan usage"><ProviderIcon provider="chatgpt" size={20} /><div><h2>Your ChatGPT plan is connected</h2><p>Your plan limits apply.</p></div><a href="https://chatgpt.com/settings/usage" target="_blank" rel="noreferrer">Manage usage <ArrowUpRight size={14} /></a><button className="icon-button" aria-label="Dismiss ChatGPT connection notice" onClick={() => void run(() => api("/connections/chatgpt/acknowledge-plan", {}))}><X size={16} /></button></section>}
-          <PageHeader title={openTopic?.name ?? page} description={openTopic ? openTopic.goal || "Questions checked together toward one goal." : page === 'Overview' ? identity.tagline : descriptions[page]} icon={navigation.find(([label]) => label === page)?.[1] ?? LayoutDashboard}>
+          <PageHeader title={openTopic?.name ?? (page === 'Topics' ? 'Prompts' : page)} description={openTopic ? openTopic.goal || "Questions checked together toward one goal." : page === 'Overview' ? identity.tagline : descriptions[page]} icon={navigation.find(([label]) => label === (page === 'Topics' ? 'Prompts' : page))?.[1] ?? LayoutDashboard}>
             {openTopic ? <div className="button-row page-heading-actions"><button className="secondary" onClick={() => setTopicEditor({ topic: openTopic })}>Edit topic</button>{headingAction && <button className="primary" disabled={busy} onClick={headingAction.action}><Play size={14} />{headingAction.label}</button>}</div>
             : p && headingAction && !(page === 'Overview' && activeScan) && (
               <button
@@ -598,8 +588,9 @@ export function App() {
                 </>
               )}
               {page === 'Brand' && <BrandSettings key={p!.id} project={p!} refresh={refresh} onEditState={setEditState} />}
-              {page === "Prompts" && <PromptWorkspace key={p!.id} project={p!} jobs={w.jobs} observations={w.observations} evidence={openEvidence} connected={connected} refresh={refresh} openConnections={openConnections} onEditState={setEditState} runControls={<RunsPanel jobs={runsNeedingAttention(w.jobs, ['discover'])} run={run} />} topics={w.topics} checkTopic={checkTopic} editTopic={(topic, prompts) => setTopicEditor({ topic, prompts })} />}
-              {page === "Topics" && <Topics project={p!} topics={w.topics} openId={topicPage} view={topicView} error={topicError} open={setTopicPage} edit={(topic) => setTopicEditor({ topic })}
+              {(page === "Prompts" || page === "Topics") && <PromptWorkspace key={p!.id} project={p!} jobs={w.jobs} observations={w.observations} evidence={openEvidence} connected={connected} refresh={refresh} openConnections={openConnections} onEditState={setEditState} runControls={<RunsPanel jobs={runsNeedingAttention(w.jobs, ['discover'])} run={run} />} topics={w.topics} checkTopic={checkTopic} editTopic={(topic, prompts) => setTopicEditor({ topic, prompts })}
+                tab={page === 'Topics' ? 'topics' : promptTab} setTab={tab => navigate(() => { if (tab === 'topics') setPage('Topics'); else { setPromptTab(tab); setPage('Prompts'); } })}
+                topicsContent={<Topics project={p!} topics={w.topics} openId={topicPage} view={topicView} error={topicError} open={setTopicPage} edit={(topic) => setTopicEditor({ topic })}
                 opportunities={<>
                   <RunsPanel jobs={runsNeedingAttention(topicJobs.filter(job => job.kind === 'diagnose' || job.prepareRecommendations))} run={run} />
                   <section className="panel"><Findings key={topicPage} findings={topicOpportunities} projectId={p!.id} run={run} jobs={w.jobs} measurementId={topicView?.measurement?.id}
@@ -610,7 +601,7 @@ export function App() {
                     createContent={finding => navigate(() => { setContentFinding(finding); setContentTopic(finding.opportunity?.topic ?? finding.title); setJobDialog('content'); })} /></section>
                 </>}
                 evidence={(topic) => (ids, label) => navigate(() => { setScope(topic.id); setPage("Responses"); setQuery(""); setAnswerStatus('all'); setEvidenceFilter({ ids, label }); })}
-                openPrompts={() => changePage("Prompts")} openCompetitors={() => navigate(() => { setScope(topicPage); setPage("Competitors"); setTopicPage(null); })} />}
+                openPrompts={() => navigate(() => { setPromptTab('tracked'); setPage('Prompts'); })} openCompetitors={() => navigate(() => { setScope(topicPage); setPage("Competitors"); setTopicPage(null); })} />} />}
               {page === "Responses" && !lensLoading && (
                 <section className="panel">
                   <div className="panel-heading">
@@ -769,7 +760,7 @@ export function App() {
         else if (!topicEditor.topic && lensPage) setScope(id);
         else if (!topicEditor.topic && page === "Topics") setTopicPage(id);
       }} />}
-      {mobileNavigation && <Modal title="Navigate workspace" close={() => setMobileNavigation(false)}><div className="mobile-navigation-menu">{navigation.map(([label, Icon]) => <button key={label} aria-current={page === label ? "page" : undefined} onClick={() => { setMobileNavigation(false); changePage(label); }}><Icon size={20} /><span>{label}</span><ArrowRight size={15} /></button>)}</div></Modal>}
+      {mobileNavigation && <Modal title="Navigate workspace" close={() => setMobileNavigation(false)}><div className="mobile-navigation-menu">{navigation.map(([label, Icon]) => <button key={label} aria-current={page === label || page === 'Topics' && label === 'Prompts' ? "page" : undefined} onClick={() => { setMobileNavigation(false); changePage(label); }}><Icon size={20} /><span>{label}</span><ArrowRight size={15} /></button>)}</div></Modal>}
     </div>
   );
 }
@@ -927,7 +918,7 @@ function JobDialog({
   const [provider, setProvider] = useState<Provider>(
       baseline?.provider ?? choices.find((p) => connected[p]) ?? choices[0],
     ),
-    [models, setModels] = useState<Model[]>([]),
+    [models, setModels] = useState<(Model & { previous?: boolean })[]>([]),
     [model, setModel] = useState(""),
     [platform, setPlatform] = useState(baseline?.platform ?? "chat_gpt"),
     [consolePlatforms, setConsolePlatforms] = useState<{ key: string; name: string; enabled: boolean }[]>([]),
@@ -981,11 +972,11 @@ function JobDialog({
       return;
     }
     if (!platform) { setLoading(false); return; }
-    void api<Model[]>("/providers/" + provider + "/models?platform=" + platform)
+    void api<(Model & { previous?: boolean })[]>("/providers/" + provider + "/models?platform=" + platform + (baseline ? '&previousCheck=' + baseline.id : ''))
       .then((ms) => {
         if (!stopped) {
           setModels(ms);
-          setModel(baseline ? provider === baseline.provider && platform === baseline.platform && ms.some(entry => entry.id === baseline.model) ? baseline.model! : '' : ms[0]?.id ?? "");
+          setModel(baseline ? ms.find(entry => entry.previous)?.id ?? '' : ms[0]?.id ?? "");
           if (!ms.length) setDiscoveryError("No supported models are available on this connection.");
         }
       })
@@ -1107,7 +1098,7 @@ function JobDialog({
             {!connected[provider] && (
               <p role="alert">{baseline ? 'The previous connection is unavailable. Reconnect it in Settings or choose another connection.' : 'Connect this provider in Settings first.'}</p>
             )}
-            {baseline && connected[provider] && !loading && !discoveryError && <p className="small" role="status">{provider === baseline.provider && platform === baseline.platform && (provider === 'console' || model === baseline.model) && (provider !== 'chatgpt' || baseline.webSearch !== false) ? 'Keeps the previous connection and answer settings. Changes to your questions or website settings start a separate comparison.' : !model && provider !== 'console' ? 'Choose an available model. Different answer settings start a separate comparison.' : 'Different answer settings start a separate comparison.'}</p>}
+            {baseline && connected[provider] && !loading && !discoveryError && <p className="small" role="status">{provider === baseline.provider && platform === baseline.platform && (provider === 'console' || models.some(entry => entry.id === model && entry.previous)) && (provider !== 'chatgpt' || baseline.webSearch !== false) ? 'Keeps the previous connection and answer settings. Changes to your questions or website settings start a separate comparison.' : !model && provider !== 'console' ? 'Choose an available model. Different answer settings start a separate comparison.' : 'Different answer settings start a separate comparison.'}</p>}
             {["dataforseo", "console"].includes(provider) && ['measure', 'recheck'].includes(kind) && (
               <label>
                 Answer platform

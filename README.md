@@ -14,11 +14,11 @@ OpenGEO is a free, open-source app for website owners and agencies. Find out whe
 
 - **Check your AI visibility.** Choose the questions your customers ask. See which answers mention your brand and which link to your website. Open the full answers and citations behind the numbers.
 - **Ask once, compare answers.** Type a single question and read the available engines side by side. Keep these answers separate from your tracked results, or add the question to a Topic for future checks.
-- **Organize questions into Topics.** Track a product, service or customer need separately, with its own prompts, checks and results. Keep suggested prompts and the searches AI actually reported in separate views.
+- **Organize your prompts.** Group questions into Topics for a product, service or customer need, with their own checks and results. In Prompts, switch between your tracked questions, Topics, AI suggestions and the searches behind your answers.
 - **Check your website's health.** Find concrete improvements to titles, descriptions, headings, indexing and structured data. Run this optional scan with or without an AI connection.
 - **Find your next improvement.** Review suggested page updates, new resources and site changes alongside the evidence behind them.
 - **Write with your sources in view.** Develop briefs and drafts from your pages and collected evidence. Keep the sources and factual review notes with each draft.
-- **Check again after an update.** Repeat the same questions, model and locale, and compare the collected answers over time.
+- **Check again after an update.** Repeat the same questions and answer settings, and compare the collected answers over time.
 - **Manage several websites.** Keep separate projects, export your work and make backups. OpenGEO has no software-imposed project limit.
 
 This work is often called generative engine optimization (GEO) or answer engine optimization (AEO). OpenGEO gives you a way to measure and work on it; it cannot promise a mention, citation or ranking.

@@ -36,8 +36,7 @@ Put the main action in `PageHeader`. Do not repeat the page introduction in a bo
 | --- | --- |
 | Overview | Evidence summary, citation coverage, comparable history and next action |
 | Ask | A search field in the top bar; its settings drawer takes the question with engine cards, one limit and the estimate. Ask history shows one column per engine as answers arrive |
-| Prompts | Tracked questions, grounded suggestions, prompt editing and grouping by topic |
-| Topics | Questions grouped toward one goal, each with results, target pages, competitors and the checks that read it |
+| Prompts | Tabs for tracked questions, Topics, AI suggestions and reported searches. Topic detail keeps results, targets and competitors within this workspace |
 | Visibility | Trends, readable chart data, question coverage grouped by topic and check history |
 | Responses | Search and mutually exclusive outcome filters, then a full-answer drawer |
 | Sources | Domain/page views with citation counts and supporting answers |

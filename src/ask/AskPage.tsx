@@ -10,9 +10,6 @@ import { AnswerColumn } from './AnswerColumn';
 import { useAskDetail, useAskList, type AskController, type AskDetail } from './useAsk';
 import './ask.css';
 
-const engineLabel = (id?: string) => ({ chatgpt: 'ChatGPT', 'surfacedby-chatgpt': 'ChatGPT app', 'surfacedby-gemini': 'Gemini app', 'dataforseo-chatgpt': 'ChatGPT',
-  'dataforseo-gemini': 'Gemini', 'dataforseo-perplexity': 'Perplexity' } as Record<string, string>)[id ?? ''] ?? 'Engine';
-const enginePlatform = (id?: string) => id?.endsWith('gemini') ? 'gemini' : id?.endsWith('perplexity') ? 'perplexity' : 'chat_gpt';
 
 /** Ask history: past asks, one ask's answers side by side, and the first-visit suggestions. */
 export function AskPage({ projectId, version, askId, setAskId, ask, refresh }: {
@@ -45,8 +42,8 @@ function AskHistory({ projectId, version, setAskId, ask }: { projectId: string; 
     <ul>{matching.slice(currentPage * 20, (currentPage + 1) * 20).map(row => <li key={row.askId}><button type="button" onClick={() => setAskId(row.askId)}>
       <span className="ask-history-question"><strong>{row.question}</strong><small>{relativeTime(row.createdAt)}{row.spentUsd > 0 ? ', ' + usd(row.spentUsd) : ''}</small></span>
       <span className="ask-history-engines">{row.engines.map((engine, index) => <span key={index} className={'ask-dot ' + (engine.cited ? 'cited' : engine.mentioned ? 'mentioned' : engine.state === 'answered' ? 'absent' : 'none')}
-        title={engineLabel(engine.engine) + ': ' + (engine.state !== 'answered' ? ({ collecting: 'collecting', paused: 'needs attention', skipped: 'skipped', no_answer: 'no answer collected' }[engine.state]) : engine.cited ? 'website cited' : engine.mentioned ? 'brand mentioned' : 'not mentioned')}>
-        <ProviderIcon provider={enginePlatform(engine.engine)} size={14} /></span>)}</span>
+        title={engine.label + ': ' + (engine.state !== 'answered' ? ({ collecting: 'collecting', paused: 'needs attention', skipped: 'skipped', no_answer: 'no answer collected' }[engine.state]) : engine.cited ? 'website cited' : engine.mentioned ? 'brand mentioned' : 'not mentioned')}>
+        <ProviderIcon provider={engine.platform} size={14} /></span>)}</span>
       <ArrowRight size={15} />
     </button></li>)}</ul>
     <Pagination page={currentPage} total={matching.length} pageSize={20} label="Past" unit="questions" onChange={setPage} />
@@ -97,7 +94,7 @@ function SampleHistory({ detail }: { detail: AskDetail }) {
     <p className="ask-sample-summary">{cited} of {detail.history.length} {detail.history.length === 1 ? 'check' : 'checks'} cited {detail.domain}. Answers change between asks, so one result is a sample, not a verdict.</p>
     <ul>{detail.history.map((row, index) => <li key={index}>
       <time dateTime={row.observedAt}>{shortDate(row.observedAt)}</time>
-      <span><ProviderIcon provider={row.platform} size={14} />{platformLabel(row.platform)}{row.surface === 'consumer_interface' ? ' app' : ''}</span>
+      <span><ProviderIcon provider={row.platform} size={14} />{platformLabel(row.platform)}</span>
       <strong className={row.cited ? 'cited' : row.mentioned ? 'mentioned' : 'absent'}>{row.cited ? 'Cited' : row.mentioned ? 'Mentioned, not cited' : 'Not mentioned'}</strong>
     </li>)}</ul>
   </section>;

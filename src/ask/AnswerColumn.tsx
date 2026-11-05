@@ -4,7 +4,7 @@ import { markdownHtml } from '../../server/markdown';
 import { api } from '../api';
 import { targetDomain } from '../finding-groups';
 import { usd } from '../format';
-import { ProviderIcon, retrievalLabel } from '../provider-ui';
+import { ProviderIcon } from '../provider-ui';
 import { SiteIcon } from '../SiteIcon';
 import { Disclosure } from '../ui/Primitives';
 import type { AskEngine } from './useAsk';
@@ -24,7 +24,6 @@ export function AnswerColumn({ row, projectId, brand, domain, reload, askAgain }
   };
   const answer = row.answer;
   const sources = answer?.citations.filter(citation => targetDomain(citation.url)) ?? [];
-  const app = row.surface === 'consumer_interface';
   const recordedCost = row.costBasis === 'includes_estimates' ? 'Estimated ' + usd(row.spentUsd)
     : row.spentUsd > 0 ? 'Recorded charge ' + usd(row.spentUsd) : 'No charge recorded';
   const status = row.state === 'answered' ? { tone: 'completed', text: row.provider === 'chatgpt' ? 'Answered' : 'Answered, ' + usd(row.spentUsd) + (row.costBasis === 'includes_estimates' ? ' est.' : '') }
@@ -40,9 +39,7 @@ export function AnswerColumn({ row, projectId, brand, domain, reload, askAgain }
         <span className={'badge ' + status.tone}>{row.state === 'collecting' && <LoaderCircle size={12} className="loading-spin" aria-hidden="true" />}{status.text}</span>
       </div>
       <div className="ask-chips">
-        <span className={app ? 'ask-chip app' : 'ask-chip'}>{app ? 'In the app, as a person sees it' : 'API answer'}</span>
-        {app && <span className="ask-chip">via SurfacedBy</span>}
-        {answer && <span className="ask-chip">{answer.model}</span>}
+        <span className="ask-chip">{via(row.provider)} connection</span>
         {answer?.searchQueries?.length ? <span className="ask-chip">{answer.searchQueries.length} {answer.searchQueries.length === 1 ? 'search' : 'searches'}</span> : null}
       </div>
     </header>
@@ -63,11 +60,11 @@ export function AnswerColumn({ row, projectId, brand, domain, reload, askAgain }
         {answer.searchQueries?.length ? <ul className="ask-searches">{answer.searchQueries.map(query => <li key={query}><Search size={12} /><code>{query}</code></li>)}</ul>
           : <p className="ask-muted">{answer.provider === 'chatgpt' ? 'No searches were reported for this answer.' : 'This engine does not report its searches.'}</p>}
       </Disclosure></div>
-      <p className="ask-provenance">{answer.provider === 'chatgpt' ? retrievalLabel(answer) + '. ' : ''}Collected {new Date(answer.observedAt).toLocaleString()}.</p>
+      <p className="ask-provenance">Collected {new Date(answer.observedAt).toLocaleString()}.</p>
     </>}
 
     {row.state === 'collecting' && <>
-      <p className="ask-muted">{row.progress && row.progress !== 'Waiting to start' && row.progress !== 'Starting' ? row.progress + '. ' : ''}The answer appears here when {via(row.provider)} returns it{app ? ', usually within a few minutes' : ''}.</p>
+      <p className="ask-muted">{row.progress && row.progress !== 'Waiting to start' && row.progress !== 'Starting' ? row.progress + '. ' : ''}The answer appears here when {via(row.provider)} returns it.</p>
       <div className="ask-skeleton" aria-hidden="true"><span /><span /><span /><span /></div>
       <button type="button" className="secondary ask-column-action" disabled={busy} onClick={() => void act(() => api('/jobs/' + row.jobId + '/cancel', {}))}>Skip this engine</button>
     </>}

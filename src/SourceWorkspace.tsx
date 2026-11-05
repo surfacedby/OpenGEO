@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { ArrowRight, FileText, Globe, Link, Search } from 'lucide-react';
-import type { Job, Observation } from '../server/contracts';
+import type { Job } from '../server/contracts';
+import type { PublicObservation as Observation } from '../server/public-results';
 import type { Presentation, SourceRow } from '../server/presentation';
 import { sourceCoverage } from '../server/presentation';
 import { SourceRows, isOwnHost } from './DataPresentation';

@@ -19,7 +19,7 @@ export async function consoleContent(runner: Runner, job: Job, project: Project,
   const completed = runner.store.step(job.id, "content-result");
   if (completed?.state === "done") return JSON.parse(completed.body!);
   const { original, task } = runner.contentRequest(job, project);
-  const { output, input, capability } = await consoleManaged(runner, job, project, signal, () => {
+  const { output, input } = await consoleManaged(runner, job, project, signal, () => {
     const question = original?.topic ?? job.topic ?? project.brand;
     const required = task.mode === "page_update" && task.targetUrl ? [task.targetUrl] : [];
     let urls: string[];
@@ -61,7 +61,7 @@ export async function consoleContent(runner: Runner, job: Job, project: Project,
         evidenceIds: sources.filter(source => issue.evidence_urls.includes(source.url)).map(source => source.id) })) },
     reviewCurrent: true, requiresHumanReview: true,
     status: output.review.issues.length || !output.review.coverage_complete ? "needs_review" : "draft",
-    createdAt: new Date().toISOString(), model: capability?.models.find(model => model.operations.includes("content"))?.id ?? "managed",
+    createdAt: new Date().toISOString(), model: "managed",
     ...(original ? { derivedFrom: original.id, revisionInstructions: job.revisionInstructions } : {}) };
   runner.store.db.transaction(() => {
     runner.store.put("content", project.id, job.id, doc);

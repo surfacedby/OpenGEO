@@ -62,6 +62,7 @@ export function AskDrawer({ ask, brand, domain, locale }: {
         <fieldset className="ask-engines" disabled={ask.busy}>
           <legend>Engines</legend>
           {!ask.catalog && <p className="ask-muted" role="status">Checking your connections...</p>}
+          {ask.catalog?.availabilityNote && <p className="ask-muted" role="status">{ask.catalog.availabilityNote}</p>}
           <div className="ask-engine-grid">
             {available.map(engine => {
               const on = ask.choice.includes(engine.id);

@@ -130,6 +130,8 @@ export async function consoleManaged<I, O extends { job: z.infer<typeof managedJ
     : consoleCapabilities((await runner.providers.console("/capabilities", undefined, undefined, signal)).data);
   if (!submitted && (!capability?.operations.includes(operation) || operation === "content" && !capability.content_available))
     throw new ProviderError("capability", "SurfacedBy cannot provide " + contract.label + " on this connection right now. Choose ChatGPT or OpenRouter, or try again later.");
+  if (!submitted && operation === 'measurement' && !capability?.selected_question_platforms.includes(job.platform === 'chat_gpt' ? 'chatgpt' : job.platform))
+    throw new ProviderError('capability', 'Single-question checks are no longer available for this engine. Nothing was submitted.');
   if (!submitted) runner.store.setStep(job.id, step("capabilities"), "done", capability);
   const domain = await runner.once(job, "console-domain", async () => {
     const domains = await runner.consolePages("/domains", signal);

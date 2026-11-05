@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { localCall } from "./local-client.js";
 import identity from "../brand/identity.json";
+import { askEngineKey } from './asks.js';
 const server = new McpServer({ name: identity.name, version: "0.1.0" });
 async function call(path: string, body?: unknown) {
   const { ok, data: result } = await localCall(path, body);
@@ -101,7 +102,7 @@ server.registerTool(
   },
   ({ id }) => call("/jobs/" + id + "/cancel", {}),
 );
-const askEngines = z.enum(["chatgpt", "surfacedby-chatgpt", "surfacedby-gemini", "dataforseo-chatgpt", "dataforseo-gemini", "dataforseo-perplexity"]);
+const askEngines = askEngineKey;
 server.registerTool(
   "list_ask_engines",
   {
@@ -137,7 +138,7 @@ server.registerTool(
 server.registerTool(
   "read_ask",
   {
-    description: "Read one ask's answers per engine with their state, surface, citations, searches and cost, or every ask for the project when askId is omitted.",
+    description: "Read one ask's answers per engine with their state, citations, searches and cost, or every ask for the project when askId is omitted.",
     inputSchema: { projectId: z.string().uuid(), askId: z.string().uuid().optional() },
     annotations: { readOnlyHint: true },
   },

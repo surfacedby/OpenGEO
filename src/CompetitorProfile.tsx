@@ -1,6 +1,7 @@
 import { useId, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
-import type { DiscoveredWebsite, Observation, Project } from '../server/contracts';
+import type { DiscoveredWebsite, Project } from '../server/contracts';
+import type { PublicObservation as Observation } from '../server/public-results';
 import { sourceCoverage } from '../server/presentation';
 import { AnswerCard, SourceRows } from './DataPresentation';
 import { competitorComparison } from './competitor-comparison';

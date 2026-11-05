@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ArrowRight, Search } from 'lucide-react';
-import type { Observation } from '../server/contracts';
+import type { PublicObservation as Observation } from '../server/public-results';
 import { EmptyState, Section, Toolbar } from './ui/Primitives';
 import { reportedSearches } from '../server/prompt-searches';
 

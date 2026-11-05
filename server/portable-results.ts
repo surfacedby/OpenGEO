@@ -9,7 +9,6 @@ const analysisResult = z.object({
   omittedSuggestions: count.optional(),
   uncertainties: z.array(z.string()).optional(),
   pagesReviewed: count.optional(),
-  model: z.string().optional(),
 });
 const measurementResult = z.object({
   metrics: z.object({ requested: count, completed: count, missing: count,

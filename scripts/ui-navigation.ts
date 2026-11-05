@@ -2,6 +2,11 @@ import type { Page } from 'playwright';
 
 /** Exercise the labeled menu on compact screens and the sidebar on desktop. */
 export async function navigate(page: Page, view: string) {
+  if (view === 'Topics') {
+    await navigate(page, 'Prompts');
+    await page.getByRole('tab', { name: /^Topics(?:\s|$)/ }).click();
+    return;
+  }
   await page.locator('.topbar').waitFor({ state: 'visible' });
   const menu = page.getByRole('button', { name: 'Open navigation', exact: true });
   if (await menu.isVisible()) {

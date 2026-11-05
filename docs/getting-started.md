@@ -4,7 +4,7 @@ Find out whether AI answers mention your brand, which sources they cite, and wha
 
 ## 1. Install and add your website
 
-[Download the app for Windows or Mac](https://github.com/surfacedby/OpenGEO/releases/tag/v0.1.0-beta.4), then follow the [installation guide](distribution.md). Source and Docker users can open their local instance at <http://localhost:4318>.
+[Download the app for Windows or Mac](https://github.com/surfacedby/OpenGEO/releases), then follow the [installation guide](distribution.md). Source and Docker users can open their local instance at <http://localhost:4318>.
 
 In setup, enter your website and brand name, then connect an eligible service. OpenGEO can read your public pages and suggest relevant prompts. Review the suggestions and choose what to track. Paid services require a spending limit and any applicable price approval. Review the optional usage-sharing choice before finishing setup.
 
@@ -22,7 +22,7 @@ In **Visibility**, inspect mention and citation rates. Use **Responses** to read
 
 In **Scans**, choose **Website health**. Review the pages fetched and findings for titles, descriptions, headings, canonical URLs, indexing instructions and structured data. A missing description is a concrete finding, not proof that an AI service is ignoring your business. This scan is optional and does not block visibility checks.
 
-The [connection guide](connections.md) explains service choices, costs and differences between API answers and consumer-interface answers.
+The [connection guide](connections.md) explains service choices, costs and what each check measures.
 
 ## Manage brands and the app
 

@@ -49,12 +49,12 @@ const observation = z
     prompt: z.string(),
     provider: z.enum(providers),
     platform: z.string(),
-    model: z.string(),
+    model: z.string().default('not-disclosed'),
     locale: z.string(),
     observedAt: date,
     answer: z.string(),
     citations: z.array(citation),
-    surface: z.enum(["api", "consumer_interface", "unknown"]),
+    surface: z.enum(["api", "consumer_interface", "unknown"]).default('unknown'),
     retrieval: z.enum(["web_search", "model_only", "provider_managed"]).optional(),
     webSearchConfirmed: z.boolean().optional(),
     searchQueries: z.array(z.string().min(1).max(300)).max(20).optional(),
@@ -120,7 +120,7 @@ const content = z
     revisionInstructions: z.string().max(2000).optional(),
     requiresHumanReview: z.literal(true),
     createdAt: date,
-    model: z.string(),
+    model: z.string().default('not-disclosed'),
     editedAt: date.optional(),
   })
   .strict();

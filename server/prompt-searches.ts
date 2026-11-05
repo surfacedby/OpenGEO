@@ -1,7 +1,7 @@
 import type { Observation } from './contracts.js';
 
 /** Count an answer once even when its provider repeats the same query. */
-export function reportedSearches(observations: Observation[]) {
+export function reportedSearches(observations: Pick<Observation, 'id' | 'prompt' | 'searchQueries'>[]) {
   const rows = new Map<string, { query: string; prompts: Set<string>; observationIds: Set<string> }>();
   for (const observation of observations) for (const raw of observation.searchQueries ?? []) {
     const query = raw.replace(/\s+/g, ' ').trim();

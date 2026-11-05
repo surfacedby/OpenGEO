@@ -1,4 +1,4 @@
-import type { Observation } from '../server/contracts';
+import type { PublicObservation as Observation } from '../server/public-results';
 
 /** Exact prompt text keeps edited questions separate; each saved answer contributes once. */
 export function promptResults(observations: Observation[]) {

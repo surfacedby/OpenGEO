@@ -1,4 +1,4 @@
-import type { Observation } from '../server/contracts';
+import type { PublicObservation as Observation } from '../server/public-results';
 
 export function citesDomain(answer: Observation, domain: string): boolean {
   const normalized = domain.toLowerCase().replace(/^www\./, '');

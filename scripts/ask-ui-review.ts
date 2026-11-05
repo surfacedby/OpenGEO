@@ -84,8 +84,8 @@ try {
     if (!(await page.locator("#ask-settings").isVisible())) await page.locator(width > 900 ? ".ask-settings-button" : ".ask-mobile-trigger").first().click();
     const drawer = page.locator("#ask-settings");
     await drawer.waitFor();
-    for (const name of ["ChatGPT app", "Gemini app"]) {
-      const box = drawer.getByRole("checkbox", { name: new RegExp(name) });
+    for (const name of ["ChatGPT", "Gemini"]) {
+      const box = drawer.locator('.ask-engine').filter({ has: page.getByText(name, { exact: true }) }).filter({ hasText: 'Your SurfacedBy connection' }).getByRole('checkbox');
       if (!(await box.isChecked())) await box.check();
     }
     await drawer.getByText("est. $0.10").first().waitFor();
