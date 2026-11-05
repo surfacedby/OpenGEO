@@ -280,7 +280,7 @@ def publish():
                 'cleanMachineCertification': False, 'manualUpdates': False,
                 'updateDelivery': {'windows': 'download-and-confirm-restart', 'mac': 'download-and-open-disk-image', 'macReplacementRequiresUser': True},
                 'verification': {'applicationRun': approval['applicationRun'], 'remoteRun': approval['remoteRun'],
-                                 'freshInstallAndBeta1Upgrade': TARGETS, 'docker': ['linux-amd64', 'linux-arm64'],
+                                 'freshInstallAndUpgrade': TARGETS, 'docker': ['linux-amd64', 'linux-arm64'],
                                  'unresolvedConfidentialityFindings': 0},
                 'scope': 'Beta local workflow and optional authenticated private-network access; no paid provider or managed production acceptance implied'}
     manifest_file = out / 'release-manifest.json'
