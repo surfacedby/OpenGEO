@@ -14,15 +14,17 @@ const output = join(process.env.LOCALAPPDATA ?? tmpdir(), "OpenGEO", "ask-ux-rev
 mkdirSync(output, { recursive: true });
 const original = globalThis.fetch;
 let providerRequests = 0;
+let quoteLifetime = 3600000, quoteRequests = 0;
 globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
   const address = new URL(String(url));
   if (address.hostname !== "api.surfacedby.com") return original(url, init);
   providerRequests++;
   const path = address.pathname.replace("/api/v1/console", "");
+  if (path.endsWith('/measurement/estimate')) quoteRequests++;
   const data = path === "/capabilities" ? { platforms: [{ key: "chatgpt", name: "ChatGPT", enabled: true }, { key: "gemini", name: "Gemini", enabled: true }],
       operations: ["measurement"], content_available: false, models: [], selected_question_platforms: ["chatgpt", "gemini"] }
     : path === "/domains" ? [{ id: "00000000-0000-4000-8000-000000000001", domain: "example.com" }]
-    : path.endsWith("/measurement/estimate") ? { id: randomUUID(), domain_id: "00000000-0000-4000-8000-000000000001", operation: "measurement", estimated_credits: 1, expires_at: new Date(Date.now() + 3600000).toISOString() }
+    : path.endsWith("/measurement/estimate") ? { id: randomUUID(), domain_id: "00000000-0000-4000-8000-000000000001", operation: "measurement", estimated_credits: 1, estimated_usd: '0.10', expires_at: new Date(Date.now() + quoteLifetime).toISOString() }
     : null;
   if (!data) throw new Error("Unexpected review request " + path);
   return new Response(JSON.stringify({ data, meta: {} }), { headers: { "Content-Type": "application/json" } });
@@ -102,6 +104,24 @@ try {
   await page.setViewportSize({ width: 1360, height: 900 });
   await page.locator('.ask-settings-button').click();
   const modal = page.getByRole('dialog', { name: 'Ask a question', exact: true });
+  quoteLifetime = 1500;
+  const pricingQuestion = question + ' Pricing review.';
+  await Promise.all([
+    page.waitForResponse(response => response.url().endsWith('/asks/estimate') && response.request().postDataJSON()?.question === pricingQuestion),
+    modal.getByRole('textbox', { name: 'Question', exact: true }).fill(pricingQuestion),
+  ]);
+  await modal.getByText('est. $0.10').first().waitFor();
+  const beforeRefresh = quoteRequests;
+  quoteLifetime = -1000;
+  // The expired-price button can appear during the request debounce; observe the automatic response before judging refresh.
+  await page.waitForResponse(response => response.url().endsWith('/asks/estimate') && response.request().postDataJSON()?.question === pricingQuestion);
+  await modal.getByRole('button', { name: 'Refresh prices', exact: true }).waitFor();
+  assert.ok(quoteRequests > beforeRefresh, 'Expired estimates refresh without editing the question');
+  quoteLifetime = 3600000;
+  await modal.getByRole('button', { name: 'Refresh prices', exact: true }).click();
+  await modal.getByText('est. $0.10').first().waitFor();
+  await modal.getByRole('textbox', { name: 'Question', exact: true }).fill(question);
+  await modal.getByText('est. $0.10').first().waitFor();
   await modal.locator('button[type="submit"]').focus();
   await page.keyboard.press('Tab');
   assert.equal(await modal.evaluate(element => element.contains(document.activeElement)), true, 'Ask keeps keyboard focus inside the modal');

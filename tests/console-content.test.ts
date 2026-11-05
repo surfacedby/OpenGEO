@@ -36,7 +36,7 @@ test("lost managed submissions recover their approved identity for collection an
     else if (path === "/domains") data = [{ id: domainId, domain: project.domain }];
     else if (path.includes("/estimates/")) {
       const id = randomUUID(); quotes.set(request.headers["idempotency-key"] as string, id);
-      data = { id, domain_id: domainId, operation: "content", estimated_credits: 3, expires_at: new Date(Date.now() + 3600000).toISOString() };
+      data = { id, domain_id: domainId, operation: "content", estimated_credits: 3, estimated_usd: '0.30', expires_at: new Date(Date.now() + 3600000).toISOString() };
     } else if (path === "/content/jobs" && request.method === "POST") {
       purchases++;
       jobs.set(body.request_key, { id: randomUUID(), ...body, status: mode === "cancel" ? "queued" : "completed", estimated_credits: 3, cancel_requested: false,
@@ -131,7 +131,7 @@ test("managed drafts preserve approved quotes, survive interrupted collection, s
       assert.equal(requests.at(-1)!.body.locale, "fr-FR");
       assert.equal(requests.at(-1)!.body.content_type, "blog_post");
       assert.deepEqual(requests.at(-1)!.body.source_urls, ["https://example.com/"]);
-      data = { id: quoteId, domain_id: domainId, operation: "content", estimated_credits: 4, expires_at: new Date(Date.now() + (expired ? -3600000 : 3600000)).toISOString() };
+      data = { id: quoteId, domain_id: domainId, operation: "content", estimated_credits: 4, estimated_usd: '0.40', expires_at: new Date(Date.now() + (expired ? -3600000 : 3600000)).toISOString() };
     } else if (path === "/content/jobs") data = remote();
     else if (path.endsWith("/cancel")) { cancelling = true; data = remote(); }
     else if (path.endsWith("/results")) data = { job: remote(), brief: "Explain reports for small teams.", draft: { title: "Reports", markdown: "# Rapports\n\nCréez un rapport utile.", html: "<script>private-fixture</script>" },
@@ -238,7 +238,7 @@ test("managed page improvements send their task and target, and revisions send t
     const path = request.url!; let data: unknown;
     if (path === "/capabilities") data = { platforms: [], operations: ["content"], content_available: true, models: [{ id: "managed-model", operations: ["content"] }] };
     else if (path === "/domains") data = [{ id: domainId, domain: project.domain }];
-    else if (path.includes("/estimates/")) { estimates.push(JSON.parse(body)); data = { id: randomUUID(), domain_id: domainId, operation: "content", estimated_credits: 3, expires_at: new Date(Date.now() + 3600000).toISOString() }; quote++; }
+    else if (path.includes("/estimates/")) { estimates.push(JSON.parse(body)); data = { id: randomUUID(), domain_id: domainId, operation: "content", estimated_credits: 3, estimated_usd: '0.30', expires_at: new Date(Date.now() + 3600000).toISOString() }; quote++; }
     else if (path === "/content/jobs") { remoteId = randomUUID(); data = { id: remoteId, status: "completed", estimated_credits: 3, approved_credits: 5, cancel_requested: false, receipt: { status: "completed", charged_credits: 3, refunded_credits: 2 } }; }
     else if (path === "/content/jobs/" + remoteId) data = { id: remoteId, status: "completed", estimated_credits: 3, approved_credits: 5, cancel_requested: false, receipt: { status: "completed", charged_credits: 3, refunded_credits: 2 } };
     else if (path.endsWith("/results")) data = { job: { id: remoteId, status: "completed", estimated_credits: 3, approved_credits: 5, cancel_requested: false, receipt: { status: "completed", charged_credits: 3, refunded_credits: 2 } },

@@ -35,7 +35,7 @@ for (const scenario of ["lost_ack", "changed_receipt", "foreign_question", "canc
         input = body;
         assert.deepEqual(input.questions.map((row: any) => row.question), prompts);
         assert.equal(input.locale, "en-US"); assert.equal(input.country, "US");
-        data = { id: quote, domain_id: domain, operation: "measurement", estimated_credits: 4,
+        data = { id: quote, domain_id: domain, operation: "measurement", estimated_credits: 4, estimated_usd: '0.40',
           expires_at: new Date(Date.now() + 3600000).toISOString() };
       } else if (path === "/measurement/jobs") {
         purchases++;
@@ -71,6 +71,8 @@ for (const scenario of ["lost_ack", "changed_receipt", "foreign_question", "canc
       (server.address() as any).port + address.pathname.replace("/api/v1/console", "") + address.search, init); }) as typeof fetch;
     try {
       const job = store.enqueue(jobInput.parse({ projectId: project.id, kind: "measure", provider: "console", maxCostUsd: 0.5 }), "selected");
+      // Installed selected-question checks retain their original operation on resume.
+      store.setStep(job.id, 'console-measurement-profile', 'done', 'selected_questions');
       await runner.tick(); assert.equal(store.job(job.id).error, "approval"); assert.equal(purchases, 0);
       assert.equal(store.observations(project.id).length, 0);
       store.updateProject(project.id, { ...project, prompts: ["A later project edit must not change this check."] });

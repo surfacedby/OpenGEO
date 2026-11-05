@@ -14,6 +14,56 @@ const json = (data: unknown) => new Response(JSON.stringify({ data }), {
   headers: { "Content-Type": "application/json" },
 });
 
+test('full-check approval and refunds retain the advertised rate through price changes and cancellation', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'opengeo-console-price-')), store = new Store(directory);
+  const vault = new Vault(directory, { encrypt: text => Buffer.from(text), decrypt: bytes => bytes.toString() });
+  vault.set('console', { key: 'synthetic-console-key' });
+  const runtime = await createApp(store, vault, 'synthetic-local-session');
+  const original = globalThis.fetch;
+  let unit: unknown = 0.25, submitted = 0;
+  globalThis.fetch = (async (url, init) => {
+    const path = new URL(String(url)).pathname.replace('/api/v1/console', '');
+    if (path === '/capabilities') return json({ platforms: [{ key: 'chatgpt', name: 'ChatGPT', enabled: true }], pricing: { credit_usd: unit } });
+    if (path === '/domains') return json([{ id: 'fixture-domain', domain: 'example.com' }]);
+    if (path.endsWith('/brand')) return json({});
+    if (path === '/scans/preview') return json({ credits_required: 2, query_count: 1 });
+    if (path === '/scans') {
+      submitted++;
+      assert.equal(JSON.parse(String(init?.body)).max_credits, 2);
+      return json({ scan_id: 'fixture-scan', credits_charged: 2 });
+    }
+    if (path.endsWith('/cancel')) return json({ refunded_credits: 1, prior_status: 'running' });
+    if (path === '/scans/fixture-scan') return json({ status: 'failed' });
+    throw new Error('Unexpected external request: ' + path);
+  }) as typeof fetch;
+  try {
+    const project = store.createProject(projectInput.parse({ domain: 'example.com', brand: 'Example', prompts: ['Which examples are useful?'] }));
+    const enqueue = (key: string) => store.enqueue(jobInput.parse({ projectId: project.id, kind: 'measure', provider: 'console', maxCostUsd: .74 }), key);
+    const job = enqueue('quoted-price');
+    await runtime.runner.tick();
+    assert.equal(store.job(job.id).error, 'provider');
+    assert.equal(store.job(job.id).spentUsd, .5);
+    unit = 0.75;
+    await runtime.runner.cancel(job.id);
+    assert.equal(store.job(job.id).spentUsd, .25);
+    await runtime.runner.cancel(job.id);
+    assert.equal(store.job(job.id).spentUsd, .25);
+    assert.equal(submitted, 1);
+    for (const invalid of [undefined, -1, 0, '0.25', 0.0000001]) {
+      unit = invalid;
+      const refused = enqueue('invalid-price-' + String(invalid));
+      await runtime.runner.tick();
+      assert.equal(store.job(refused.id).error, 'estimate');
+      assert.equal(store.job(refused.id).spentUsd, 0);
+      await runtime.runner.cancel(refused.id);
+    }
+    assert.equal(submitted, 1);
+  } finally {
+    globalThis.fetch = original;
+    await runtime.app.close(); store.close(); rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("Console check totals and public citations survive project edits, dashboard reads and restore", async () => {
   const directory = mkdtempSync(join(tmpdir(), "opengeo-console-contract-")), store = new Store(directory);
   const vault = new Vault(directory, { encrypt: (text) => Buffer.from(text), decrypt: (bytes) => bytes.toString() });
@@ -24,7 +74,8 @@ test("Console check totals and public citations survive project edits, dashboard
   // Supplier HTTP fixtures exercise the production adapter, queue, projections and SQLite writes.
   globalThis.fetch = (async (url, init) => {
     const path = new URL(String(url)).pathname.replace("/api/v1/console", "");
-    if (path === "/capabilities") return json({ platforms: [{ key: "chatgpt", name: "ChatGPT", enabled: true }] });
+    if (path === "/capabilities") return json({ platforms: [{ key: "chatgpt", name: "ChatGPT", enabled: true }], pricing: { credit_usd: 0.1 },
+      operations: ['measurement', 'full_check'], selected_question_platforms: ['chatgpt'] });
     if (path === "/domains") return json([{ id: "fixture-domain", domain: "example.com" }]);
     if (path === "/domains/fixture-domain/brand") return json({ domain_id: "fixture-domain" });
     if (path === "/scans/preview") return json({ credits_required: 2, query_count: previewCount });

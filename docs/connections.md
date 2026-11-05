@@ -37,7 +37,7 @@ A direct DataForSEO request has no per-request dollar cap. Its actual charge can
 
 SurfacedBy is optional. You can keep using local projects and exports without a managed account.
 
-OpenGEO checks the connected server's capabilities before offering managed work. Supported checks show a credit preview or quote for review. Selected-question checks collect answers for the approved list without automatically purchasing analysis. Suggestions and drafts require a separate price review when available.
+OpenGEO checks the connected server's capabilities before offering managed work. A visibility scan collects answers and waits for SurfacedBy's analysis and recommendations. Ask requests one answer per selected engine without buying a full scan. Suggestions and drafts require a separate price review when available.
 
 Engine availability comes from your connected account. Full checks and single-question checks may support different engines. Ask shows which engines can answer one question, and checks availability again before starting paid work. An unavailable single-question check is never replaced with a full scan.
 
@@ -46,6 +46,8 @@ Engine availability comes from your connected account. Full checks and single-qu
 ## Spending, pauses and cancellation
 
 An ask uses ChatGPT on your plan by default; your plan limits apply. Choose paid engines explicitly for each ask. They share the spending approval evenly, rounded down to the cent. SurfacedBy checks its current quote against that engine's share before submitting work. DataForSEO uses your saved per-request estimate, so its actual charge can differ; OpenGEO records the reported cost and stops further work if it exceeds the limit. Provider charges and refunds apply. After an ask, selection returns to ChatGPT on your plan.
+
+SurfacedBy prices come from the connected service. Ask shows each quote's dollar amount and expiry, refreshes expired quotes, and lets you retry an unavailable price. Execution checks a current quote against your approved limit. The original valuation stays with the run for its charge and refund; a later price change does not rewrite its receipt.
 
 If a response is lost, retry with the same settings. OpenGEO keeps the original request key and returns the same Ask instead of starting it twice. A request key cannot add engines or raise an existing Ask's approval. One-off answers remain in Ask history even after you track the question; future visibility checks collect their own answers.
 

@@ -37,7 +37,7 @@ test("managed questions require approval, recover uncertain submissions and reta
     } else if (path === "/domains") data = [{ id: domain, domain: project.domain }];
     else if (path.endsWith("/questions/estimate")) {
       inputs.set(request.headers["idempotency-key"] as string, body);
-      data = { id: randomUUID(), domain_id: domain, operation: "questions", estimated_credits: 3, expires_at: new Date(Date.now() + 3600000).toISOString() };
+      data = { id: randomUUID(), domain_id: domain, operation: "questions", estimated_credits: 3, estimated_usd: '0.30', expires_at: new Date(Date.now() + 3600000).toISOString() };
     } else if (path === "/questions/jobs") {
       purchases++;
       jobs.set(body.request_key, { id: randomUUID(), ...body, operation: "questions", status: mode === "cancel" ? "queued" : "completed",

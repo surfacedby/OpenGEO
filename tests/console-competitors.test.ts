@@ -38,7 +38,7 @@ test("managed role review keeps saved answers, rejects unrelated evidence and re
     else if (path === "/domains") data = [{ id: domain, domain: project.domain }];
     else if (path.endsWith("/competitors/estimate")) {
       assert.deepEqual(body.answers, [{ id: answer.id, question: answer.prompt, answer: answer.answer, observed_at: answer.observedAt, citations: answer.citations }]);
-      data = { id: quote, domain_id: domain, operation: "competitors", estimated_credits: 2, expires_at: new Date(Date.now() + 3600000).toISOString() };
+      data = { id: quote, domain_id: domain, operation: "competitors", estimated_credits: 2, estimated_usd: '0.20', expires_at: new Date(Date.now() + 3600000).toISOString() };
     } else if (path === "/competitors/jobs") {
       purchases++; approved = body.approved_credits;
       data = { ...saved, approved_credits: approved, receipt: { ...saved.receipt, refunded_credits: approved - 1 } };

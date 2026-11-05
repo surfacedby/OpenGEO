@@ -23,8 +23,8 @@ import { consoleContent } from "./console-content.js";
 import { consoleCompetitors } from "./console-competitors.js";
 import { consoleOpportunities } from "./console-opportunities.js";
 import { consoleMeasurement, collectCancelledMeasurement } from "./console-measurement.js";
-import { consoleCapabilities } from "./console-capabilities.js";
 import { cancelConsoleManaged, managedStep } from "./console-managed.js";
+import { creditUnitUsd, creditsUsd, creditsWithinBudget } from './console-pricing.js';
 import {
   ProviderError,
   jobInput,
@@ -177,11 +177,11 @@ export class Runner {
         try {
           const result = await this.providers.console('/scans/' + scan.scan_id + '/cancel', {}, id + ':cancel', AbortSignal.timeout(20000));
           const refund = result.data?.refunded_credits;
-          if (typeof refund !== 'number' || !Number.isFinite(refund) || refund < 0)
+          if (!Number.isSafeInteger(refund) || refund < 0 || !Number.isSafeInteger(scan.credits_charged) || refund > scan.credits_charged)
             throw new Error('Invalid cancellation receipt');
           this.store.updateJob(id, {
             error: null,
-            spentUsd: Math.max(0, this.store.job(id).spentUsd - refund * 0.1),
+            spentUsd: creditsUsd(scan.credits_charged - refund, this.consoleScanCreditUnit(job)),
             progress: refund > 0 ? 'Cancelled on SurfacedBy. Unused credits were returned.' : 'Cancelled on SurfacedBy. Work already started remains billable.',
             result: { cancellation: { refundedCredits: refund, priorStatus: result.data.prior_status } },
           });
@@ -1098,21 +1098,22 @@ export class Runner {
   async consoleMeasure(job: Job, project: Project, signal: AbortSignal) {
     const savedProfile = this.store.step(job.id, "console-measurement-profile");
     const profile = savedProfile?.body ? JSON.parse(savedProfile.body) : this.store.step(job.id, "console-scan") ? "full_check"
-      : await this.once(job, "console-measurement-profile", async () => {
-        const capability = consoleCapabilities((await this.providers.console("/capabilities", undefined, undefined, signal)).data);
-        const platform = job.platform === "chat_gpt" ? "chatgpt" : job.platform;
-        return capability.operations.includes("measurement") && capability.selected_question_platforms.includes(platform)
-          ? "selected_questions" : "full_check";
-      });
+      : await this.once(job, "console-measurement-profile", async () => job.kind === 'ask' ? 'selected_questions' : 'full_check');
     if (profile === "selected_questions") return consoleMeasurement(this, job, project, signal);
     if (job.kind === "ask")
       throw new ProviderError("capability", "This SurfacedBy connection cannot answer a single question on this AI platform. Choose another engine.");
     const platform = job.platform === 'chat_gpt' ? 'chatgpt' : job.platform;
+    const priorScan = this.store.step(job.id, 'console-scan');
     if (this.store.step(job.id, 'console-scan')?.state !== 'done') {
       const capability = await this.providers.console('/capabilities', undefined, undefined, signal);
       if (!capability.data?.platforms?.some((p: any) => p.key === platform && p.enabled === true))
         throw new ProviderError('capability', 'This AI platform is not available on your SurfacedBy connection. Select an enabled platform.');
+      if (!priorScan || priorScan.state === 'rejected') {
+        const rate = creditUnitUsd(capability.data?.pricing?.credit_usd);
+        this.store.setStep(job.id, 'console-scan-credit-usd', 'done', rate);
+      }
     }
+    const unitUsd = this.consoleScanCreditUnit(job);
     const domain = await this.once(job, "console-domain", async () => {
       const list = await this.consolePages("/domains", signal);
       const existing = list.find((d: any) => d.domain === project.domain);
@@ -1152,7 +1153,7 @@ export class Runner {
       domain_id: domain.id,
       platforms: [platform],
       keywords: project.prompts,
-      max_credits: Math.floor((job.maxCostUsd + Number.EPSILON) / 0.1),
+      max_credits: creditsWithinBudget(job.maxCostUsd, unitUsd),
     };
     if (this.store.step(job.id, "console-scan")?.state !== "done") {
       const preview = await this.providers.console(
@@ -1172,7 +1173,7 @@ export class Runner {
         );
       if (!Number.isSafeInteger(preview.data?.query_count) || preview.data.query_count < 1)
         throw new ProviderError("estimate", "The API did not return the number of answers in this check. No check was submitted.");
-      if (credits * 0.1 > job.maxCostUsd)
+      if (creditsUsd(credits, unitUsd) > job.maxCostUsd)
         throw new ProviderError(
           "budget",
           "The approved budget is insufficient for this SurfacedBy check.",
@@ -1192,9 +1193,9 @@ export class Runner {
         "SurfacedBy did not confirm this check. Review SurfacedBy Console before continuing.",
         true,
       );
-    if (typeof scan.credits_charged !== 'number' || !Number.isFinite(scan.credits_charged) || scan.credits_charged < 0)
+    if (!Number.isSafeInteger(scan.credits_charged) || scan.credits_charged < 0)
       throw new ProviderError('cost_unknown', 'SurfacedBy did not confirm the charge for this check. Review it in SurfacedBy Console before continuing.', true);
-    this.store.updateJob(job.id, { spentUsd: scan.credits_charged * 0.1 });
+    this.store.updateJob(job.id, { spentUsd: creditsUsd(scan.credits_charged, unitUsd) });
     let state;
     for (let n = 0; n < 180; n++) {
       signal.throwIfAborted();
@@ -1328,6 +1329,14 @@ export class Runner {
         this.store.observations(project.id, job.id),
       ),
     };
+  }
+  private consoleScanCreditUnit(job: Job) {
+    const price = this.store.step(job.id, 'console-scan-credit-usd');
+    if (price?.state === 'done') return creditUnitUsd(JSON.parse(price.body!));
+    // Earlier installed versions submitted full checks under the fixed 2026-09-30 valuation.
+    // Only an existing submission can use that historical rate during recovery or cancellation.
+    if (this.store.step(job.id, 'console-scan')) return 0.1;
+    throw new ProviderError('estimate', 'The price for this check is missing. Nothing was submitted.');
   }
   async consolePages(path: string, signal: AbortSignal) {
     const rows: any[] = [];

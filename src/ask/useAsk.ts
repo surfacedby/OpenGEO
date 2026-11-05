@@ -20,6 +20,7 @@ export function useAskController(projectId: string | undefined, onAsked: (askId:
   const [open, setOpen] = useState(false);
   const [estimate, setEstimate] = useState<{ key: string; value: Estimate } | null>(null);
   const [estimating, setEstimating] = useState(false);
+  const [priceRevision, setPriceRevision] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const freeOf = (list: Catalog | null) => list?.engines.filter(engine => engine.available && engine.price === 'free').map(engine => engine.id) ?? [];
@@ -69,7 +70,7 @@ export function useAskController(projectId: string | undefined, onAsked: (askId:
     let current = true;
     setEstimating(false);
     if (!projectId || !paid.length || trimmed.length < 3) return;
-    if (estimate?.key === estimateKey) return;
+    if (estimate?.key === estimateKey && (!estimate.value.expiresAt || Date.parse(estimate.value.expiresAt) > Date.now())) return;
     const timer = setTimeout(() => {
       setEstimating(true);
       api<Estimate>('/projects/' + projectId + '/asks/estimate', { question: trimmed, engines: paid.map(engine => engine.id) })
@@ -78,9 +79,15 @@ export function useAskController(projectId: string | undefined, onAsked: (askId:
         .finally(() => { if (current) setEstimating(false); });
     }, 600);
     return () => { current = false; clearTimeout(timer); };
-  }, [estimateKey]);
+  }, [estimateKey, priceRevision]);
 
-  const current = estimate?.key === estimateKey ? estimate.value : null;
+  useEffect(() => {
+    if (!estimate?.value.expiresAt || estimate.key !== estimateKey) return;
+    const timer = setTimeout(() => setPriceRevision(value => value + 1), Math.max(0, Date.parse(estimate.value.expiresAt) - Date.now()) + 1);
+    return () => clearTimeout(timer);
+  }, [estimate, estimateKey]);
+
+  const current = estimate?.key === estimateKey && (!estimate.value.expiresAt || Date.parse(estimate.value.expiresAt) > Date.now()) ? estimate.value : null;
   const priceOf = (id: string) => {
     const engine = catalog?.engines.find(row => row.id === id);
     if (engine?.price === 'free') return 0;
@@ -122,7 +129,8 @@ export function useAskController(projectId: string | undefined, onAsked: (askId:
   }
   return {
     catalog, ensureCatalog, question, setQuestion, choice, setChoice, limit, setLimit, open, setOpen, error, setError, busy,
-    chosen, paid, priceOf, fit, totalUsd, estimating, priced, freeChoice, submit,
+    chosen, paid, priceOf, fit, totalUsd, estimating, priced, freeChoice, submit, estimateExpiresAt: current?.expiresAt ?? null,
+    refreshPrices: () => { setEstimate(null); setError(''); setPriceRevision(value => value + 1); },
     toggle: (id: string) => setChoice(list => list.includes(id) ? list.filter(item => item !== id) : [...list, id]),
     /** Opens settings with a question and engines filled in, for example to ask again with a higher limit. */
     prefill: (text: string, engines?: string[]) => {

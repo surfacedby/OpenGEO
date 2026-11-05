@@ -25,6 +25,7 @@ type Fake = {
   credits: number; platforms: string[]; missing: string[]; chatgptFails: boolean; domainKnown: boolean;
   gate?: Promise<void>; gated?: string; estimates: any[]; purchases: any[]; openai: string[];
   advertised?: { key: string; name: string; enabled: boolean }[]; publicResults?: boolean;
+  quotedUsd?: string; quoteExpiry?: Record<string, string>;
 };
 function fakeProviders(state: Fake) {
   const domain = randomUUID(), quotes = new Map<string, any>(), remote = new Map<string, any>();
@@ -54,7 +55,9 @@ function fakeProviders(state: Fake) {
     if (path.endsWith('/brand')) return json({ data: {} });
     if (path.endsWith('/measurement/estimate')) {
       const id = randomUUID(); quotes.set(id, body); state.estimates.push(body);
-      return json({ data: { id, domain_id: domain, operation: 'measurement', estimated_credits: state.credits, expires_at: new Date(Date.now() + 3600000).toISOString() } });
+      return json({ data: { id, domain_id: domain, operation: 'measurement', estimated_credits: state.credits,
+        estimated_usd: state.quotedUsd ?? (state.credits / 10).toFixed(2),
+        expires_at: state.quoteExpiry?.[body.platform] ?? new Date(Date.now() + 3600000).toISOString() } });
     }
     if (path === '/measurement/jobs' && method === 'POST') {
       const id = randomUUID(); state.purchases.push(body); remote.set(id, { request: body, input: quotes.get(body.estimate_id) });
@@ -280,6 +283,56 @@ test('an ask refuses paid engines without a limit and never buys more than an en
     const scheduled = await f.app.inject({ method: 'POST', url: '/api/schedules', headers: { ...headers, 'idempotency-key': 'scheduled-ask' },
       payload: { job: { projectId: f.project.id, kind: 'ask', askId: randomUUID(), question, provider: 'chatgpt' }, frequency: 'daily', hour: 9, timezone: 'UTC', monthlyBudgetUsd: 0 } });
     assert.equal(scheduled.statusCode, 422);
+  } finally { await f.close(); }
+});
+
+test('the displayed quote, approval and recorded charge use the server valuation', async () => {
+  const f = await fixture({ credits: 3, quotedUsd: '0.75' });
+  try {
+    const quote = (await f.app.inject({ method: 'POST', url: `/api/projects/${f.project.id}/asks/estimate`, headers,
+      payload: { question, engines: ['surfacedby-chatgpt'] } })).json();
+    assert.equal(quote.totalUsd, 0.75);
+    assert.ok(Date.parse(quote.expiresAt) > Date.now());
+    const { askId, jobs } = (await f.ask({ question, engines: ['surfacedby-chatgpt'], maxCostUsd: 0.99 })).json();
+    await f.runner.tick();
+    assert.equal(f.store.job(jobs[0]).status, 'completed');
+    assert.equal(f.state.purchases[0].approved_credits, 3);
+    assert.equal((await f.read(askId)).spentUsd, 0.75);
+
+    const denied = (await f.ask({ question, engines: ['surfacedby-chatgpt'], maxCostUsd: 0.74 })).json();
+    await f.runner.tick();
+    assert.equal(f.store.job(denied.jobs[0]).error, 'budget');
+    assert.equal(f.state.purchases.length, 1);
+  } finally { await f.close(); }
+});
+
+test('a changed execution quote cannot spend beyond the monetary approval', async () => {
+  const f = await fixture({ credits: 3, quotedUsd: '0.75' });
+  try {
+    const preview = await f.app.inject({ method: 'POST', url: `/api/projects/${f.project.id}/asks/estimate`, headers,
+      payload: { question, engines: ['surfacedby-chatgpt'] } });
+    assert.equal(preview.json().totalUsd, 0.75);
+    const { jobs } = (await f.ask({ question, engines: ['surfacedby-chatgpt'], maxCostUsd: 1 })).json();
+    f.state.quotedUsd = '1.50';
+    await f.runner.tick();
+    assert.equal(f.store.job(jobs[0]).error, 'budget');
+    assert.equal(f.state.purchases.length, 0);
+    assert.equal(f.store.job(jobs[0]).spentUsd, 0);
+  } finally { await f.close(); }
+});
+
+test('a combined preview expires with its earliest quote and refuses expired prices', async () => {
+  const soon = new Date(Date.now() + 60000).toISOString(), later = new Date(Date.now() + 120000).toISOString();
+  const f = await fixture({ quoteExpiry: { chatgpt: later, gemini: soon } });
+  try {
+    const estimate = async () => (await f.app.inject({ method: 'POST', url: `/api/projects/${f.project.id}/asks/estimate`, headers,
+      payload: { question, engines: ['surfacedby-chatgpt', 'surfacedby-gemini'] } })).json();
+    assert.equal((await estimate()).expiresAt, soon);
+    f.state.quoteExpiry!.gemini = new Date(Date.now() - 1000).toISOString();
+    const expired = await estimate();
+    assert.equal(expired.totalUsd, null);
+    assert.equal(expired.engines[1].estimateUsd, null);
+    assert.equal(f.state.purchases.length, 0);
   } finally { await f.close(); }
 });
 

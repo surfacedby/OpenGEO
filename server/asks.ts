@@ -11,6 +11,7 @@ import type { Runner } from "./workflows.js";
 import { askShare } from "./ask-scope.js";
 import { consolePlatformKey, localPlatformKey, platformName } from './platforms.js';
 import { publicObservation } from './public-results.js';
+import { quotedCreditUsd, usdString } from './console-pricing.js';
 
 /** Direct connections have implemented adapters; managed engines come from Console's live contract. */
 const directEngines = {
@@ -91,8 +92,13 @@ async function surfacedByQuote(deps: AskDeps, project: Project, text: string, pl
   const quote = (await deps.providers.console("/domains/" + domain.id + "/measurement/estimate",
     { questions: [{ id: randomUUID(), question: text }], platform: platform === "chat_gpt" ? "chatgpt" : platform, locale: project.locale, country },
     "ask-estimate:" + randomUUID(), AbortSignal.timeout(20000))).data;
-  const credits = z.object({ estimated_credits: z.number().int().nonnegative() }).parse(quote).estimated_credits;
-  return { estimateUsd: credits / 10 };
+  const price = z.object({ domain_id: z.string().uuid(), operation: z.literal('measurement'),
+    estimated_credits: z.number().int().positive(), estimated_usd: usdString,
+    expires_at: z.string().datetime({ offset: true }) }).parse(quote);
+  quotedCreditUsd(price);
+  if (price.domain_id !== domain.id || Date.parse(price.expires_at) <= Date.now())
+    throw new ProviderError('estimate', 'SurfacedBy did not return a current estimate for this website.');
+  return { estimateUsd: Number(price.estimated_usd), expiresAt: price.expires_at };
 }
 
 export async function estimateAsk(deps: AskDeps, projectId: string, body: unknown) {
@@ -109,7 +115,9 @@ export async function estimateAsk(deps: AskDeps, projectId: string, body: unknow
     catch { return { id, estimateUsd: null, note: "SurfacedBy did not return a price. It is checked again when the ask starts." }; }
   }));
   const known = engines.every(row => row.estimateUsd !== null);
-  return { engines, totalUsd: known ? Math.round(engines.reduce((sum, row) => sum + (row.estimateUsd ?? 0), 0) * 100) / 100 : null };
+  const expiries = engines.flatMap(row => 'expiresAt' in row && typeof row.expiresAt === 'string' ? [row.expiresAt] : []);
+  return { engines, expiresAt: expiries.length ? expiries.sort((a, b) => Date.parse(a) - Date.parse(b))[0] : null,
+    totalUsd: known ? Math.round(engines.reduce((sum, row) => sum + (row.estimateUsd ?? 0), 0) * 1_000_000) / 1_000_000 : null };
 }
 
 /** Split the approval across engines. Quoted providers enforce it; metered providers can report costs above their estimate. */

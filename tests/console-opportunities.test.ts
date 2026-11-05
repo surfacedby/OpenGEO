@@ -40,7 +40,7 @@ test("managed recommendations validate evidence, keep work types and restore fre
     else if (path === "/domains") data = [{ id: domain, domain: project.domain }];
     else if (path.endsWith("/opportunities/estimate")) {
       assert.equal(body.answers[0].observed_at, answer.observedAt); assert.equal(body.answers[0].answer, answer.answer);
-      data = { id: quote, domain_id: domain, operation: "local_opportunities", estimated_credits: 4,
+      data = { id: quote, domain_id: domain, operation: "local_opportunities", estimated_credits: 4, estimated_usd: '0.40',
         expires_at: new Date(Date.now() + 3600000).toISOString() };
     } else if (path === "/opportunities/jobs") {
       purchases++; approved = body.approved_credits;

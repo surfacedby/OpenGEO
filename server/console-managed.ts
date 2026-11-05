@@ -4,10 +4,9 @@ import { ProviderError, type Job, type Project } from "./contracts.js";
 import { consoleCapabilities } from "./console-capabilities.js";
 import { scheduledBudgetCeiling } from "./scheduler.js";
 import type { Runner } from "./workflows.js";
+import { creditsUsd, creditsWithinBudget, quotedCreditUsd, usdString } from './console-pricing.js';
 
 const credits = z.number().int().nonnegative();
-/** Dividing by ten keeps the provider's whole-credit prices exact in dollars. */
-const creditUsd = (value: number) => value / 10;
 const receipt = z.object({ charged_credits: credits, refunded_credits: credits,
   status: z.enum(["completed", "cancelled", "failed", "expired"]) });
 export const managedJob = z.object({
@@ -49,7 +48,17 @@ export function managedStep(job: Job, step: string) {
   return contracts[managedOperation(job)].prefix + "-" + step;
 }
 const quoteSchema = (operation: Operation) => z.object({ id: z.string().uuid(), estimated_credits: credits,
+  estimated_usd: usdString.optional(),
   operation: z.literal(operation), domain_id: z.string().uuid(), expires_at: z.string().datetime({ offset: true }) });
+
+function savedUnitPrice(runner: Runner, job: Job): number {
+  const saved = runner.store.step(job.id, managedStep(job, 'estimate'));
+  if (!saved?.body) throw new ProviderError('estimate', 'The original price is missing. No replacement was submitted.');
+  const quote = quoteSchema(managedOperation(job)).parse(JSON.parse(saved.body));
+  // Installed versions before quote valuation retention saved only credits under the fixed 2026-09-30 contract.
+  // This historical recovery rule is never used for a new server quote.
+  return quote.estimated_usd === undefined ? 0.1 : quotedCreditUsd({ ...quote, estimated_usd: quote.estimated_usd });
+}
 
 /** Held spend remains the full reservation until one balanced final receipt arrives. */
 function recordReceipt(runner: Runner, job: Job, remote: z.infer<typeof managedJob>, expected: { estimated: number; approved: number }) {
@@ -58,7 +67,7 @@ function recordReceipt(runner: Runner, job: Job, remote: z.infer<typeof managedJ
   if (remote.receipt && (remote.receipt.charged_credits + remote.receipt.refunded_credits !== remote.approved_credits ||
     remote.receipt.charged_credits > remote.approved_credits || remote.status !== remote.receipt.status))
     throw new ProviderError("invalid_response", "The final charge does not match this run's reservation. Review SurfacedBy before continuing.");
-  runner.store.updateJob(job.id, { spentUsd: creditUsd(remote.receipt?.charged_credits ?? remote.approved_credits),
+  runner.store.updateJob(job.id, { spentUsd: creditsUsd(remote.receipt?.charged_credits ?? remote.approved_credits, savedUnitPrice(runner, job)),
     costBasis: remote.receipt ? "reported" : "includes_estimates" });
 }
 
@@ -140,8 +149,13 @@ export async function consoleManaged<I, O extends { job: z.infer<typeof managedJ
   });
   const domainId = z.string().uuid().parse(domain.id);
   const input: I = await runner.once(job, step("input"), async () => prepareInput());
-  const quote = quoteSchema(operation).parse(await runner.once(job, step("estimate"), async () =>
-    quoteSchema(operation).parse((await runner.providers.console(contract.quote(domainId), input, job.id + ":estimate", signal)).data)));
+  const quote = quoteSchema(operation).parse(await runner.once(job, step("estimate"), async () => {
+    const fresh = quoteSchema(operation).extend({ estimated_usd: usdString }).parse(
+      (await runner.providers.console(contract.quote(domainId), input, job.id + ':estimate', signal)).data);
+    quotedCreditUsd(fresh);
+    return fresh;
+  }));
+  const unitUsd = savedUnitPrice(runner, job), creditUsd = (value: number) => creditsUsd(value, unitUsd);
   if (quote.domain_id !== domainId)
     throw new ProviderError("invalid_response", "The estimate does not belong to this website. No work was submitted.");
   if (!submitted) {
@@ -160,7 +174,7 @@ export async function consoleManaged<I, O extends { job: z.infer<typeof managedJ
     if (runner.store.step(job.id, step("approval"))?.body !== JSON.stringify(quote.id))
       throw new ProviderError("approval", "Estimated maximum: $" + creditUsd(quote.estimated_credits).toFixed(2) + ". Approve to start. Completed work is charged and unused credits returned.");
   }
-  const approvedCredits = Math.floor(job.maxCostUsd * 10 + 1e-9);
+  const approvedCredits = creditsWithinBudget(job.maxCostUsd, unitUsd);
   const savedSubmission = runner.store.step(job.id, step("submission"));
   const request = submission.parse(savedSubmission?.body ? JSON.parse(savedSubmission.body) : {
     estimate_id: quote.id, request_key: job.id, approved_credits: approvedCredits });

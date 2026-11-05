@@ -96,7 +96,10 @@ export function AskDrawer({ ask, brand, domain, locale }: {
           </label>}
           <span id="ask-estimate" className="ask-estimate">{ask.paid.length
             ? <>{ask.totalUsd === null ? <>A complete estimate is unavailable. SurfacedBy checks its quote against each engine's share before starting.</> : <>Estimated <strong>{usd(ask.totalUsd)}</strong>. Each paid engine receives an equal share of the limit.</>} {ask.paid.some(engine => engine.provider === 'dataforseo') && <>DataForSEO uses your saved estimate; its actual charge may differ. </>}Provider charges and refunds apply. No paid fallback.</>
-            : <>Uses your ChatGPT plan. Your plan limits apply.</>}</span>
+            : <>Uses your ChatGPT plan. Your plan limits apply.</>}
+            {ask.estimateExpiresAt && <> Price valid until {new Date(ask.estimateExpiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}. Prices refresh automatically; your spending limit still applies.</>}
+          </span>
+          {ask.paid.length > 0 && ask.totalUsd === null && !ask.estimating && ask.question.trim().length >= 3 && <button type="button" className="secondary" disabled={ask.busy} onClick={ask.refreshPrices}>Refresh prices</button>}
           <button type="submit" className="primary" disabled={ask.busy || !ask.choice.length || (ask.paid.length > 0 && (!ask.priced || ask.fit.overLimit))}><Search size={15} />{ask.busy ? 'Starting...' : askLabel}</button>
         </div>
       </form>

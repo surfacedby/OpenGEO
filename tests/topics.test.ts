@@ -294,7 +294,7 @@ test('legacy Campaign exports import as Topics and reject offsite targets withou
   } finally { f.close(); }
 });
 
-test('a topic check on SurfacedBy prices only the topic\'s questions and waits for approval', async () => {
+test('a saved selected-question topic check keeps its scope and waits for approval', async () => {
   const f = fixture();
   f.vault.set('console', { key: 'synthetic-console-credential' });
   const launch = topic('Launch', [prompts[2]]);
@@ -311,7 +311,7 @@ test('a topic check on SurfacedBy prices only the topic\'s questions and waits f
     else if (path.endsWith('/brand')) data = {};
     else if (path.endsWith('/measurement/estimate')) {
       estimated = body.questions.map((row: any) => row.question);
-      data = { id: randomUUID(), domain_id: domain, operation: 'measurement', estimated_credits: 4, expires_at: new Date(Date.now() + 3600000).toISOString() };
+      data = { id: randomUUID(), domain_id: domain, operation: 'measurement', estimated_credits: 4, estimated_usd: '0.40', expires_at: new Date(Date.now() + 3600000).toISOString() };
     } else { purchases++; data = {}; }
     response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ data }));
   });
@@ -320,6 +320,7 @@ test('a topic check on SurfacedBy prices only the topic\'s questions and waits f
   globalThis.fetch = ((url, init) => { const address = new URL(String(url)); return original('http://127.0.0.1:' + (server.address() as any).port + address.pathname.replace('/api/v1/console', '') + address.search, init); }) as typeof fetch;
   try {
     const job = f.store.enqueue(jobInput.parse({ projectId: project.id, kind: 'measure', provider: 'console', maxCostUsd: .5, topicId: launch.id }), 'console-scoped');
+    f.store.setStep(job.id, 'console-measurement-profile', 'done', 'selected_questions');
     await runner.tick();
     assert.deepEqual(estimated, [prompts[2]]);
     assert.equal(f.store.job(job.id).error, 'approval');

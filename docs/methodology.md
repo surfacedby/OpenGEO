@@ -27,7 +27,7 @@ Results can differ from a conversation in a chat app. Each public answer keeps i
 
 Citations come from returned source evidence, not guessed links in answer text. Requesting search does not prove it ran. The AI searches tab shows only searches reported with the answer, up to 20 per answer. Older answers without that evidence show no reported searches; OpenGEO does not invent them.
 
-Supported SurfacedBy selected-question checks preserve the approved question IDs, locale, original answers, citations and collection dates, then use local presence matching. They do not automatically purchase analysis. Failed or cancelled checks can retain answers already collected; full checks keep their separate pricing and analysis workflow.
+SurfacedBy visibility scans include analysis and recommendations. Ask uses selected-question measurement: it preserves the approved question, language, original answer, citations and collection date, then uses local presence matching. It does not buy full analysis. Older saved visibility runs that used selected-question measurement keep that original workflow when resumed; they are never silently replaced with a full scan. Failed or cancelled checks can retain answers already collected.
 
 ## Compare checks fairly
 
@@ -51,7 +51,7 @@ A target page is cited when an answer links to it. Each answer counts once per p
 
 ## Asks
 
-An ask sends one question, typed as a person would search it, to the engines you choose, and keeps each engine's answer with its surface, model, locale, date, searches and citations. It is scored with the same mention and citation rules as a check.
+An ask sends one question, typed as a person would search it, to the engines you choose. Each answer keeps its engine, language, date, reported searches and citations. It is scored with the same mention and citation rules as a check.
 
 **One-off answers stay separate from visibility measurements.** They do not enter Responses, Sources, rates, trends, findings or exports. An Ask uses the engines chosen for that question, rather than the consistent question list and settings needed to compare checks. The screen shows earlier answers to the same tracked question beside it so a single reading is not mistaken for a trend.
 
