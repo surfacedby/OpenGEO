@@ -191,6 +191,26 @@ try {
   );
   await page.locator(".visibility-chart circle[role=button]").first().focus();
   assert.match(await page.locator(".chart-readout").innerText(), /25\.0%/);
+  const mentionsLegend = page.getByRole('button', { name: /^Brand mentions / });
+  const citationsLegend = page.getByRole('button', { name: /^Website citations / });
+  await citationsLegend.click();
+  assert.equal(await citationsLegend.getAttribute('aria-pressed'), 'false');
+  assert.equal(await page.locator('.visibility-chart > svg path[fill="none"]').count(), 2);
+  await mentionsLegend.click();
+  assert.equal(await mentionsLegend.getAttribute('aria-pressed'), 'true', 'The last visible series stays visible');
+  await citationsLegend.click();
+  assert.equal(await page.locator('.visibility-chart > svg path[fill="none"]').count(), 4);
+  const exploreChecks = page.getByRole('slider', { name: 'Explore visibility checks' });
+  await exploreChecks.focus();
+  await exploreChecks.press('Home');
+  await exploreChecks.press('ArrowRight');
+  await exploreChecks.press('ArrowRight');
+  assert.match(await page.locator('.chart-readout').innerText(), /Incomplete check.*No comparable rate/);
+  await exploreChecks.press('End');
+  assert.match(await page.locator('.chart-readout').innerText(), /75\.0%/);
+  assert.equal(await page.locator('.chart-end-label').count(), 2);
+  await page.locator('.visibility-chart > svg').hover({ position: { x: 45, y: 90 } });
+  assert.match(await page.locator('.chart-readout').innerText(), /25\.0%/);
   await page.getByText("View chart data", { exact: true }).click();
   assert.equal(await page.locator(".chart-data tbody tr").count(), 5);
   assert.match(

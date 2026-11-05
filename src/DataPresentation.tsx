@@ -142,6 +142,7 @@ export function VisibilityChart({
 }) {
   const [selected, setSelected] = useState<string | null>(null),
     id = useId();
+  const [hiddenSeries, setHiddenSeries] = useState<string | null>(null);
   const history = presentation.history;
   const chartRef = useRef<SVGSVGElement>(null),
     [chartWidth, setChartWidth] = useState(600);
@@ -156,8 +157,10 @@ export function VisibilityChart({
   }, [history.length > 0]);
   const active =
     history.find((point) => point.jobId === selected) ?? history.at(-1);
+  const activeIndex = active ? history.indexOf(active) : 0;
+  const latest = history.at(-1);
   const left = 43,
-    right = chartWidth - 20,
+    right = chartWidth - 72,
     top = 18,
     bottom = 175;
   const start = history.length ? Date.parse(history[0].at) : 0;
@@ -172,6 +175,15 @@ export function VisibilityChart({
     { key: "mentionRate", label: "Brand mentions", color: "var(--mention)" },
     { key: "citationRate", label: "Website citations", color: "var(--citation)" },
   ] as const;
+  const visibleSeries = series.filter(s => s.key !== hiddenSeries);
+  const endLabels = visibleSeries.flatMap(s => latest?.[s.key] == null ? [] : [{ ...s, value: latest[s.key]!, position: y(latest[s.key]!) }]).sort((a, b) => a.position - b.position);
+  // Keep close end values legible without moving the actual measured points.
+  if (endLabels.length === 2 && endLabels[1].position - endLabels[0].position < 26) {
+    const middle = Math.max(top + 13, Math.min(bottom - 13, (endLabels[0].position + endLabels[1].position) / 2));
+    endLabels[0].position = middle - 13;
+    endLabels[1].position = middle + 13;
+  }
+  const gapLabel = (point: typeof history[number]) => point.topic ? `Topic check: ${point.topic}. Not comparable with the whole brand.` : 'Incomplete check. No comparable rate.';
   function segments(key: "mentionRate" | "citationRate") {
     const paths: { line: string; area: string }[] = [];
     let path = "", first = 0, last = 0;
@@ -199,10 +211,12 @@ export function VisibilityChart({
         <div className="visibility-chart">
           <div className="chart-legend">
             {series.map((s) => (
-              <span key={s.key}>
-                <i style={{ background: s.color }} />
+              <button key={s.key} type="button" aria-pressed={hiddenSeries !== s.key}
+                onClick={() => setHiddenSeries(current => current === s.key ? null : current === null ? s.key : current)}>
+                <i style={{ background: hiddenSeries === s.key ? 'var(--border-strong)' : s.color }} aria-hidden="true" />
                 {s.label}
-              </span>
+                <strong>{percent(latest?.[s.key] ?? null)}</strong>
+              </button>
             ))}
           </div>
           <svg
@@ -210,14 +224,21 @@ export function VisibilityChart({
             viewBox={`0 0 ${chartWidth} 205`}
             aria-labelledby={id}
             role="group"
+            onPointerMove={event => {
+              if (event.pointerType === 'touch' && !event.isPrimary) return;
+              const bounds = event.currentTarget.getBoundingClientRect();
+              const pointerX = (event.clientX - bounds.left) * chartWidth / bounds.width;
+              const nearest = history.reduce((best, _, index) => Math.abs(x(index) - pointerX) < Math.abs(x(best) - pointerX) ? index : best, 0);
+              setSelected(history[nearest].jobId);
+            }}
           >
             <title id={id}>
               Mention and citation rates in comparable checks. Percentages range
               from zero to one hundred. Missing checks are gaps.
             </title>
             <defs>{series.map(s => <linearGradient key={s.key} id={id + s.key} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" style={{ stopColor: s.color }} stopOpacity=".14" /><stop offset="100%" style={{ stopColor: s.color }} stopOpacity=".015" /></linearGradient>)}</defs>
-            {history.map((point, index) => point.mentionRate === null && point.citationRate === null ? <g key={point.jobId} className="chart-missing"><rect x={x(index) - 10} y={top} width="20" height={bottom - top} fill="var(--surface-3)" /><line x1={x(index)} x2={x(index)} y1={top} y2={bottom} stroke="var(--border-strong)" strokeDasharray="3 4" /><title>{dateTime(point.at)}: incomplete check, no comparable rate</title></g> : null)}
-            {[0, 25, 50, 75, 100].map((tick) => (
+            {history.map((point, index) => point.mentionRate === null && point.citationRate === null ? <g key={point.jobId} className="chart-missing"><rect x={x(index) - 8} y={top} width="16" height={bottom - top} fill="var(--surface-3)" /><line x1={x(index)} x2={x(index)} y1={top} y2={bottom} stroke="var(--border-strong)" strokeDasharray="3 4" /><title>{dateTime(point.at)}: {gapLabel(point)}</title></g> : null)}
+            {(chartWidth < 480 ? [0, 50, 100] : [0, 25, 50, 75, 100]).map((tick) => (
               <g key={tick}>
                 <line
                   x1={left}
@@ -231,14 +252,15 @@ export function VisibilityChart({
                 </text>
               </g>
             ))}
-            {series.map((s) => (
+            {active && <line className="chart-reading-guide" x1={x(activeIndex)} x2={x(activeIndex)} y1={top} y2={bottom} stroke="var(--border-strong)" strokeDasharray="3 4" aria-hidden="true" />}
+            {visibleSeries.map((s) => (
               <g key={s.key}>
                 {segments(s.key).map((path, index) => (
-                  <g key={index}><path d={path.area} fill={`url(#${id + s.key})`} /><path
+                  <g key={index}>{visibleSeries.length === 1 && <path d={path.area} fill={`url(#${id + s.key})`} />}<path
                     d={path.line}
                     fill="none"
                     style={{ stroke: s.color }}
-                    strokeWidth="2.5"
+                    strokeWidth={s.key === 'mentionRate' ? 3 : 2}
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   /></g>
@@ -285,6 +307,11 @@ export function VisibilityChart({
                 )}
               </g>
             ))}
+            {endLabels.map(s => <g key={s.key} className="chart-end-label" aria-label={`${s.label}, latest check: ${percent(s.value)}`}>
+              <line x1={x(history.length - 1) + 6} y1={y(s.value)} x2={right + 13} y2={s.position} stroke={s.color} strokeOpacity=".45" />
+              <rect x={right + 13} y={s.position - 11} width="52" height="22" rx="6" fill="var(--surface)" stroke="var(--border)" />
+              <text x={right + 39} y={s.position + 4} textAnchor="middle" style={{ fill: s.color }}>{percent(s.value)}</text>
+            </g>)}
             {axisLabels(history.map((_, index) => x(index))).map((index) => (
               <text
                 key={history[index].jobId}
@@ -305,12 +332,19 @@ export function VisibilityChart({
               <span>
                 Citations <strong>{percent(active.citationRate)}</strong>
               </span>
+              <small>{active.mentionRate === null && active.citationRate === null ? gapLabel(active) : `${active.collected} of ${active.requested} answers collected`}</small>
             </div>
           )}
+          {history.length > 1 && <label className="chart-scrubber">
+            <span>Explore checks <span>{activeIndex + 1} of {history.length}</span></span>
+            <input type="range" min="0" max={history.length - 1} step="1" value={activeIndex}
+              aria-label="Explore visibility checks" aria-valuetext={active ? `${dateTime(active.at)}. Mentions ${percent(active.mentionRate)}. Citations ${percent(active.citationRate)}.` : undefined}
+              onChange={event => setSelected(history[Number(event.target.value)].jobId)} />
+          </label>}
           <p className="chart-note">
             {history.length === 1
               ? "One check so far; recheck to see a trend."
-              : history.some(point => point.mentionRate === null || point.citationRate === null) ? "Comparable checks only. Shaded gaps mark incomplete checks, not a fall to zero." : "Comparable checks only. Select a point to see its results."}
+              : history.some(point => point.mentionRate === null || point.citationRate === null) ? "Gaps mark incomplete or differently scoped checks, not a fall to zero." : "Comparable checks only. Point to the chart or use the slider to explore."}
           </p>
           <details className="chart-data">
             <summary>

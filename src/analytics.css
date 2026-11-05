@@ -78,12 +78,22 @@
 .visibility-chart svg text { font: 12px var(--font); fill: var(--muted); }
 .visibility-chart circle { cursor: pointer; }
 .visibility-chart circle:focus-visible { outline: none; stroke: var(--ink); stroke-width: 3px; }
-.chart-legend { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 6px; font-size: 12px; color: var(--text); }
-.chart-legend span { display: flex; align-items: center; gap: 6px; }
-.chart-legend i { width: 10px; height: 3px; border-radius: 2px; }
-.chart-readout { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; padding: 8px 12px; background: var(--surface-2); border: 1px solid var(--divider); border-radius: var(--radius-md); margin: 10px 0; min-height: 36px; font-size: 13px; color: var(--muted); }
+.chart-legend { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; font-size: 12px; color: var(--text); }
+.chart-legend button { display: flex; align-items: center; gap: 8px; padding: 8px 10px; min-height: 36px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); text-align: left; }
+.chart-legend button:hover { background: var(--surface-2); }
+.chart-legend button[aria-pressed="false"] { color: var(--muted); background: var(--surface-2); }
+.chart-legend strong { font-weight: 600; margin-left: 4px; font-variant-numeric: tabular-nums; }
+.chart-legend i { width: 16px; height: 3px; border-radius: 2px; flex: none; }
+.chart-end-label text { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.chart-end-label { pointer-events: none; }
+.chart-readout { display: flex; gap: 8px 16px; flex-wrap: wrap; align-items: center; padding: 12px 0; border-top: 1px solid var(--divider); margin: 12px 0 0; min-height: 36px; font-size: 13px; color: var(--muted); }
 .chart-readout time { color: var(--text); font-weight: 500; }
 .chart-readout strong { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.chart-readout small { flex-basis: 100%; font-size: 12px; line-height: 1.5; }
+.chart-scrubber { display: grid; gap: 2px; margin: 0 0 8px; font-size: 12px; color: var(--muted); }
+.chart-scrubber > span { display: flex; justify-content: space-between; gap: 12px; }
+.chart-scrubber input { width: 100%; height: 28px; margin: 0; padding: 0; box-shadow: none; accent-color: var(--primary); cursor: pointer; }
+.chart-legend button:focus-visible, .chart-scrubber input:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
 .chart-note { font-size: 12px; color: var(--muted); line-height: 1.5; margin: 0 0 10px; }
 .chart-data { border-top: 1px solid var(--divider); font-size: 13px; margin: 0 -20px; padding: 4px 20px; }
 .chart-data td, .chart-data th { white-space: nowrap; }
