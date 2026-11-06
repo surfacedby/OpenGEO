@@ -56,9 +56,9 @@ export function AnswerColumn({ row, projectId, brand, domain, reload, askAgain }
             <span><strong>{targetDomain(citation.url)}</strong>{citation.title && <small>{citation.title}</small>}</span><ExternalLink size={11} /></a>
         </li>)}</ul> : <p className="ask-muted">This answer has no source links.</p>}
       </Disclosure></div>
-      <div className="ask-fold"><Disclosure label={`Searches it ran (${answer.searchQueries?.length ?? 0})`}>
-        {answer.searchQueries?.length ? <ul className="ask-searches">{answer.searchQueries.map(query => <li key={query}><Search size={12} /><code>{query}</code></li>)}</ul>
-          : <p className="ask-muted">{answer.provider === 'chatgpt' ? 'No searches were reported for this answer.' : 'This engine does not report its searches.'}</p>}
+      <div className="ask-fold"><Disclosure label={answer.searchQueries?.length ? `Reported searches (${answer.searchQueries.length})` : 'Reported searches'}>
+        {answer.searchQueries?.length ? <ul className="ask-searches">{answer.searchQueries.map((query, index) => <li key={index}><Search size={12} /><code>{query}</code></li>)}</ul>
+          : <p className="ask-muted">{answer.webSearchConfirmed ? 'This answer used web search, but no queries were reported.' : 'No search queries were reported for this answer.'}</p>}
       </Disclosure></div>
       <p className="ask-provenance">Collected {new Date(answer.observedAt).toLocaleString()}.</p>
     </>}

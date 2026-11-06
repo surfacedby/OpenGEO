@@ -13,6 +13,7 @@ const resultSchema = z.object({ job: managedJob, profile: z.literal("selected_qu
     status: z.enum(["collected", "missing_observation"]), platform: platformKey, locale: z.string().max(40),
     country: z.string().regex(/^[A-Z]{2}$/).nullable(), surface: z.enum(['api', 'consumer_interface', 'unknown']).optional(),
     answer: z.string().max(100000).nullable(), model: z.string().max(500).nullable().optional(), observed_at: z.string().datetime({ offset: true }),
+    web_search_used: z.boolean().nullable().optional(), search_queries: z.array(z.string().min(1)).optional(),
     citations: z.array(z.object({ url: z.string().max(2048).refine(value => { try { publicUrl(value); return true; } catch { return false; } }),
       title: z.string().max(1000).nullable().optional() })).max(100) })).max(100) });
 type Input = { questions: { id: string; question: string }[]; platform: string; locale: string; country: string | null };
@@ -33,6 +34,8 @@ function save(runner: Runner, job: Job, project: Project, input: Input, output: 
     observations.push({ id: row.id, projectId: project.id, jobId: job.id, provider: "console",
       prompt: row.question, answer: row.answer!, citations, platform: job.platform, model: row.model || "not-disclosed",
       locale: row.locale, surface: row.surface ?? "unknown", observedAt: row.observed_at,
+      ...(typeof row.web_search_used === 'boolean' ? { webSearchConfirmed: row.web_search_used } : {}),
+      ...(row.search_queries ? { searchQueries: row.search_queries } : {}),
       ...presence(project, row.answer!, citations.map(source => source.url)), costUsd: null });
   }
   const result = { metrics: summarize(observations, input.questions.length),

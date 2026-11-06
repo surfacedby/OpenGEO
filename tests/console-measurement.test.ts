@@ -12,6 +12,8 @@ import { Connections } from "../server/oauth.js";
 import { Providers } from "../server/providers.js";
 import { Runner } from "../server/workflows.js";
 import { jobInput, projectInput } from "../server/contracts.js";
+import { exportProject } from "../server/export.js";
+import { importProject } from "../server/import.js";
 
 for (const scenario of ["lost_ack", "changed_receipt", "foreign_question", "cancel", "cancel_receipt", "cancel_completed", "subcredit_budget"] as const) {
   test("selected-question measurement preserves approval and evidence: " + scenario, async () => {
@@ -60,6 +62,8 @@ for (const scenario of ["lost_ack", "changed_receipt", "foreign_question", "canc
             question: question.question, status: index === 1 ? "missing_observation" : "collected", platform: input.platform,
             locale: input.locale, country: input.country, surface: "consumer_interface", model: "measured-model",
             answer: index === 1 ? null : "Example helps teams share reports.",
+            web_search_used: index === 1 ? null : scenario === 'changed_receipt' ? false : scenario === 'lost_ack' ? true : null,
+            search_queries: index === 1 ? [] : ['report sharing', 'report sharing', 'q'.repeat(501), ...Array.from({ length: 21 }, (_, i) => 'report tool ' + i)],
             citations: index === 1 ? [] : [{ url: "https://example.com/reports", title: "Sharing reports" }],
             observed_at: "2026-10-08T08:00:00Z" })) };
       } else { assert.equal(path, "/jobs/" + remote); data = accepted; }
@@ -108,9 +112,14 @@ for (const scenario of ["lost_ack", "changed_receipt", "foreign_question", "canc
       assert.equal(observations.length, 1); assert.equal(observations[0].prompt, prompts[0]);
       assert.equal(observations[0].observedAt, "2026-10-08T08:00:00Z");
       assert.equal(observations[0].surface, "consumer_interface"); assert.equal(observations[0].costUsd, null);
+      assert.equal(observations[0].webSearchConfirmed, scenario === 'changed_receipt' ? false : scenario === 'lost_ack' ? true : undefined);
+      assert.deepEqual(observations[0].searchQueries, ['report sharing', 'report sharing', 'q'.repeat(501), ...Array.from({ length: 21 }, (_, i) => 'report tool ' + i)]);
       assert.deepEqual((store.job(job.id).result as any).metrics,
         { requested: 2, completed: 1, missing: 1, mentionRate: 100, citationRate: 100, citations: 1 });
       assert.equal(store.findings(project.id).length, 0);
+      const restored = importProject(store, exportProject(store, project.id));
+      assert.deepEqual(store.observations(restored.project.id)[0].searchQueries, observations[0].searchQueries);
+      assert.equal(store.observations(restored.project.id)[0].webSearchConfirmed, observations[0].webSearchConfirmed);
       await runner.tick(); assert.equal(purchases, 1);
     } finally {
       globalThis.fetch = original; connections.close(); await runner.stop(); store.close();
