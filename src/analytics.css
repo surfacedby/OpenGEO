@@ -179,7 +179,8 @@
 .answer-sources a { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); min-height: 50px; color: var(--text); }
 .answer-sources a:hover { border-color: var(--primary-200); text-decoration: none; background: var(--primary-50); }
 .answer-sources a > span:not(.site-icon) { display: grid; gap: 1px; min-width: 0; flex: 1; }
-.answer-sources strong { font-size: 13px; font-weight: 500; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.answer-source-heading { margin: 0 0 8px; font-size: var(--text-body); font-weight: 600; color: var(--ink); }
+.answer-sources strong { font-size: 13px; font-weight: 500; color: var(--ink); overflow-wrap: anywhere; }
 .answer-sources small { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .answer-sources a > svg { flex: none; color: var(--faint); }
 .answer-provenance { font-size: 12px; color: var(--muted); }

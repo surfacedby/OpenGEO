@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { withoutEvidenceList } from './finding-text.js';
 import { Store } from "./storage.js";
-import { Providers, safeCitations } from "./providers.js";
+import { Providers, safeCitations, otherSearchLinks } from "./providers.js";
 import { crawl, auditFindings, type CrawlPolicies } from "./audit.js";
 import { renderedFetch } from "./render.js";
 import { CrawlBackoff, CrawlDeferred, crawlFetch, publicUrl, sameSiteHost } from "./network.js";
@@ -471,6 +471,9 @@ export class Runner {
             observedAt: new Date().toISOString(),
             answer: result.text,
             citations: result.citations,
+            retrievedSources: result.retrievedSources,
+            webSearchConfirmed: result.webSearchConfirmed,
+            searchQueries: result.searchQueries,
             surface: "api",
             ...presence(
               project,
@@ -1279,6 +1282,7 @@ export class Runner {
             observedAt: row.observed_at ?? state.completed_at,
             answer: row.answer_text,
             citations,
+            retrievedSources: otherSearchLinks(row.retrieved_sources, citations),
             surface: ["api", "consumer_interface"].includes(row.surface) ? row.surface : "unknown",
             mentioned: ["cited", "named"].includes(row.presence),
             cited: row.presence === "cited",

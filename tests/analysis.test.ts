@@ -25,6 +25,10 @@ test("recheck comparisons reject changed collection scope and incomplete evidenc
   } as Job;
   const obs = [{ model: "m", prompt: "A question?" }] as Observation[];
   const key = comparisonKey(project, job, obs);
+  const perplexity = { ...obs[0], provider: 'dataforseo' as const, platform: 'perplexity' };
+  assert.notEqual(comparisonKey(project, job, [perplexity]), comparisonKey(project, job, [{ ...perplexity, retrievedSources: [] }]));
+  assert.equal(comparisonKey(project, job, [{ ...perplexity, retrievedSources: [] }]),
+    comparisonKey(project, job, [{ ...perplexity, retrievedSources: [{ url: 'https://example.org/guide' }] }]));
   assert.notEqual(
     key,
     comparisonKey({ ...project, locale: "fr-FR" }, job, obs),

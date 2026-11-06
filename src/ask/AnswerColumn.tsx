@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { ExternalLink, LoaderCircle, Search } from 'lucide-react';
+import { LoaderCircle, Search } from 'lucide-react';
 import { markdownHtml } from '../../server/markdown';
 import { api } from '../api';
 import { targetDomain } from '../finding-groups';
 import { usd } from '../format';
 import { ProviderIcon } from '../provider-ui';
-import { SiteIcon } from '../SiteIcon';
+import { AnswerSources } from '../AnswerSources';
 import { Disclosure } from '../ui/Primitives';
 import type { AskEngine } from './useAsk';
 
@@ -50,11 +50,8 @@ export function AnswerColumn({ row, projectId, brand, domain, reload, askAgain }
         <div className={answer.cited ? 'ask-mark cited' : 'ask-mark missing'}><span>{domain}</span><strong>{answer.cited ? 'Cited' : 'Not cited'}</strong></div>
       </div>
       <div className="ask-answer-text" lang={answer.locale} dangerouslySetInnerHTML={{ __html: markdownHtml(answer.answer) }} />
-      <div className="ask-fold"><Disclosure label={`Sources (${sources.length})`} defaultOpen>
-        {sources.length ? <ul className="ask-sources">{sources.map((citation, index) => <li key={index}>
-          <a href={citation.url} target="_blank" rel="noreferrer"><SiteIcon projectId={projectId} domain={targetDomain(citation.url)!} size={16} />
-            <span><strong>{targetDomain(citation.url)}</strong>{citation.title && <small>{citation.title}</small>}</span><ExternalLink size={11} /></a>
-        </li>)}</ul> : <p className="ask-muted">This answer has no source links.</p>}
+      <div className="ask-fold"><Disclosure label="Sources" defaultOpen>
+        <AnswerSources projectId={projectId} citations={sources} retrieved={answer.retrievedSources} />
       </Disclosure></div>
       <div className="ask-fold"><Disclosure label={answer.searchQueries?.length ? `Reported searches (${answer.searchQueries.length})` : 'Reported searches'}>
         {answer.searchQueries?.length ? <ul className="ask-searches">{answer.searchQueries.map((query, index) => <li key={index}><Search size={12} /><code>{query}</code></li>)}</ul>

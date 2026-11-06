@@ -78,6 +78,7 @@ export type Observation = {
   observedAt: string;
   answer: string;
   citations: Citation[];
+  retrievedSources?: Citation[];
   surface: "api" | "consumer_interface" | "unknown";
   retrieval?: "web_search" | "model_only" | "provider_managed";
   webSearchConfirmed?: boolean;

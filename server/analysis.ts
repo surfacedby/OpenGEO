@@ -48,6 +48,10 @@ export function comparisonKey(
   job: Job,
   observations: Observation[] = [],
 ) {
+  // Earlier Perplexity checks counted the whole search pool. Compare citation
+  // rates only when the same prompts used the numbered-reference method.
+  const numberedPrompts = observations.filter(row => row.provider === 'dataforseo' &&
+    row.platform === 'perplexity' && row.retrievedSources !== undefined).map(row => row.prompt).sort();
   return createHash("sha256")
     .update(
       JSON.stringify({
@@ -63,6 +67,7 @@ export function comparisonKey(
         observedPrompts: [...new Set(observations.map((o) => o.prompt))].sort(),
         surfaces: [...new Set(observations.map((o) => o.surface ?? "unknown"))].sort(),
         retrieval: [...new Set(observations.map((observation) => observation.retrieval ?? "provider_managed"))].sort(),
+        ...(numberedPrompts.length ? { numberedPrompts } : {}),
         webSearchConfirmed: [...new Set(observations.filter((observation) => observation.provider === "chatgpt").map((observation) => observation.webSearchConfirmed === true))].sort(),
       }),
     )

@@ -24,6 +24,7 @@ test('topics, actual searches, persistent progress and safe outside dismissal', 
   try {
     const job = store.enqueue(jobInput.parse({ projectId: project.id, kind: 'measure', provider: 'chatgpt' }), randomUUID());
     const observation: Observation = { id: randomUUID(), projectId: project.id, jobId: job.id, prompt: project.prompts[0], provider: 'chatgpt', platform: 'chat_gpt', model: 'synthetic-test-model', locale: 'en-US', observedAt: new Date().toISOString(), answer: 'Synthetic test evidence: example domains are reserved for documentation.', citations: [{ url: 'https://iana.org/domains/reserved', title: 'Reserved domains' }, { url: 'https://example.com/docs/start', title: 'Example documentation' }], surface: 'api', retrieval: 'web_search', webSearchConfirmed: true, searchQueries: ['example domains documentation'], mentioned: false, cited: true, costUsd: 0 };
+    observation.retrievedSources = [{ url: 'https://example.org/background', title: 'Background reading' }];
     store.put('observation', project.id, job.id, observation);
     store.setStep(job.id, 'project', 'done', project);
     store.updateJob(job.id, { status: 'completed', requestedAnswers: 1, result: { metrics: summarize([observation], 1), comparisonKey: comparisonKey(project, job, [observation]), references: [{ name: 'Example reference', domain: 'iana.org', role: 'reference', observationIds: [observation.id], reason: 'Synthetic reference classification for browser testing.', category: 'organization', categoryEvidence: { observationId: observation.id, source: 'citation', url: 'https://iana.org/domains/reserved', quote: 'Reserved domains' } }] } });
@@ -75,6 +76,8 @@ test('topics, actual searches, persistent progress and safe outside dismissal', 
     await drawer.getByRole('tab', { name: /Searches/ }).click();
     await expect(drawer.getByRole('tabpanel', { name: 'Searches', exact: true })).toContainText('example domains documentation');
     await drawer.getByRole('tab', { name: /Sources/ }).click();
+    await drawer.getByText('Retrieved without a citation (1)', { exact: true }).click();
+    await expect(drawer.getByRole('link', { name: /Background reading/ })).toHaveAttribute('href', 'https://example.org/background');
     await page.screenshot({ path: join(output, 'synthetic-answer-drawer.png') });
     await drawer.getByRole('tab', { name: 'Answer', exact: true }).click();
     await drawer.getByText(observation.answer, { exact: true }).click();

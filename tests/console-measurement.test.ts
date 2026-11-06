@@ -65,6 +65,9 @@ for (const scenario of ["lost_ack", "changed_receipt", "foreign_question", "canc
             web_search_used: index === 1 ? null : scenario === 'changed_receipt' ? false : scenario === 'lost_ack' ? true : null,
             search_queries: index === 1 ? [] : ['report sharing', 'report sharing', 'q'.repeat(501), ...Array.from({ length: 21 }, (_, i) => 'report tool ' + i)],
             citations: index === 1 ? [] : [{ url: "https://example.com/reports", title: "Sharing reports" }],
+            retrieved_sources: index === 1 ? null : scenario === 'lost_ack' ? undefined : [
+              { url: "https://research.example.org/tools", title: "Research tools", secret: "internal" },
+              { url: "https://example.com/reports" }, { url: "http://127.0.0.1" }, { url: "javascript:bad" }],
             observed_at: "2026-10-08T08:00:00Z" })) };
       } else { assert.equal(path, "/jobs/" + remote); data = accepted; }
       response.setHeader("Content-Type", "application/json"); response.end(JSON.stringify({ data, ...(meta ? { meta } : {}) }));
@@ -117,7 +120,10 @@ for (const scenario of ["lost_ack", "changed_receipt", "foreign_question", "canc
       assert.deepEqual((store.job(job.id).result as any).metrics,
         { requested: 2, completed: 1, missing: 1, mentionRate: 100, citationRate: 100, citations: 1 });
       assert.equal(store.findings(project.id).length, 0);
+      assert.deepEqual(observations[0].retrievedSources, scenario === 'lost_ack' ? undefined :
+        [{ url: "https://research.example.org/tools", title: "Research tools" }]);
       const restored = importProject(store, exportProject(store, project.id));
+      assert.deepEqual(store.observations(restored.project.id)[0].retrievedSources, observations[0].retrievedSources);
       assert.deepEqual(store.observations(restored.project.id)[0].searchQueries, observations[0].searchQueries);
       assert.equal(store.observations(restored.project.id)[0].webSearchConfirmed, observations[0].webSearchConfirmed);
       await runner.tick(); assert.equal(purchases, 1);

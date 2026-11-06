@@ -31,6 +31,12 @@ SurfacedBy visibility scans include analysis and recommendations. Ask uses selec
 
 ## Compare checks fairly
 
+In a response, **Retrieved without a citation** lists additional pages the engine
+reported finding. Those pages earn no citation credit. For Perplexity checks with
+a numbered source list, OpenGEO matches references such as `[3]` to the original
+list before filtering duplicate links. When no reference matches a position, the
+answer keeps its reported source annotations and the split is unavailable.
+
 Use the same brand identity, aliases, question list, language, connection and answer settings. OpenGEO keeps a private comparison record for that scope, including available search evidence. A change of settings starts a separate comparison. Exported history keeps its comparison digest; imported answers without private settings are not assumed to match a new check.
 
 The history chart uses actual check timestamps. Incomplete checks create gaps; one check is a point rather than a trend. The underlying counts and timestamps remain available in an accessible table.

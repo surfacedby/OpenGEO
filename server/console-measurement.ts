@@ -6,6 +6,7 @@ import { publicUrl } from "./network.js";
 import { managedJob, consoleManaged, managedStep, validateManagedResult } from "./console-managed.js";
 import type { Runner } from "./workflows.js";
 import { platformKey } from './platforms.js';
+import { otherSearchLinks } from './providers.js';
 
 const resultSchema = z.object({ job: managedJob, profile: z.literal("selected_questions"),
   requested_answers: z.number().int().min(1).max(100), locale: z.string().max(40), platform: platformKey,
@@ -14,7 +15,8 @@ const resultSchema = z.object({ job: managedJob, profile: z.literal("selected_qu
     country: z.string().regex(/^[A-Z]{2}$/).nullable(), surface: z.enum(['api', 'consumer_interface', 'unknown']).optional(),
     answer: z.string().max(100000).nullable(), model: z.string().max(500).nullable().optional(), observed_at: z.string().datetime({ offset: true }),
     web_search_used: z.boolean().nullable().optional(), search_queries: z.array(z.string().min(1)).optional(),
-    citations: z.array(z.object({ url: z.string().max(2048).refine(value => { try { publicUrl(value); return true; } catch { return false; } }),
+    retrieved_sources: z.array(z.unknown()).nullish(),
+    citations: z.array(z.object({ url: z.string().url().max(2048).refine(value => { try { publicUrl(value); return true; } catch { return false; } }),
       title: z.string().max(1000).nullable().optional() })).max(100) })).max(100) });
 type Input = { questions: { id: string; question: string }[]; platform: string; locale: string; country: string | null };
 
@@ -36,6 +38,7 @@ function save(runner: Runner, job: Job, project: Project, input: Input, output: 
       locale: row.locale, surface: row.surface ?? "unknown", observedAt: row.observed_at,
       ...(typeof row.web_search_used === 'boolean' ? { webSearchConfirmed: row.web_search_used } : {}),
       ...(row.search_queries ? { searchQueries: row.search_queries } : {}),
+      retrievedSources: otherSearchLinks(row.retrieved_sources, citations),
       ...presence(project, row.answer!, citations.map(source => source.url)), costUsd: null });
   }
   const result = { metrics: summarize(observations, input.questions.length),

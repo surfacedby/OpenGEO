@@ -54,6 +54,7 @@ const observation = z
     observedAt: date,
     answer: z.string(),
     citations: z.array(citation),
+    retrievedSources: z.array(citation).optional(),
     surface: z.enum(["api", "consumer_interface", "unknown"]).default('unknown'),
     retrieval: z.enum(["web_search", "model_only", "provider_managed"]).optional(),
     webSearchConfirmed: z.boolean().optional(),

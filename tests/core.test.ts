@@ -15,6 +15,31 @@ import {jobInput,projectInput,ProviderError} from '../server/contracts.js';
 import {presence,summarize} from '../server/analysis.js';
 import {isPublicIp,publicUrl} from '../server/network.js';
 import {parseDfs} from '../server/providers.js';
+
+test('Perplexity citation numbers refer to the original pool before URL filtering or deduplication', () => {
+  const annotations = [
+    { url: 'javascript:bad' }, { url: 'https://brand.example/background', title: 'Background' },
+    { url: 'https://reference.example', title: 'Reference', private: 'internal' },
+    { url: 'https://reference.example/' }, { url: 'https://brand.example/background' },
+  ];
+  const response = (text: string) => ({ status_code: 20000, tasks: [{ status_code: 20000, result: [{
+    model_name: 'fixture', web_search: true, fan_out_queries: [' one ', 'one', null],
+    items: [null, { sections: [null, { type: 'text', text: { private: true } }, { type: 'text', text, annotations }] }],
+  }] }] });
+  const answer = parseDfs(response('A useful reference [3][3][90].'), 'perplexity');
+  assert.equal(answer.text, 'A useful reference [3][3][90].');
+  assert.deepEqual(answer.citations, [{ url: 'https://reference.example', title: 'Reference' }]);
+  assert.deepEqual(answer.retrievedSources, [{ url: 'https://brand.example/background', title: 'Background' }]);
+  assert.deepEqual(answer.searchQueries, ['one', 'one']);
+  assert.equal(answer.webSearchConfirmed, true);
+  assert.equal(presence({ brand: 'Brand Ltd', aliases: [], domain: 'brand.example' } as any,
+    answer.text, answer.citations.map(source => source.url)).cited, false);
+  for (const [platform, text] of [['perplexity', 'No indexed citation [90].'], ['claude', 'Reference [3].']]) {
+    const unknown = parseDfs(response(text), platform);
+    assert.equal(unknown.citations.length, 2);
+    assert.equal(unknown.retrievedSources, undefined);
+  }
+});
 import {exportProject} from '../server/export.js';
 import {lockRuntime} from '../server/runtime-lock.js';
 function fixture(){const dir=mkdtempSync(join(tmpdir(),'opengeo-test-'));const store=new Store(dir);return {dir,store,close(){store.close();rmSync(dir,{recursive:true,force:true})}}}

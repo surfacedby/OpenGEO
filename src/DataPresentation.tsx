@@ -11,6 +11,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { SiteIcon } from "./SiteIcon";
+import { AnswerSources } from './AnswerSources';
 import { markdownHtml, markdownSummary } from '../server/markdown';
 import { targetDomain } from './finding-groups';
 import { FileText, ListChecks, Braces } from "lucide-react";
@@ -720,7 +721,7 @@ export function AnswerCard({ observation: o }: { observation: Observation }) {
   const [detailTab, setDetailTab] = useState<'answer' | 'sources' | 'searches'>('answer');
   const detailId = useId();
   const sources = o.citations.filter((c) => targetDomain(c.url));
-  const searches = [...new Set(o.searchQueries ?? [])];
+  const searches = o.searchQueries ?? [];
   const domains = [...new Set(sources.map((c) => targetDomain(c.url)!))];
   return (
     <article className="answer compact-answer">
@@ -742,21 +743,11 @@ export function AnswerCard({ observation: o }: { observation: Observation }) {
       <button className="text-button answer-open" onClick={() => { setDetailTab('answer'); setOpen(true); }}>Read full answer and sources <ArrowRight size={14} /></button>
       {open && <Dialog title="Answer and sources" close={() => setOpen(false)} variant="drawer"><div className="answer-reader">
         <div className="answer-reader-heading"><span><ProviderIcon provider={o.platform} size={20} />{platformLabel(o.platform)}<time dateTime={o.observedAt}>{dateTime(o.observedAt)}</time></span><h3>{o.prompt}</h3><p>{o.cited ? 'This answer links to your website.' : o.mentioned ? 'This answer names your brand without linking to your website.' : 'Your brand was not detected in this answer.'}</p></div>
-        <Tabs label="Answer details" panelId={detailId} value={detailTab} onChange={setDetailTab} items={[{ value: 'answer', label: 'Answer', icon: FileText }, { value: 'sources', label: 'Sources', icon: Link, count: sources.length }, { value: 'searches', label: 'Searches', icon: Search, count: searches.length }]} />
+        <Tabs label="Answer details" panelId={detailId} value={detailTab} onChange={setDetailTab} items={[{ value: 'answer', label: 'Answer', icon: FileText }, { value: 'sources', label: 'Sources', icon: Link, count: sources.length + (o.retrievedSources?.length ?? 0) }, { value: 'searches', label: 'Searches', icon: Search, count: searches.length || undefined }]} />
         <div className="answer-detail-panel" id={detailId} role="tabpanel" aria-label={detailTab === 'answer' ? 'Answer' : detailTab === 'sources' ? 'Sources' : 'Searches'}>
         {detailTab === 'answer' ? <div className="document-preview answer-document" lang={o.locale} dir={['ar', 'fa', 'he', 'ur'].includes(o.locale.split('-')[0]) ? 'rtl' : 'ltr'} dangerouslySetInnerHTML={{ __html: markdownHtml(o.answer) }} /> : detailTab === 'sources' ? <>
-        {!sources.length && <p>This answer contains no source links. Its claims still need independent verification.</p>}
-        <ul className="answer-sources">
-          {sources.map((c, index) => (
-            <li key={index}>
-              <a href={c.url} target="_blank" rel="noreferrer">
-                <SiteIcon projectId={o.projectId} domain={targetDomain(c.url)!} size={24} />
-                <span><strong>{c.title || targetDomain(c.url)}</strong>{c.title && <small>{targetDomain(c.url)}</small>}</span>
-                <ExternalLink size={12} />
-              </a>
-            </li>
-          ))}
-        </ul></> : <><p>Search queries reported by the AI provider for this answer.</p>{searches.length ? <ul className="answer-searches">{searches.map(query => <li key={query}><Search size={15} aria-hidden="true" /><span>{query}</span></li>)}</ul> : <p>No search queries were reported. This does not establish whether web search was used.</p>}</>}
+        <AnswerSources projectId={o.projectId} citations={sources} retrieved={o.retrievedSources} />
+        </> : <>{searches.length ? <ul className="answer-searches">{searches.map((query, index) => <li key={index}><Search size={15} aria-hidden="true" /><span>{query}</span></li>)}</ul> : <p>{o.webSearchConfirmed ? 'This answer used web search, but no queries were reported.' : 'No search queries were reported for this answer.'}</p>}</>}
         </div>
       </div></Dialog>}
     </article>
