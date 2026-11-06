@@ -142,6 +142,8 @@ try {
   // The expired-price button can appear during the request debounce; observe the automatic response before judging refresh.
   await page.waitForResponse(response => response.url().endsWith('/asks/estimate') && response.request().postDataJSON()?.question === pricingQuestion);
   await modal.getByRole('button', { name: 'Refresh prices', exact: true }).waitFor();
+  await modal.getByRole('status').filter({ hasText: "couldn't confirm a price" }).waitFor();
+  assert.ok(await modal.getByRole('button', { name: 'Ask 3 engines', exact: true }).isDisabled());
   assert.ok(quoteRequests > beforeRefresh, 'Expired estimates refresh without editing the question');
   quoteLifetime = 3600000;
   await modal.getByRole('button', { name: 'Refresh prices', exact: true }).click();

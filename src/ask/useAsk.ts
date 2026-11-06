@@ -96,7 +96,9 @@ export function useAskController(projectId: string | undefined, onAsked: (askId:
   const limitUsd = Number(limit);
   const fit = askFit(Number.isFinite(limitUsd) ? limitUsd : 0, paid.map(engine => priceOf(engine.id)));
   const totalUsd = paid.length ? (current ? current.totalUsd : null) : 0;
-  const priced = !paid.length || (!!current && !estimating);
+  const blockedQuote = current?.engines.find(row => 'blocked' in row && row.blocked);
+  const quoteNotice = blockedQuote && 'note' in blockedQuote ? blockedQuote.note : undefined;
+  const priced = !paid.length || (!!current && !estimating && !blockedQuote);
 
   async function submit(requested?: string[]) {
     if (submitting.current) return;
@@ -129,7 +131,7 @@ export function useAskController(projectId: string | undefined, onAsked: (askId:
   }
   return {
     catalog, ensureCatalog, question, setQuestion, choice, setChoice, limit, setLimit, open, setOpen, error, setError, busy,
-    chosen, paid, priceOf, fit, totalUsd, estimating, priced, freeChoice, submit, estimateExpiresAt: current?.expiresAt ?? null,
+    chosen, paid, priceOf, fit, totalUsd, estimating, priced, quoteNotice, freeChoice, submit, estimateExpiresAt: current?.expiresAt ?? null,
     refreshPrices: () => { setEstimate(null); setError(''); setPriceRevision(value => value + 1); },
     toggle: (id: string) => setChoice(list => list.includes(id) ? list.filter(item => item !== id) : [...list, id]),
     /** Opens settings with a question and engines filled in, for example to ask again with a higher limit. */

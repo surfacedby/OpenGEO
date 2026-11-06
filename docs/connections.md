@@ -45,7 +45,11 @@ Engine availability comes from your connected account. Full checks and single-qu
 
 ## Spending, pauses and cancellation
 
-An ask uses ChatGPT on your plan by default; your plan limits apply. Choose paid engines explicitly for each ask. One spending limit covers the selected engines together. OpenGEO checks their estimates before starting, allocates enough for each quoted answer, then shares any remaining approval. For example, answers estimated at $0.10 and $0.30 fit a $0.40 limit. If the known estimates exceed your limit, nothing starts. An unavailable price is checked against that engine's saved budget before SurfacedBy submits work. DataForSEO uses your saved per-request estimate, so its actual charge can differ; OpenGEO records the reported cost and stops further work if it exceeds the limit. Provider charges and refunds apply. After an ask, selection returns to ChatGPT on your plan.
+Ask uses your ChatGPT plan by default. Choose paid engines for each question. One spending limit covers them together. For example, two answers quoted at $0.10 and $0.30 fit a $0.40 limit.
+
+For a website already connected to SurfacedBy, OpenGEO checks each selected engine's quote before starting the group. If a quote fails, refresh prices, edit the question or deselect that engine. For a website that still needs to be registered, SurfacedBy checks the price after registration and before buying the answer. Each engine stays within its allocated approval for SurfacedBy work.
+
+Your direct DataForSEO connection uses your saved per-request estimate. Its actual charge can differ. OpenGEO records the reported cost and stops further work if it exceeds the limit. After an ask, selection returns to your ChatGPT plan.
 
 SurfacedBy prices come from the connected service. When it supplies a single-answer price menu, Ask shows each engine's maximum price before you type. Estimates are free. After you enter your question, Ask shows the current quote's dollar amount and expiry, refreshes expired quotes, and lets you retry an unavailable price. Execution checks a current quote against your approved limit and reserves only that quoted maximum. A $0.10 quote under a $1 limit holds $0.10, leaving the rest of your credit available. Unused reserved credits are returned when the final charge is confirmed. The original valuation and reservation stay with the run for its charge and refund; an app update or later price change does not rewrite its receipt.
 

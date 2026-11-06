@@ -112,7 +112,7 @@ export async function estimateAsk(deps: AskDeps, projectId: string, body: unknow
   const catalog = await engineCatalog(deps);
   const engines = await Promise.all(input.engines.map(async id => {
     const engine = catalog.engines.find(row => row.id === id);
-    if (!engine?.available) return { id, estimateUsd: null, note: engine?.reason ?? 'This engine is not available on your connection.' };
+    if (!engine?.available) return { id, estimateUsd: null, blocked: true, note: engine?.reason ?? 'This engine is not available on your connection.' };
     return { id, ...await quoteEngine(deps, project, input.question, engine) };
   }));
   const known = engines.every(row => row.estimateUsd !== null);
@@ -128,7 +128,10 @@ async function quoteEngine(deps: AskDeps, project: Project, text: string, engine
     return { estimateUsd: estimate > 0 ? estimate : null };
   }
   try { return await surfacedByQuote(deps, project, text, engine.platform); }
-  catch { return { estimateUsd: null, note: 'SurfacedBy did not return a price. It is checked again when the ask starts.' }; }
+  catch {
+    return { estimateUsd: null, blocked: true,
+      note: `SurfacedBy couldn't confirm a price for ${engine.label}. Refresh prices, edit your question or deselect that engine.` };
+  }
 }
 
 /** Recheck estimates before atomically saving the shared approval. Execution still enforces each saved limit. */
@@ -150,6 +153,9 @@ export async function createAsk(deps: AskDeps, projectId: string, body: unknown,
   const paid = chosen.filter(engine => engine.price !== "free");
   if (paid.length && input.maxCostUsd <= 0) throw new ProviderError("budget", "Set a spending limit to ask paid engines. Nothing was started.");
   const quotes = await Promise.all(paid.map(engine => quoteEngine(deps, project, input.question, engine)));
+  for (const quote of quotes) {
+    if ('blocked' in quote && quote.blocked) throw new ProviderError('estimate', quote.note);
+  }
   const fit = askFit(input.maxCostUsd, quotes.map(quote => quote.estimateUsd));
   if (fit.overLimit) throw new ProviderError('budget', 'The selected engines exceed your spending limit. Review the estimates or choose fewer engines. Nothing was started.');
   const limits = new Map(paid.map((engine, index) => [engine.id, fit.limitsUsd[index]]));

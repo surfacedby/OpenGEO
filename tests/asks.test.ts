@@ -26,7 +26,7 @@ type Fake = {
   gate?: Promise<void>; gated?: string; estimates: any[]; purchases: any[]; openai: string[];
   advertised?: { key: string; name: string; enabled: boolean }[]; publicResults?: boolean;
   quotedUsd?: string; quoteExpiry?: Record<string, string>; creditsByPlatform?: Record<string, number>;
-  waiting?: boolean; balanceCredits?: number;
+  waiting?: boolean; balanceCredits?: number; rejectedPlatform?: string;
 };
 function fakeProviders(state: Fake) {
   const domain = randomUUID(), quotes = new Map<string, any>(), remote = new Map<string, any>();
@@ -56,6 +56,8 @@ function fakeProviders(state: Fake) {
     if (path === '/domains') return json({ data: state.domainKnown ? [{ id: domain, domain: 'example.com' }] : [], meta: {} });
     if (path.endsWith('/brand')) return json({ data: {} });
     if (path.endsWith('/measurement/estimate')) {
+      if (body.platform === state.rejectedPlatform)
+        return json({ type: 'https://docs.surfacedby.com/errors#validation_error', detail: 'Question unsupported' }, 422);
       const id = randomUUID(); quotes.set(id, body); state.estimates.push(body);
       const credits = state.creditsByPlatform?.[body.platform] ?? state.credits;
       return json({ data: { id, domain_id: domain, operation: 'measurement', estimated_credits: credits,
@@ -328,6 +330,30 @@ test('a changed execution quote cannot spend beyond the monetary approval', asyn
     assert.equal(f.store.job(jobs[0]).error, 'budget');
     assert.equal(f.state.purchases.length, 0);
     assert.equal(f.store.job(jobs[0]).spentUsd, 0);
+  } finally { await f.close(); }
+});
+
+test('a refused engine quote leaves the whole Ask unstarted, including after a valid preview', async () => {
+  const f = await fixture();
+  try {
+    const engines = ['chatgpt', 'surfacedby-chatgpt', 'surfacedby-gemini'];
+    const preview = () => f.app.inject({ method: 'POST', url: `/api/projects/${f.project.id}/asks/estimate`,
+      headers, payload: { question, engines } });
+    assert.equal((await preview()).json().totalUsd, .2);
+    f.state.rejectedPlatform = 'gemini';
+    const denied = (await f.ask({ question, engines, maxCostUsd: 1 })).json();
+    assert.equal(denied.code, 'estimate');
+    assert.match(denied.message ?? denied.error, /Gemini/);
+    const price = (await preview()).json().engines.find((engine: { id: string }) => engine.id === 'surfacedby-gemini');
+    assert.equal(price.blocked, true);
+    assert.match(price.note, /Gemini/);
+    await f.runner.tick();
+    assert.deepEqual(f.store.jobs(f.project.id), []);
+    assert.deepEqual(f.state.purchases, []);
+    assert.deepEqual(f.state.openai, []);
+    f.state.rejectedPlatform = undefined;
+    assert.equal((await preview()).json().totalUsd, .2);
+    assert.equal((await f.ask({ question, engines, maxCostUsd: 1 })).json().jobs.length, 3);
   } finally { await f.close(); }
 });
 

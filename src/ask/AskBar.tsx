@@ -99,9 +99,9 @@ export function AskDrawer({ ask, brand, domain, locale }: {
           {ask.paid.length > 0 && <label className="ask-limit">Spending limit
             <span><span aria-hidden="true">$</span><input disabled={ask.busy} inputMode="decimal" value={ask.limit} onChange={event => ask.setLimit(event.target.value)} aria-describedby="ask-estimate" /></span>
           </label>}
-          <span id="ask-estimate" className="ask-estimate">{ask.paid.length
+          <span id="ask-estimate" className="ask-estimate" role="status">{ask.quoteNotice ?? (ask.paid.length
             ? <>{ask.totalUsd === null ? <>Some prices are unavailable. SurfacedBy rechecks each quote before work starts.</> : <>Estimated <strong>{usd(ask.totalUsd)}</strong> total. Your limit covers all selected engines.</>} {ask.paid.some(engine => engine.provider === 'dataforseo') && <>DataForSEO uses your saved estimate; its actual charge may differ.</>}</>
-            : <>Uses your ChatGPT plan. Your plan limits apply.</>}
+            : <>Uses your ChatGPT plan. Your plan limits apply.</>)}
             {ask.estimateExpiresAt && <> Quote expires at {new Date(ask.estimateExpiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}. Refreshed automatically.</>}
           </span>
           {ask.paid.length > 0 && ask.totalUsd === null && !ask.estimating && ask.question.trim().length >= 3 && <button type="button" className="secondary" disabled={ask.busy} onClick={ask.refreshPrices}>Refresh prices</button>}
