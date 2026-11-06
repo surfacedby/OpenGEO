@@ -2,12 +2,11 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { ProviderError, type Job, type Project } from "./contracts.js";
 import { contentSources } from "./evidence-context.js";
+import { isPublicEvidenceUrl } from "./network.js";
 import { consoleManaged, managedJob } from "./console-managed.js";
 import type { Runner } from "./workflows.js";
 
-const source = z.object({ url: z.string().url().refine(value => {
-  const url = new URL(value); return ["https:", "http:"].includes(url.protocol) && !url.username && !url.password;
-}), title: z.string() });
+const source = z.object({ url: z.string().refine(isPublicEvidenceUrl), title: z.string() });
 const result = z.object({ job: managedJob, brief: z.string().nullable(),
   draft: z.object({ title: z.string().nullable(), markdown: z.string().nullable() }).nullable(),
   review: z.object({ requires_human_review: z.literal(true), claim_scope: z.literal("numeric_and_absolute_statements"),

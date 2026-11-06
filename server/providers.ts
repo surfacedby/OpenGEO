@@ -7,7 +7,7 @@ import {
   type Citation,
   type CredentialInput,
 } from "./contracts.js";
-import { providerJson, publicUrl } from "./network.js";
+import { providerJson, isPublicEvidenceUrl } from "./network.js";
 import { Agent } from 'undici';
 const chatGPTTimeoutMs = 15 * 60 * 1000;
 const chatGPTAgent = new Agent({ headersTimeout: chatGPTTimeoutMs, bodyTimeout: chatGPTTimeoutMs });
@@ -426,10 +426,7 @@ function dfsSourceEvidence(platform: string | undefined, text: string, annotatio
 export function otherSearchLinks(raw: unknown, citations: Citation[]): Citation[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const citedUrls = new Set(citations.map(source => new URL(source.url).href));
-  return safeCitations(raw).filter(source => {
-    try { publicUrl(source.url); } catch { return false; }
-    return !citedUrls.has(new URL(source.url).href);
-  });
+  return safeCitations(raw).filter(source => !citedUrls.has(new URL(source.url).href));
 }
 /** Citation metadata is projected explicitly, without supplier tracking fields or invented links. */
 export function safeCitations(annotations: unknown): Citation[] {
@@ -439,12 +436,11 @@ export function safeCitations(annotations: unknown): Citation[] {
     if (!annotation || typeof annotation !== "object" || Array.isArray(annotation)) continue;
     const citation = annotation.url_citation ?? annotation;
     if (!citation || typeof citation !== "object" || Array.isArray(citation)) continue;
-    if (typeof citation.url !== "string") continue;
-    try {
-      const url = new URL(citation.url);
-      if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || seen.has(url.href)) continue;
-      seen.add(url.href); citations.push({ url: citation.url, ...(typeof citation.title === "string" ? { title: citation.title } : {}) });
-    } catch { /* Malformed supplier annotations are not usable citation evidence. */ }
+    if (typeof citation.url !== "string" || !isPublicEvidenceUrl(citation.url)) continue;
+    const href = new URL(citation.url).href;
+    if (seen.has(href)) continue;
+    seen.add(href);
+    citations.push({ url: citation.url, ...(typeof citation.title === "string" ? { title: citation.title } : {}) });
   }
   return citations;
 }

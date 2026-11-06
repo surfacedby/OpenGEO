@@ -1,12 +1,11 @@
 import { z } from "zod";
 import { ProviderError, type Job, type Project } from "./contracts.js";
-import { publicUrl } from "./network.js";
+import { publicUrl, isPublicEvidenceUrl } from "./network.js";
 import { consoleManaged, managedJob } from "./console-managed.js";
 import type { Runner } from "./workflows.js";
 
-const source = z.object({ url: z.string().url().refine(value => {
-  try { publicUrl(value); return true; } catch { return false; }
-}), title: z.string().max(1000), observed_at: z.string().datetime({ offset: true }) });
+const source = z.object({ url: z.string().refine(isPublicEvidenceUrl),
+  title: z.string().max(1000), observed_at: z.string().datetime({ offset: true }) });
 const result = z.object({ job: managedJob, review_complete: z.literal(true),
   locale: z.string().max(40), pages_read: z.number().int().min(1).max(6),
   questions: z.array(z.object({ text: z.string().trim().min(10).max(500), sources: z.array(source).min(1).max(6) })).max(20) });

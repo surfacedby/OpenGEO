@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { ProviderError, type Finding, type Job, type ManagedSourceEvidence, type Project } from "./contracts.js";
-import { publicUrl } from "./network.js";
+import { publicUrl, isPublicEvidenceUrl } from "./network.js";
 import { completedBrandMeasurement, completedMeasurement } from "./portable-results.js";
 import { consoleAnswerInput } from "./console-competitors.js";
 import { consoleManaged, managedJob } from "./console-managed.js";
 import type { Runner } from "./workflows.js";
 
-const url = z.string().max(2048).refine(value => { try { publicUrl(value); return true; } catch { return false; } });
+const url = z.string().max(2048).refine(isPublicEvidenceUrl);
 const result = z.object({ job: managedJob, review_complete: z.literal(true), locale: z.string().max(40),
   provenance: z.literal("client_supplied_answers"), pages_read: z.number().int().min(1).max(6),
   sources: z.array(z.object({ url, title: z.string().max(1000), text: z.string().min(1).max(50000),

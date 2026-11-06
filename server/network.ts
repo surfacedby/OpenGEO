@@ -1,32 +1,38 @@
 import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
+import { BlockList, isIP } from "node:net";
 import { Agent, fetch as safeFetch } from "undici";
 import { ProviderError } from "./contracts.js";
 import identity from "../brand/identity.json";
+const unavailable = new BlockList();
+// Apply each IPv4 refusal to the address embedded in a 6to4 route as well.
+// DNS answers and direct URL literals must use the same destination policy.
+const ipv4Subnets: [string, number][] = [
+  ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8],
+  ['169.254.0.0', 16], ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.0.2.0', 24],
+  ['192.88.99.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15], ['198.51.100.0', 24],
+  ['203.0.113.0', 24], ['224.0.0.0', 3],
+];
+for (const [network, prefix] of ipv4Subnets) {
+  unavailable.addSubnet(network, prefix, 'ipv4');
+  const [a, b, c, d] = network.split('.').map(Number);
+  unavailable.addSubnet(`2002:${(a * 256 + b).toString(16)}:${(c * 256 + d).toString(16)}::`, 16 + prefix, 'ipv6');
+}
+const ipv6Subnets: [string, number][] = [
+  ['2001::', 32], ['2001:2::', 48], ['2001:10::', 28], ['2001:db8::', 32], ['3fff::', 20],
+];
+for (const [network, prefix] of ipv6Subnets) unavailable.addSubnet(network, prefix, 'ipv6');
+const directIPv6 = new BlockList();
+directIPv6.addSubnet('2000::', 3, 'ipv6');
+directIPv6.addSubnet('::ffff:0:0', 96, 'ipv6');
+
 export function isPublicIp(ip: string): boolean {
-  if (isIP(ip) === 4) {
-    const [a, b] = ip.split(".").map(Number);
-    return !(
-      a === 0 ||
-      a === 10 ||
-      a === 127 ||
-      (a === 169 && b === 254) ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      (a === 100 && b >= 64 && b <= 127) ||
-      (a === 192 && b === 0) ||
-      a >= 224 ||
-      (a === 198 && (b === 18 || b === 19))
-    );
-  }
-  if (isIP(ip) === 6) {
-    const v = ip.toLowerCase();
-    if (v.startsWith("::ffff:")) return isPublicIp(v.slice(7));
-    return v.startsWith("2") || v.startsWith("3");
-  }
-  return false;
+  const family = isIP(ip);
+  if (family === 4) return !unavailable.check(ip, 'ipv4');
+  return family === 6 && directIPv6.check(ip, 'ipv6') && !unavailable.check(ip, 'ipv6');
 }
 export function publicUrl(value: string): URL {
+  if (/[\\\s\u0000-\u001f\u007f]/u.test(value) || value.startsWith('//'))
+    throw new Error("Use an unambiguous public website address");
   const u = new URL(value.includes("://") ? value : "https://" + value);
   if (
     !["https:", "http:"].includes(u.protocol) ||
@@ -35,15 +41,21 @@ export function publicUrl(value: string): URL {
     (u.port && !["80", "443"].includes(u.port))
   )
     throw new Error("Use a public HTTP or HTTPS website");
+  const host = u.hostname.replace(/\.$/, "");
+  const literal = host.replace(/^\[|\]$/g, "");
   if (
-    u.hostname === "localhost" ||
-    u.hostname.endsWith(".local") ||
-    (isIP(u.hostname.replace(/[\[\]]/g, "")) &&
-      !isPublicIp(u.hostname.replace(/[\[\]]/g, "")))
+    (!isIP(literal) && !host.includes(".")) || host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    (isIP(literal) && !isPublicIp(literal))
   )
     throw new Error("Private network access is disabled");
   u.hash = "";
   return u;
+}
+/** Evidence retains its original clickable href. Never repair it as a typed project domain. */
+export function isPublicEvidenceUrl(value: string): boolean {
+  if (!/^https?:\/\/[^/]/i.test(value)) return false;
+  try { publicUrl(value); return true; } catch { return false; }
 }
 /** A site's apex and www address share crawl scope; other subdomains do not. */
 export function sameSiteHost(left: URL, right: URL) {

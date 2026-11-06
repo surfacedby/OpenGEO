@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { presence, comparisonKey, summarize } from "./analysis.js";
 import { ProviderError, answerKind, type Job, type Project, type Observation } from "./contracts.js";
-import { publicUrl } from "./network.js";
+import { isPublicEvidenceUrl } from "./network.js";
 import { managedJob, consoleManaged, managedStep, validateManagedResult } from "./console-managed.js";
 import type { Runner } from "./workflows.js";
 import { platformKey } from './platforms.js';
@@ -16,7 +16,7 @@ const resultSchema = z.object({ job: managedJob, profile: z.literal("selected_qu
     answer: z.string().max(100000).nullable(), model: z.string().max(500).nullable().optional(), observed_at: z.string().datetime({ offset: true }),
     web_search_used: z.boolean().nullable().optional(), search_queries: z.array(z.string().min(1)).optional(),
     retrieved_sources: z.array(z.unknown()).nullish(),
-    citations: z.array(z.object({ url: z.string().url().max(2048).refine(value => { try { publicUrl(value); return true; } catch { return false; } }),
+    citations: z.array(z.object({ url: z.string().max(2048).refine(isPublicEvidenceUrl),
       title: z.string().max(1000).nullable().optional() })).max(100) })).max(100) });
 type Input = { questions: { id: string; question: string }[]; platform: string; locale: string; country: string | null };
 

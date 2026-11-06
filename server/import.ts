@@ -2,24 +2,14 @@ import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { Store } from "./storage.js";
 import { projectInput, providers, jobKinds, contentTask, opportunityDetails } from "./contracts.js";
-import { publicUrl } from "./network.js";
+import { publicUrl, isPublicEvidenceUrl } from "./network.js";
 import { portableJobResult } from "./portable-results.js";
 import { summarize } from "./analysis.js";
 import { normalizeTopics } from "./topics.js";
 import { topicNames } from "./topic-migration.js";
 const date = z.string().datetime({ offset: true });
 const id = z.string().min(1).max(200);
-const safeUrl = z
-  .string()
-  .url()
-  .refine((value) => {
-    try {
-      publicUrl(value);
-      return true;
-    } catch {
-      return false;
-    }
-  }, "Use a public HTTP URL without credentials");
+const safeUrl = z.string().refine(isPublicEvidenceUrl, "Use a public HTTP URL without credentials");
 const citation = z
   .object({ url: safeUrl, title: z.string().optional() })
   .strict();
@@ -27,7 +17,7 @@ const page = z
   .object({
     id,
     jobId: id.optional(),
-    url: z.string().url(),
+    url: safeUrl,
     fetchedAt: date,
     status: z.number().int(),
     title: z.string(),

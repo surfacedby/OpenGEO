@@ -13,8 +13,23 @@ import {Runner} from '../server/workflows.js';
 import {Scheduler} from '../server/scheduler.js';
 import {jobInput,projectInput,ProviderError} from '../server/contracts.js';
 import {presence,summarize} from '../server/analysis.js';
-import {isPublicIp,publicUrl} from '../server/network.js';
+import {isPublicIp,publicUrl,isPublicEvidenceUrl} from '../server/network.js';
 import {parseDfs} from '../server/providers.js';
+
+test('public links retain HTTP meaning and reject local host aliases and tunneled private addresses', () => {
+  for (const link of ['javascript:443', 'example.com/guide', 'http://localhost./', 'http://name.localhost/',
+    'http://host.local./', 'https://[2002:7f00:1::]/', 'https://[2002:0a00:0001::]/',
+    'http://[::ffff:7f00:1]/', 'https://192.0.2.1/', 'https://203.0.113.10/', 'https://[2001:db8::1]/']) {
+    assert.equal(isPublicEvidenceUrl(link), false, link);
+  }
+  assert.equal(publicUrl('example.com/guide').href, 'https://example.com/guide');
+  for (const link of ['https://example.com/guide#part', 'https://[2606:4700:4700::1111]/', 'https://[2002:0808:0808::1]/']) {
+    assert.equal(isPublicEvidenceUrl(link), true, link);
+  }
+  for (const address of ['2002:7f00:1::1', '2002:a00::1', '::ffff:127.0.0.1', '::ffff:7f00:0001', '2001:0::1']) {
+    assert.equal(isPublicIp(address), false, address);
+  }
+});
 
 test('Perplexity citation numbers refer to the original pool before URL filtering or deduplication', () => {
   const annotations = [
