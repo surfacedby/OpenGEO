@@ -37,6 +37,14 @@ import {
   type Observation,
   type Model,
 } from "./contracts.js";
+const consoleDomainBinding = z.object({ id: z.string().uuid(), domain: z.string().min(1) });
+
+function boundConsoleDomain(value: unknown, hostname: string) {
+  const parsed = consoleDomainBinding.safeParse(value);
+  if (!parsed.success || parsed.data.domain !== hostname)
+    throw new ProviderError('invalid_response', 'SurfacedBy did not confirm the requested website.');
+  return parsed.data;
+}
 const factsSchema = z.object({
   facts: z.array(
     z.object({ claim: z.string(), evidenceIds: z.array(z.string()).min(1) }),
@@ -1118,19 +1126,7 @@ export class Runner {
       }
     }
     const unitUsd = this.consoleScanCreditUnit(job);
-    const domain = await this.once(job, "console-domain", async () => {
-      const list = await this.consolePages("/domains", signal);
-      const existing = list.find((d: any) => d.domain === project.domain);
-      if (existing) return existing;
-      return (
-        await this.providers.console(
-          "/domains",
-          { domain: project.domain },
-          job.id + ":domain",
-          signal,
-        )
-      ).data;
-    });
+    const domain = await this.consoleDomain(job, project.domain, signal);
     await this.once(job, "console-brand", async () =>
       this.providers.console(
         "/domains/" + domain.id + "/brand",
@@ -1343,6 +1339,31 @@ export class Runner {
     if (this.store.step(job.id, 'console-scan')) return 0.1;
     throw new ProviderError('estimate', 'The price for this check is missing. Nothing was submitted.');
   }
+  async findConsoleDomain(hostname: string, signal: AbortSignal) {
+    const list = consoleDomainBinding.array().safeParse(await this.consolePages('/domains', signal));
+    if (!list.success) throw new ProviderError('invalid_response', 'SurfacedBy returned an incomplete website list.');
+    return list.data.find(row => row.domain === hostname);
+  }
+
+  async consoleDomain(job: Job, hostname: string, signal: AbortSignal) {
+    const saved = await this.once(job, 'console-domain', async () => {
+      const existing = await this.findConsoleDomain(hostname, signal);
+      if (existing) return existing;
+      try {
+        const created = await this.providers.console('/domains', { domain: hostname }, job.id + ':domain', signal);
+        return boundConsoleDomain(created.data, hostname);
+      } catch (error) {
+        // Another client may register the website between our list and create calls.
+        if (error instanceof ProviderError && error.httpStatus === 409 && error.remoteCode === 'domain_already_tracked') {
+          const winner = await this.findConsoleDomain(hostname, signal);
+          if (winner) return winner;
+        }
+        throw error;
+      }
+    });
+    return boundConsoleDomain(saved, hostname);
+  }
+
   async consolePages(path: string, signal: AbortSignal) {
     const rows: any[] = [];
     let cursor: string | undefined;
@@ -1360,7 +1381,9 @@ export class Runner {
         undefined,
         signal,
       );
-      rows.push(...(result.data ?? []));
+      if (!Array.isArray(result?.data) || (result.meta?.next_cursor != null && typeof result.meta.next_cursor !== 'string'))
+        throw new ProviderError("invalid_response", "SurfacedBy returned an incomplete list. Try again shortly.");
+      rows.push(...result.data);
       cursor = result.meta?.next_cursor;
       if (cursor && seen.has(cursor))
         throw new ProviderError(

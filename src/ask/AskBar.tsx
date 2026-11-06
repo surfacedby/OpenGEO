@@ -43,6 +43,7 @@ export function AskDrawer({ ask, brand, domain, locale }: {
     const engine = ask.catalog!.engines.find(row => row.id === id)!;
     if (engine.price === 'free') return 'Uses your ChatGPT plan';
     const value = ask.priceOf(id);
+    if (value !== null && ask.menuPrices.includes(id)) return 'Up to ' + usd(value) + ' per answer';
     if (value === null && engine.estimateUsd !== undefined &&
         (ask.question.trim().length < 3 || !ask.choice.includes(id)))
       return (engine.provider === 'console' ? 'Up to ' : 'est. ') + usd(engine.estimateUsd) + ' per answer';
@@ -102,6 +103,7 @@ export function AskDrawer({ ask, brand, domain, locale }: {
           <span id="ask-estimate" className="ask-estimate" role="status">{ask.quoteNotice ?? (ask.paid.length
             ? <>{ask.totalUsd === null ? <>Some prices are unavailable. SurfacedBy rechecks each quote before work starts.</> : <>Estimated <strong>{usd(ask.totalUsd)}</strong> total. Your limit covers all selected engines.</>} {ask.paid.some(engine => engine.provider === 'dataforseo') && <>DataForSEO uses your saved estimate; its actual charge may differ.</>}</>
             : <>Uses your ChatGPT plan. Your plan limits apply.</>)}
+            {ask.menuPrices.length > 0 && <> SurfacedBy confirms its published prices after registering this website.</>}
             {ask.estimateExpiresAt && <> Quote expires at {new Date(ask.estimateExpiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}. Refreshed automatically.</>}
           </span>
           {ask.paid.length > 0 && ask.totalUsd === null && !ask.estimating && ask.question.trim().length >= 3 && <button type="button" className="secondary" disabled={ask.busy} onClick={ask.refreshPrices}>Refresh prices</button>}

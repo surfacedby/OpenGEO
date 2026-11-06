@@ -24,7 +24,7 @@ test('full-check approval and refunds retain the advertised rate through price c
   globalThis.fetch = (async (url, init) => {
     const path = new URL(String(url)).pathname.replace('/api/v1/console', '');
     if (path === '/capabilities') return json({ platforms: [{ key: 'chatgpt', name: 'ChatGPT', enabled: true }], pricing: { credit_usd: unit } });
-    if (path === '/domains') return json([{ id: 'fixture-domain', domain: 'example.com' }]);
+    if (path === '/domains') return json([{ id: 'd373ba88-779f-41ce-926e-28a40103c97e', domain: 'example.com' }]);
     if (path.endsWith('/brand')) return json({});
     if (path === '/scans/preview') return json({ credits_required: 2, query_count: 1 });
     if (path === '/scans') {
@@ -76,8 +76,8 @@ test("Console check totals and public citations survive project edits, dashboard
     const path = new URL(String(url)).pathname.replace("/api/v1/console", "");
     if (path === "/capabilities") return json({ platforms: [{ key: "chatgpt", name: "ChatGPT", enabled: true }], pricing: { credit_usd: 0.1 },
       operations: ['measurement', 'full_check'], selected_question_platforms: ['chatgpt'] });
-    if (path === "/domains") return json([{ id: "fixture-domain", domain: "example.com" }]);
-    if (path === "/domains/fixture-domain/brand") return json({ domain_id: "fixture-domain" });
+    if (path === "/domains") return json([{ id: "d373ba88-779f-41ce-926e-28a40103c97e", domain: "example.com" }]);
+    if (path === "/domains/d373ba88-779f-41ce-926e-28a40103c97e/brand") return json({ domain_id: "d373ba88-779f-41ce-926e-28a40103c97e" });
     if (path === "/scans/preview") return json({ credits_required: 2, query_count: previewCount });
     if (path === "/scans") {
       submitted++;

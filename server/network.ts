@@ -177,7 +177,10 @@ export async function providerJson(
     .then(JSON.parse)
     .catch(() => null);
   if (!response.ok) {
-    const rawCode = typeof body?.error === "string" ? body.error : body?.error?.code ?? body?.error?.type;
+    const problemPrefix = 'https://docs.surfacedby.com/v1/api/errors#';
+    const consoleProblem = url.startsWith('https://api.surfacedby.com/api/v1/console/') &&
+      typeof body?.type === 'string' && body.type.startsWith(problemPrefix) ? body.type.slice(problemPrefix.length) : undefined;
+    const rawCode = consoleProblem ?? (typeof body?.error === "string" ? body.error : body?.error?.code ?? body?.error?.type);
     const code = typeof rawCode === "string" && /^[a-z_]{1,100}$/.test(rawCode) ? rawCode : undefined;
     const quota =
       response.status === 429 ||
@@ -191,6 +194,7 @@ export async function providerJson(
           : "Provider rejected this request. Check its account and capabilities.",
       response.status >= 500,
       code,
+      response.status,
     );
   }
   if (!body)

@@ -234,6 +234,7 @@ export class ProviderError extends Error {
     message: string,
     public uncertain = false,
     public remoteCode?: string,
+    public httpStatus?: number,
   ) {
     super(message);
     this.name = "ProviderError";

@@ -142,12 +142,7 @@ export async function consoleManaged<I, O extends { job: z.infer<typeof managedJ
   if (!submitted && operation === 'measurement' && !capability?.selected_question_platforms.includes(job.platform === 'chat_gpt' ? 'chatgpt' : job.platform))
     throw new ProviderError('capability', 'Single-question checks are no longer available for this engine. Nothing was submitted.');
   if (!submitted) runner.store.setStep(job.id, step("capabilities"), "done", capability);
-  const domain = await runner.once(job, "console-domain", async () => {
-    const domains = await runner.consolePages("/domains", signal);
-    return domains.find(row => row.domain === project.domain) ??
-      (await runner.providers.console("/domains", { domain: project.domain }, job.id + ":domain", signal)).data;
-  });
-  const domainId = z.string().uuid().parse(domain.id);
+  const { id: domainId } = await runner.consoleDomain(job, project.domain, signal);
   const input: I = await runner.once(job, step("input"), async () => prepareInput());
   const quote = quoteSchema(operation).parse(await runner.once(job, step("estimate"), async () => {
     const fresh = quoteSchema(operation).extend({ estimated_usd: usdString }).parse(

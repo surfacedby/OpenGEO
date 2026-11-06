@@ -27,6 +27,8 @@ type Fake = {
   advertised?: { key: string; name: string; enabled: boolean }[]; publicResults?: boolean;
   quotedUsd?: string; quoteExpiry?: Record<string, string>; creditsByPlatform?: Record<string, number>;
   waiting?: boolean; balanceCredits?: number; rejectedPlatform?: string;
+  advertisedCredits?: Record<string, number>; domainReads: number; registrations: number;
+  registrationResult?: 'concurrent' | 'wrong-domain' | 'other-conflict';
 };
 function fakeProviders(state: Fake) {
   const domain = randomUUID(), quotes = new Map<string, any>(), remote = new Map<string, any>();
@@ -52,8 +54,25 @@ function fakeProviders(state: Fake) {
     assert.equal(address.hostname, 'api.surfacedby.com');
     const path = address.pathname.replace('/api/v1/console', '');
     if (path === '/capabilities') return json({ data: { platforms: state.advertised ?? [{ key: 'chatgpt', name: 'ChatGPT', enabled: true }, { key: 'gemini', name: 'Gemini', enabled: true }],
-      operations: ['measurement'], content_available: false, models: [], selected_question_platforms: state.platforms } });
-    if (path === '/domains') return json({ data: state.domainKnown ? [{ id: domain, domain: 'example.com' }] : [], meta: {} });
+      operations: ['measurement'], content_available: false, models: [], selected_question_platforms: state.platforms,
+      pricing: state.advertisedCredits ? { credit_usd: .1, measurement: { estimates_free: true,
+        estimate_validity_seconds: 900, credit_increment: 1, rounding: 'up_to_whole_credit_per_request',
+        settlement: 'actual_usage_up_to_estimate', platforms: Object.entries(state.advertisedCredits).map(([platform, credits]) =>
+          ({ platform, one_answer_credits: credits, one_answer_usd: (credits / 10).toFixed(2) })) } } : undefined } });
+    if (path === '/domains') {
+      if (method === 'GET') {
+        state.domainReads++;
+        return json({ data: state.domainKnown ? [{ id: domain, domain: 'example.com' }] : [], meta: {} });
+      }
+      assert.equal(method, 'POST');
+      state.registrations++;
+      if (state.registrationResult === 'other-conflict')
+        return json({ type: 'https://docs.surfacedby.com/v1/api/errors#idempotency_conflict' }, 409);
+      const duplicate = state.domainKnown || state.registrationResult === 'concurrent';
+      state.domainKnown = true;
+      if (duplicate) return json({ type: 'https://docs.surfacedby.com/v1/api/errors#domain_already_tracked' }, 409);
+      return json({ data: { id: domain, domain: state.registrationResult === 'wrong-domain' ? 'other.example' : body.domain } }, 201);
+    }
     if (path.endsWith('/brand')) return json({ data: {} });
     if (path.endsWith('/measurement/estimate')) {
       if (body.platform === state.rejectedPlatform)
@@ -92,7 +111,8 @@ async function fixture(overrides: Partial<Fake> = {}) {
   const vault = new Vault(dir, { encrypt: text => Buffer.from(text), decrypt: bytes => bytes.toString() });
   vault.set('chatgpt', { active: 'test-account', profiles: [{ id: 'test-account', access_token: 'synthetic-access', expiresAt: Date.now() + 3600000, scopes: ['chatgpt.tokens.use.direct'] }] });
   vault.set('console', { key: 'synthetic-console-credential' });
-  const state: Fake = { credits: 1, platforms: ['chatgpt', 'gemini'], missing: [], chatgptFails: false, domainKnown: true, estimates: [], purchases: [], openai: [], ...overrides };
+  const state: Fake = { credits: 1, platforms: ['chatgpt', 'gemini'], missing: [], chatgptFails: false, domainKnown: true,
+    estimates: [], purchases: [], openai: [], domainReads: 0, registrations: 0, ...overrides };
   const original = globalThis.fetch;
   globalThis.fetch = fakeProviders(state);
   const { app, runner } = await createApp(store, vault, session);
@@ -465,6 +485,46 @@ test('earlier tracked answers to the same question show beside an ask, and an un
     assert.equal(estimate.totalUsd, null);
   } finally { await f.close(); }
 });
+
+test('the first Ask uses published prices before registering and confirms each price before spending', async () => {
+  const prices = { chatgpt: 1, gemini: 3 };
+  const f = await fixture({ domainKnown: false, advertisedCredits: prices, creditsByPlatform: prices, registrationResult: 'concurrent' });
+  try {
+    const input = { question, engines: ['surfacedby-chatgpt', 'surfacedby-gemini'] };
+    const preview = (await f.app.inject({ method: 'POST', url: `/api/projects/${f.project.id}/asks/estimate`, headers, payload: input })).json();
+    assert.equal(preview.totalUsd, .4);
+    assert.equal(preview.expiresAt, null);
+    assert.deepEqual(preview.engines.map((e: { publishedPrice: boolean }) => e.publishedPrice), [true, true]);
+    assert.equal(f.state.domainReads, 1);
+    assert.equal((await f.ask({ ...input, maxCostUsd: .39 })).json().code, 'budget');
+    assert.deepEqual(f.store.jobs(f.project.id), []);
+    assert.equal(f.state.registrations, 0);
+    assert.deepEqual(f.state.estimates, []);
+    const { jobs } = (await f.ask({ ...input, maxCostUsd: .4 })).json();
+    assert.deepEqual(jobs.map((id: string) => f.store.job(id).maxCostUsd), [.1, .3]);
+    assert.equal(f.state.registrations, 0);
+    assert.equal(f.state.purchases.length, 0);
+    await f.runner.tick();
+    assert.deepEqual(jobs.map((id: string) => f.store.job(id).status), ['completed', 'completed']);
+    assert.deepEqual(f.state.purchases.map(row => row.approved_credits).sort(), [1, 3]);
+    assert.equal(f.state.estimates.length, 2);
+  } finally { await f.close(); }
+});
+
+for (const failure of ['wrong-domain', 'other-conflict', 'price-increase'] as const) {
+  test(`first Ask stops before purchase on ${failure}`, async () => {
+    const f = await fixture({ domainKnown: false, advertisedCredits: { chatgpt: 1 },
+      credits: failure === 'price-increase' ? 2 : 1, registrationResult: failure === 'price-increase' ? undefined : failure });
+    try {
+      const { jobs } = (await f.ask({ question, engines: ['surfacedby-chatgpt'], maxCostUsd: .1 })).json();
+      await f.runner.tick();
+      assert.equal(f.state.registrations, 1);
+      assert.equal(f.state.estimates.length, failure === 'price-increase' ? 1 : 0);
+      assert.equal(f.store.job(jobs[0]).error, { 'price-increase': 'budget', 'wrong-domain': 'invalid_response', 'other-conflict': 'provider' }[failure]);
+      assert.deepEqual(f.state.purchases, []);
+    } finally { await f.close(); }
+  });
+}
 
 test('quote-aware allocation never increases the total approval and names the smallest limit that fits', () => {
   for (const [limit, engines] of [[1, 3], [.1, 3], [.07, 2], [10, 6], [.01, 2]] as const)

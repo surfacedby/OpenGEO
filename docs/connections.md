@@ -47,7 +47,9 @@ Engine availability comes from your connected account. Full checks and single-qu
 
 Ask uses your ChatGPT plan by default. Choose paid engines for each question. One spending limit covers them together. For example, two answers quoted at $0.10 and $0.30 fit a $0.40 limit.
 
-For a website already connected to SurfacedBy, OpenGEO checks each selected engine's quote before starting the group. If a quote fails, refresh prices, edit the question or deselect that engine. For a website that still needs to be registered, SurfacedBy checks the price after registration and before buying the answer. Each engine stays within its allocated approval for SurfacedBy work.
+For a website already connected to SurfacedBy, OpenGEO checks each selected engine's quote before starting the group. If a quote fails, refresh prices, edit the question or deselect that engine.
+
+For a new website, Ask uses the one-answer prices published by your SurfacedBy connection to check whether your selection fits your limit. Previewing prices leaves the website unregistered. When you start the Ask, OpenGEO registers the website and requests a quote for each answer. An engine whose quote exceeds its share of your limit stops before purchase. If your connection has no published price for an engine, its price is first checked after registration.
 
 Your direct DataForSEO connection uses your saved per-request estimate. Its actual charge can differ. OpenGEO records the reported cost and stops further work if it exceeds the limit. After an ask, selection returns to your ChatGPT plan.
 

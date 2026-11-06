@@ -89,19 +89,16 @@ const engineList = z.array(askEngineKey).min(1, "Choose at least one engine").ma
 const askInput = z.object({ question, engines: engineList, maxCostUsd: z.number().finite().min(0).max(1000).default(0) }).strict();
 
 /** Quote the same single question without submitting a measurement job. */
-async function surfacedByQuote(deps: AskDeps, project: Project, text: string, platform: string) {
-  const domains = await deps.runner.consolePages("/domains", AbortSignal.timeout(15000));
-  const domain = domains.find((row: any) => row.domain === project.domain);
-  if (!domain) return { estimateUsd: null, note: "Priced when the ask starts" };
+async function surfacedByQuote(deps: AskDeps, project: Project, domainId: string, text: string, platform: string) {
   const country = new Intl.Locale(project.locale).region ?? null;
-  const quote = (await deps.providers.console("/domains/" + domain.id + "/measurement/estimate",
-    { questions: [{ id: randomUUID(), question: text }], platform: platform === "chat_gpt" ? "chatgpt" : platform, locale: project.locale, country },
+  const quote = (await deps.providers.console("/domains/" + domainId + "/measurement/estimate",
+    { questions: [{ id: randomUUID(), question: text }], platform: consolePlatformKey(platform), locale: project.locale, country },
     "ask-estimate:" + randomUUID(), AbortSignal.timeout(20000))).data;
   const price = z.object({ domain_id: z.string().uuid(), operation: z.literal('measurement'),
     estimated_credits: z.number().int().positive(), estimated_usd: usdString,
     expires_at: z.string().datetime({ offset: true }) }).parse(quote);
   quotedCreditUsd(price);
-  if (price.domain_id !== domain.id || Date.parse(price.expires_at) <= Date.now())
+  if (price.domain_id !== domainId || Date.parse(price.expires_at) <= Date.now())
     throw new ProviderError('estimate', 'SurfacedBy did not return a current estimate for this website.');
   return { estimateUsd: Number(price.estimated_usd), expiresAt: price.expires_at };
 }
@@ -110,10 +107,11 @@ export async function estimateAsk(deps: AskDeps, projectId: string, body: unknow
   const input = z.object({ question, engines: engineList }).strict().parse(body);
   const project = deps.store.project(projectId);
   const catalog = await engineCatalog(deps);
+  const quote = questionQuoter(deps, project, input.question);
   const engines = await Promise.all(input.engines.map(async id => {
     const engine = catalog.engines.find(row => row.id === id);
     if (!engine?.available) return { id, estimateUsd: null, blocked: true, note: engine?.reason ?? 'This engine is not available on your connection.' };
-    return { id, ...await quoteEngine(deps, project, input.question, engine) };
+    return { id, ...await quote(engine) };
   }));
   const known = engines.every(row => row.estimateUsd !== null);
   const expiries = engines.flatMap(row => 'expiresAt' in row && typeof row.expiresAt === 'string' ? [row.expiresAt] : []);
@@ -121,17 +119,23 @@ export async function estimateAsk(deps: AskDeps, projectId: string, body: unknow
     totalUsd: known ? sumUsd(engines.map(row => row.estimateUsd ?? 0)) : null };
 }
 
-async function quoteEngine(deps: AskDeps, project: Project, text: string, engine: EngineDefinition) {
-  if (engine.provider === 'chatgpt') return { estimateUsd: 0 };
-  if (engine.provider === 'dataforseo') {
-    const estimate = deps.store.setting<number>('measurementRequestEstimateUsd', 0);
-    return { estimateUsd: estimate > 0 ? estimate : null };
-  }
-  try { return await surfacedByQuote(deps, project, text, engine.platform); }
-  catch {
-    return { estimateUsd: null, blocked: true,
-      note: `SurfacedBy couldn't confirm a price for ${engine.label}. Refresh prices, edit your question or deselect that engine.` };
-  }
+/** Each group uses one domain lookup. Previewing an unregistered website never registers it. */
+function questionQuoter(deps: AskDeps, project: Project, text: string) {
+  let domainLookup: ReturnType<Runner['findConsoleDomain']> | undefined;
+  return async (engine: EngineDefinition & { estimateUsd?: number }) => {
+    if (engine.provider === 'chatgpt') return { estimateUsd: 0 };
+    if (engine.provider === 'dataforseo') return { estimateUsd: engine.estimateUsd ?? null };
+    try {
+      domainLookup ??= deps.runner.findConsoleDomain(project.domain, AbortSignal.timeout(15000));
+      const domain = await domainLookup;
+      if (domain) return await surfacedByQuote(deps, project, domain.id, text, engine.platform);
+      if (engine.estimateUsd !== undefined) return { estimateUsd: engine.estimateUsd, publishedPrice: true };
+      return { estimateUsd: null, note: 'Priced when the ask starts' };
+    } catch {
+      return { estimateUsd: null, blocked: true,
+        note: `SurfacedBy couldn't confirm a price for ${engine.label}. Refresh prices, edit your question or deselect that engine.` };
+    }
+  };
 }
 
 /** Recheck estimates before atomically saving the shared approval. Execution still enforces each saved limit. */
@@ -152,7 +156,7 @@ export async function createAsk(deps: AskDeps, projectId: string, body: unknown,
   if (unavailable) throw new ProviderError("capability", unavailable.label + " (" + unavailable.detail + "): " + unavailable.reason + ".");
   const paid = chosen.filter(engine => engine.price !== "free");
   if (paid.length && input.maxCostUsd <= 0) throw new ProviderError("budget", "Set a spending limit to ask paid engines. Nothing was started.");
-  const quotes = await Promise.all(paid.map(engine => quoteEngine(deps, project, input.question, engine)));
+  const quotes = await Promise.all(paid.map(questionQuoter(deps, project, input.question)));
   for (const quote of quotes) {
     if ('blocked' in quote && quote.blocked) throw new ProviderError('estimate', quote.note);
   }

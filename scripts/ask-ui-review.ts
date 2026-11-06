@@ -16,6 +16,7 @@ const output = mkdtempSync(join(outputRoot, "ask-price-review-"));
 const original = globalThis.fetch;
 let providerRequests = 0;
 let quoteLifetime = 3600000, quoteRequests = 0, geminiCredits = 1, externalRequests = 0;
+let registeredWebsite = true;
 globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
   const address = new URL(String(url));
   if (address.hostname !== "api.surfacedby.com") {
@@ -32,7 +33,7 @@ globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
       pricing: { credit_usd: .1, measurement: { estimates_free: true, estimate_validity_seconds: 900,
         credit_increment: 1, rounding: 'up_to_whole_credit_per_request', settlement: 'actual_usage_up_to_estimate',
         platforms: ['chatgpt', 'gemini'].map(platform => ({ platform, one_answer_credits: 1, one_answer_usd: '0.10' })) } } }
-    : path === "/domains" ? [{ id: "00000000-0000-4000-8000-000000000001", domain: "example.com" }]
+    : path === "/domains" ? (registeredWebsite ? [{ id: "00000000-0000-4000-8000-000000000001", domain: "example.com" }] : [])
     : path.endsWith("/measurement/estimate") ? { id: randomUUID(), domain_id: "00000000-0000-4000-8000-000000000001", operation: "measurement", estimated_credits: credits, estimated_usd: (credits / 10).toFixed(2), expires_at: new Date(Date.now() + quoteLifetime).toISOString() }
     : null;
   if (!data) throw new Error("Unexpected review request " + path);
@@ -130,6 +131,17 @@ try {
   await page.setViewportSize({ width: 1360, height: 900 });
   await page.locator('.ask-settings-button').click();
   const modal = page.getByRole('dialog', { name: 'Ask a question', exact: true });
+  registeredWebsite = false;
+  const beforeFirstAsk = quoteRequests;
+  await modal.getByRole('textbox', { name: 'Question', exact: true }).fill(question + ' New website.');
+  await modal.getByRole('status').filter({ hasText: 'after registering this website' }).waitFor();
+  assert.equal(await modal.getByText('Up to $0.10 per answer', { exact: true }).count(), 2);
+  assert.equal(quoteRequests, beforeFirstAsk);
+  await modal.getByRole('textbox', { name: /Spending limit/ }).fill('0.19');
+  assert.ok(await modal.getByRole('button', { name: 'Ask 3 engines', exact: true }).isDisabled());
+  await modal.getByRole('button', { name: 'Raise limit to $0.20' }).click();
+  assert.ok(await modal.getByRole('button', { name: 'Ask 3 engines', exact: true }).isEnabled());
+  registeredWebsite = true;
   quoteLifetime = 1500;
   const pricingQuestion = question + ' Pricing review.';
   await Promise.all([
