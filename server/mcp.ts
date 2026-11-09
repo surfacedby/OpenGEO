@@ -101,7 +101,7 @@ server.registerTool(
   },
   ({ id }) => call("/jobs/" + id + "/cancel", {}),
 );
-const askEngines = z.enum(["chatgpt", "surfacedby-chatgpt", "surfacedby-gemini", "dataforseo-chatgpt", "dataforseo-gemini", "dataforseo-perplexity"]);
+const askEngines = z.enum(["chatgpt", "surfacedby-chatgpt", "surfacedby-gemini", "dataforseo-chatgpt", "dataforseo-gemini", "dataforseo-perplexity", "deepseek"]);
 server.registerTool(
   "list_ask_engines",
   {
@@ -114,7 +114,7 @@ server.registerTool(
 server.registerTool(
   "estimate_ask",
   {
-    description: "Estimate one question on the chosen engines without running it. ChatGPT uses the connected plan and its limits; SurfacedBy returns a quote; DataForSEO uses the saved per-request estimate and its actual charge can differ.",
+    description: "Estimate one question on the chosen engines without running it. ChatGPT uses the connected plan and its limits; SurfacedBy returns a quote; DataForSEO uses the saved per-request estimate and its actual charge can differ; DeepSeek returns the most one answer can cost, and its recorded cost is computed from reported tokens and searches.",
     inputSchema: { projectId: z.string().uuid(), question: z.string().min(3).max(500), engines: z.array(askEngines).min(1) },
     annotations: { readOnlyHint: true, openWorldHint: true },
   },

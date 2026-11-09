@@ -9,6 +9,7 @@ import type { Store } from "./storage.js";
 import type { Vault } from "./vault.js";
 import type { Runner } from "./workflows.js";
 import { askShare } from "./ask-scope.js";
+import { deepseekAskEstimate } from "./deepseek.js";
 
 /** Ask offers search-enabled collection routes; individual answers retain the provider's reported retrieval evidence. */
 export const askEngines = {
@@ -18,6 +19,7 @@ export const askEngines = {
   "dataforseo-chatgpt": { provider: "dataforseo", platform: "chat_gpt", label: "ChatGPT", detail: "API answer with web search, via DataForSEO", surface: "api" },
   "dataforseo-gemini": { provider: "dataforseo", platform: "gemini", label: "Gemini", detail: "API answer with web search, via DataForSEO", surface: "api" },
   "dataforseo-perplexity": { provider: "dataforseo", platform: "perplexity", label: "Perplexity", detail: "API answer with web search, via DataForSEO", surface: "api" },
+  deepseek: { provider: "deepseek", platform: "deepseek", label: "DeepSeek", detail: "API answer with DeepSeek search", surface: "api" },
 } as const;
 export type AskEngineId = keyof typeof askEngines;
 const engineIds = Object.keys(askEngines) as [AskEngineId, ...AskEngineId[]];
@@ -64,7 +66,8 @@ export async function engineCatalog(deps: AskDeps) {
       reason = surfacedBy.reason ?? "Not available on this SurfacedBy connection";
     else if (engine.provider === "dataforseo" && requestEstimate <= 0) reason = "Set a DataForSEO request estimate in Settings";
     return { id, ...engine, available: !reason, ...(reason ? { reason } : {}),
-      price: engine.provider === "chatgpt" ? "free" as const : engine.provider === "console" ? "quote" as const : "per_request" as const,
+      // DeepSeek is metered by tokens and searches; its estimate is the most one answer can cost.
+      price: engine.provider === "chatgpt" ? "free" as const : engine.provider === "console" ? "quote" as const : engine.provider === "deepseek" ? "metered" as const : "per_request" as const,
       ...(engine.provider === "dataforseo" && requestEstimate > 0 ? { estimateUsd: requestEstimate } : {}) };
   });
   return { engines, defaultLimitUsd: deps.store.setting<number>("askLimitUsd", defaultLimitUsd) };
@@ -99,6 +102,7 @@ export async function estimateAsk(deps: AskDeps, projectId: string, body: unknow
     if (!available.available) return { id, estimateUsd: null, note: available.reason };
     if (engine.provider === "chatgpt") return { id, estimateUsd: 0 };
     if (engine.provider === "dataforseo") return { id, estimateUsd: requestEstimate > 0 ? requestEstimate : null };
+    if (engine.provider === "deepseek") return { id, estimateUsd: Math.ceil(deepseekAskEstimate(input.question) * 100) / 100 };
     try { return { id, ...await surfacedByQuote(deps, project, input.question, engine.platform) }; }
     catch { return { id, estimateUsd: null, note: "SurfacedBy did not return a price. It is checked again when the ask starts." }; }
   }));

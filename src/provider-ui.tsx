@@ -1,18 +1,18 @@
 import { Blocks, ChartNoAxesCombined, FilePenLine, MessagesSquare, Lightbulb, Globe, Network } from "lucide-react";
 import type { Provider, Observation } from "../server/contracts";
 import marks from "../brand/provider-marks.json";
-export const providerOrder: Provider[] = ["chatgpt", "console", "dataforseo", "openrouter"];
-export const providerLabels: Record<Provider, string> = { chatgpt: "ChatGPT", console: "SurfacedBy API", dataforseo: "DataForSEO", openrouter: "OpenRouter" };
+export const providerOrder: Provider[] = ["chatgpt", "console", "dataforseo", "openrouter", "deepseek"];
+export const providerLabels: Record<Provider, string> = { chatgpt: "ChatGPT", console: "SurfacedBy API", dataforseo: "DataForSEO", openrouter: "OpenRouter", deepseek: "DeepSeek" };
 export const consolePlatformCatalog = [
   { key: "chatgpt", name: "ChatGPT" }, { key: "perplexity", name: "Perplexity" },
   { key: "gemini", name: "Gemini" }, { key: "ai_mode", name: "Google AI Mode" },
   { key: "claude", name: "Claude" }, { key: "grok", name: "Grok" }, { key: "deepseek", name: "DeepSeek" },
 ];
 export function platformLabel(platform: string) {
-  return ({ chat_gpt: "ChatGPT", chatgpt: "ChatGPT", gemini: "Gemini", perplexity: "Perplexity", google_ai_mode: "Google AI Mode", google_ai_overview: "Google AI Overview", copilot: "Copilot", openrouter: "OpenRouter" } as Record<string, string>)[platform] ?? platform.replaceAll("_", " ");
+  return ({ chat_gpt: "ChatGPT", chatgpt: "ChatGPT", gemini: "Gemini", perplexity: "Perplexity", google_ai_mode: "Google AI Mode", google_ai_overview: "Google AI Overview", copilot: "Copilot", openrouter: "OpenRouter", deepseek: "DeepSeek" } as Record<string, string>)[platform] ?? platform.replaceAll("_", " ");
 }
 export function retrievalLabel(answer: Observation) {
-  if (answer.provider === "chatgpt" && answer.retrieval === "web_search")
+  if ((answer.provider === "chatgpt" || answer.provider === "deepseek") && answer.retrieval === "web_search")
     return answer.webSearchConfirmed === true ? "Web search confirmed" : "Web search requested, use unconfirmed";
   return answer.retrieval === "model_only" ? "Model-only answer" : "Provider-managed retrieval";
 }
@@ -31,6 +31,7 @@ export function ProviderIcon({ provider, size = 22 }: { provider: string; size?:
 export function Capabilities({ provider, consoleContent = false }: { provider: Provider; consoleContent?: boolean }) {
   const features = provider === "dataforseo" ? [[MessagesSquare, "AI answers"], [Globe, "Web citations"]] as const :
     provider === "console" ? [[MessagesSquare, "AI answers"], [Globe, "Web citations"], [Lightbulb, "Analysis & opportunities"], ...(consoleContent ? [[FilePenLine, "Content"] as const] : [])] as const :
+    provider === "deepseek" ? [[MessagesSquare, "One-off Asks"], [Globe, "Web search and citations"]] as const :
     [[MessagesSquare, provider === "openrouter" ? "AI answers (API only)" : "AI answers"], [Lightbulb, "Analysis"], [FilePenLine, "Content"]] as const;
   return <div className="capability-list">{features.map(([Icon, label]) => <span key={label}><Icon size={14} />{label}</span>)}</div>;
 }

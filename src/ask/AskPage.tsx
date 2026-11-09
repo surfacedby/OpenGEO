@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ArrowLeft, ArrowRight, Plus, Search, Trash2 } from 'lucide-react';
 import { api } from '../api';
-import { relativeTime, shortDate, usd } from '../format';
+import { relativeTime, shortDate, usd, usdSpent } from '../format';
 import { ProviderIcon, platformLabel } from '../provider-ui';
 import { Select } from '../Select';
 import { Dialog } from '../ui/Dialog';
@@ -11,8 +11,8 @@ import { useAskDetail, useAskList, type AskController, type AskDetail } from './
 import './ask.css';
 
 const engineLabel = (id?: string) => ({ chatgpt: 'ChatGPT', 'surfacedby-chatgpt': 'ChatGPT app', 'surfacedby-gemini': 'Gemini app', 'dataforseo-chatgpt': 'ChatGPT',
-  'dataforseo-gemini': 'Gemini', 'dataforseo-perplexity': 'Perplexity' } as Record<string, string>)[id ?? ''] ?? 'Engine';
-const enginePlatform = (id?: string) => id?.endsWith('gemini') ? 'gemini' : id?.endsWith('perplexity') ? 'perplexity' : 'chat_gpt';
+  'dataforseo-gemini': 'Gemini', 'dataforseo-perplexity': 'Perplexity', deepseek: 'DeepSeek' } as Record<string, string>)[id ?? ''] ?? 'Engine';
+const enginePlatform = (id?: string) => id?.endsWith('gemini') ? 'gemini' : id?.endsWith('perplexity') ? 'perplexity' : id === 'deepseek' ? 'deepseek' : 'chat_gpt';
 
 /** Ask history: past asks, one ask's answers side by side, and the first-visit suggestions. */
 export function AskPage({ projectId, version, askId, setAskId, ask, refresh }: {
@@ -43,7 +43,7 @@ function AskHistory({ projectId, version, setAskId, ask }: { projectId: string; 
     <div className="panel-heading"><h2>Past questions</h2><label className="search"><Search size={15} /><input aria-label="Find an ask" placeholder="Find a question" value={query} onChange={event => { setQuery(event.target.value); setPage(0); }} /></label></div>
     {!matching.length && <EmptyState title="No matching questions" icon={Search} action={<button className="secondary" onClick={() => setQuery('')}>Clear search</button>}>Try another word from your question.</EmptyState>}
     <ul>{matching.slice(currentPage * 20, (currentPage + 1) * 20).map(row => <li key={row.askId}><button type="button" onClick={() => setAskId(row.askId)}>
-      <span className="ask-history-question"><strong>{row.question}</strong><small>{relativeTime(row.createdAt)}{row.spentUsd > 0 ? ', ' + usd(row.spentUsd) : ''}</small></span>
+      <span className="ask-history-question"><strong>{row.question}</strong><small>{relativeTime(row.createdAt)}{row.spentUsd > 0 ? ', ' + usdSpent(row.spentUsd) : ''}</small></span>
       <span className="ask-history-engines">{row.engines.map((engine, index) => <span key={index} className={'ask-dot ' + (engine.cited ? 'cited' : engine.mentioned ? 'mentioned' : engine.state === 'answered' ? 'absent' : 'none')}
         title={engineLabel(engine.engine) + ': ' + (engine.state !== 'answered' ? ({ collecting: 'collecting', paused: 'needs attention', skipped: 'skipped', no_answer: 'no answer collected' }[engine.state]) : engine.cited ? 'website cited' : engine.mentioned ? 'brand mentioned' : 'not mentioned')}>
         <ProviderIcon provider={enginePlatform(engine.engine)} size={14} /></span>)}</span>
@@ -71,7 +71,7 @@ function AskResult({ projectId, askId, setAskId, ask, refresh }: {
         <button type="button" className="text-button" onClick={() => setAskId(null)}><ArrowLeft size={14} />Ask history</button>
         <p className="ask-eyebrow">Asked {relativeTime(detail.createdAt).toLowerCase()}, {detail.locale}, scored for {detail.domain}</p>
         <h2>{detail.question}</h2>
-        <p className="ask-muted">{detail.engines.length} {detail.engines.length === 1 ? 'engine' : 'engines'}{detail.limitUsd > 0 ? ', ' + usd(detail.spentUsd) + ' recorded against your ' + usd(detail.limitUsd) + ' limit' : ', using your ChatGPT plan'}. Track this question to include it in future visibility checks. These one-off answers stay separate.</p>
+        <p className="ask-muted">{detail.engines.length} {detail.engines.length === 1 ? 'engine' : 'engines'}{detail.limitUsd > 0 ? ', ' + usdSpent(detail.spentUsd) + ' recorded against your ' + usd(detail.limitUsd) + ' limit' : ', using your ChatGPT plan'}. Track this question to include it in future visibility checks. These one-off answers stay separate.</p>
       </div>
       <div className="button-row">
         <button type="button" className="secondary" disabled={!trackable} onClick={() => setTracking(true)}><Plus size={15} />{trackable ? 'Track this question' : 'Tracked'}</button>

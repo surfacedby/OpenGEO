@@ -30,3 +30,5 @@ export function pointChange(points: number | null) {
 }
 
 export const usd = (value: number, digits = 2) => "$" + value.toFixed(digits);
+/** Recorded spend: a metered answer often costs a fraction of a cent, which two decimals would show as $0.00. */
+export const usdSpent = (value: number) => usd(value, value > 0 && value < 0.01 ? 4 : 2);

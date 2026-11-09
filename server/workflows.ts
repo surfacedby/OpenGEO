@@ -11,6 +11,7 @@ import { scheduledBudgetCeiling } from "./scheduler.js";
 import { completedBrandMeasurement, completedMeasurement } from "./portable-results.js";
 import { topicScope } from "./topics.js";
 import { askScope } from "./ask-scope.js";
+import { deepseekAnswerEstimate } from "./deepseek.js";
 import { evidenceBatches, contentSources } from "./evidence-context.js";
 import {
   presence,
@@ -414,7 +415,7 @@ export class Runner {
       if (!project.prompts.length) throw new Error("Add at least one prompt");
       if (job.provider === "console")
         return this.consoleMeasure(job, project, signal);
-      if (job.provider === "chatgpt" || job.provider === "openrouter")
+      if (job.provider === "chatgpt" || job.provider === "openrouter" || job.provider === "deepseek")
         return this.apiMeasure(job, project, signal);
       if (job.provider !== "dataforseo")
         throw new ProviderError(
@@ -935,6 +936,8 @@ export class Runner {
   /** API answer checks share durable request receipts and budgets with the other measurement paths. */
   async apiMeasure(job: Job, project: Project, signal: AbortSignal) {
     const model = await this.contentModel(job), provider = job.provider!;
+    // Providers whose answers can run a web search and report it: ChatGPT natively, DeepSeek through its search tool.
+    const searching = provider === "chatgpt" || provider === "deepseek", webSearch = searching && job.webSearch !== false;
     const instructions = "Answer the user's question independently in locale " + project.locale + ". Cite sources when available. Do not invent citations.";
     const cap = Math.min(4096, model.maxOutputTokens ?? 4096);
     for (let index = 0; index < project.prompts.length; index++) {
@@ -942,23 +945,23 @@ export class Runner {
       const name = "measure:" + index;
       if (this.store.step(job.id, name)?.state === "done") continue;
       const prompt = project.prompts[index], tokenUpper = Buffer.byteLength(instructions + prompt, "utf8") + 1000,
-        estimate = tokenUpper * model.inputUsd + cap * model.outputUsd;
+        estimate = provider === "deepseek" ? deepseekAnswerEstimate(model, tokenUpper, cap) : tokenUpper * model.inputUsd + cap * model.outputUsd;
       this.store.updateJob(job.id, { progress: "Collecting answer " + (index + 1) + " of " + project.prompts.length });
       await this.once(job, name, async () => {
-        const completion = await this.providers.complete(provider, model.id, instructions, prompt, signal, cap, provider === "chatgpt" && job.webSearch !== false, model);
+        const completion = await this.providers.complete(provider, model.id, instructions, prompt, signal, cap, webSearch, model);
         const observation: Observation = {
           id: randomUUID(), projectId: project.id, jobId: job.id, prompt, provider,
-          platform: provider === "chatgpt" ? "chat_gpt" : "openrouter", model: completion.model, locale: project.locale,
+          platform: provider === "chatgpt" ? "chat_gpt" : provider, model: completion.model, locale: project.locale,
           observedAt: new Date().toISOString(), answer: completion.text, citations: completion.citations, surface: "api",
-          retrieval: provider === "chatgpt" && job.webSearch !== false ? "web_search" : "model_only",
-          ...(provider === "chatgpt" ? { webSearchConfirmed: completion.webSearchConfirmed === true } : {}),
+          retrieval: webSearch ? "web_search" : "model_only",
+          ...(searching ? { webSearchConfirmed: completion.webSearchConfirmed === true } : {}),
           ...(completion.searchQueries?.length ? { searchQueries: completion.searchQueries } : {}),
           ...presence(project, completion.text, completion.citations.map((citation) => citation.url)), costUsd: completion.costUsd,
         };
         this.store.db.transaction(() => {
           this.store.put(answerKind(job), project.id, job.id, observation);
           this.store.updateJob(job.id, { spentUsd: this.store.job(job.id).spentUsd + (completion.costUsd ?? estimate),
-            costBasis: completion.costUsd === null ? "includes_estimates" : this.store.job(job.id).costBasis ?? "reported" });
+            costBasis: completion.costUsd === null || completion.costEstimated ? "includes_estimates" : this.store.job(job.id).costBasis ?? "reported" });
           this.store.setStep(job.id, name, "done", observation);
         })();
         if (completion.costUsd === null) throw new ProviderError("cost_unknown", "The answer is saved. The provider omitted its cost; review usage before continuing.", true);

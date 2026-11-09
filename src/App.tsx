@@ -311,7 +311,8 @@ export function App() {
   const pausedAnalysis = w?.jobs.find(job => analysisInProgress(job) && !job.topicId && job.status === 'paused' && (!w.measurement || job.createdAt >= w.measurement.createdAt));
   const canAnalyze = connected.chatgpt || connected.console || connected.openrouter;
   const activeAudit = w?.jobs.find((job) => job.kind === "audit" && ["running", "queued"].includes(job.status));
-  const canMeasure = providerOptions(connected).length > 0;
+  // Ask-only connections (DeepSeek) cannot run a visibility check, so they do not unlock it.
+  const canMeasure = providerOptions(connected, ["chatgpt", "console", "dataforseo", "openrouter"]).length > 0;
   const measurementAction = activeScan
     ? { label: activeScan.status === 'paused' ? 'Review paused check' : 'View current check', action: () => changePage('Visibility') }
     : canMeasure

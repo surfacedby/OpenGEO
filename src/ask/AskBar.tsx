@@ -38,12 +38,13 @@ export function AskDrawer({ ask, brand, domain, locale }: {
   const available = ask.catalog?.engines.filter(engine => engine.available) ?? [];
   const missing = ask.catalog?.engines.filter(engine => !engine.available) ?? [];
   const unavailableGroups = [...new Map(missing.map(engine => [engine.provider + '|' + engine.reason, missing.filter(row => row.provider === engine.provider && row.reason === engine.reason)])).values()];
-  const providerName = (provider: string) => ({ chatgpt: 'ChatGPT', console: 'SurfacedBy', dataforseo: 'DataForSEO' } as Record<string, string>)[provider] ?? provider;
+  const providerName = (provider: string) => ({ chatgpt: 'ChatGPT', console: 'SurfacedBy', dataforseo: 'DataForSEO', deepseek: 'DeepSeek' } as Record<string, string>)[provider] ?? provider;
   const priceText = (id: string) => {
     const engine = ask.catalog!.engines.find(row => row.id === id)!;
     if (engine.price === 'free') return 'Uses your ChatGPT plan';
     const value = ask.priceOf(id);
-    return value === null ? (ask.estimating ? 'Checking price...' : 'Estimate unavailable') : 'est. ' + usd(value);
+    // A metered engine's estimate is the most one answer can cost; a typical answer costs far less.
+    return value === null ? (ask.estimating ? 'Checking price...' : 'Estimate unavailable') : (engine.price === 'metered' ? 'up to ' : 'est. ') + usd(value);
   };
   const askLabel = 'Ask ' + engineCount(ask.choice.length);
   return <Dialog title="Ask a question" close={close} variant="drawer" dismissible={!ask.busy}>
@@ -94,7 +95,7 @@ export function AskDrawer({ ask, brand, domain, locale }: {
             <span><span aria-hidden="true">$</span><input disabled={ask.busy} inputMode="decimal" value={ask.limit} onChange={event => ask.setLimit(event.target.value)} aria-describedby="ask-estimate" /></span>
           </label>}
           <span id="ask-estimate" className="ask-estimate">{ask.paid.length
-            ? <>{ask.totalUsd === null ? <>A complete estimate is unavailable. SurfacedBy checks its quote against each engine's share before starting.</> : <>Estimated <strong>{usd(ask.totalUsd)}</strong>. Each paid engine receives an equal share of the limit.</>} {ask.paid.some(engine => engine.provider === 'dataforseo') && <>DataForSEO uses your saved estimate; its actual charge may differ. </>}Provider charges and refunds apply. No paid fallback.</>
+            ? <>{ask.totalUsd === null ? <>A complete estimate is unavailable. SurfacedBy checks its quote against each engine's share before starting.</> : <>Estimated <strong>{usd(ask.totalUsd)}</strong>. Each paid engine receives an equal share of the limit.</>} {ask.paid.some(engine => engine.provider === 'dataforseo') && <>DataForSEO uses your saved estimate; its actual charge may differ. </>}{ask.paid.some(engine => engine.provider === 'deepseek') && <>DeepSeek's price is the most one answer can cost; the recorded cost comes from its reported tokens and searches. </>}Provider charges and refunds apply. No paid fallback.</>
             : <>Uses your ChatGPT plan. Your plan limits apply.</>}</span>
           <button type="submit" className="primary" disabled={ask.busy || !ask.choice.length || (ask.paid.length > 0 && (!ask.priced || ask.fit.overLimit))}><Search size={15} />{ask.busy ? 'Starting...' : askLabel}</button>
         </div>

@@ -3,13 +3,15 @@ import { ExternalLink, LoaderCircle, Search } from 'lucide-react';
 import { markdownHtml } from '../../server/markdown';
 import { api } from '../api';
 import { targetDomain } from '../finding-groups';
-import { usd } from '../format';
+import { usdSpent } from '../format';
 import { ProviderIcon, retrievalLabel } from '../provider-ui';
 import { SiteIcon } from '../SiteIcon';
 import { Disclosure } from '../ui/Primitives';
 import type { AskEngine } from './useAsk';
 
-const via = (provider?: string) => provider === 'console' ? 'SurfacedBy' : provider === 'dataforseo' ? 'DataForSEO' : 'ChatGPT';
+const via = (provider?: string) => provider === 'console' ? 'SurfacedBy' : provider === 'dataforseo' ? 'DataForSEO' : provider === 'deepseek' ? 'DeepSeek' : 'ChatGPT';
+/** Engines that run their own web search and report its queries. */
+const reportsSearches = (provider?: string) => provider === 'chatgpt' || provider === 'deepseek';
 /** Pause reasons that only need a fresh start; anything with an uncertain request needs a review first. */
 const reviewFirst = new Set(['interrupted', 'waiting', 'cost_unknown', 'invalid_response', 'approval']);
 
@@ -25,9 +27,9 @@ export function AnswerColumn({ row, projectId, brand, domain, reload, askAgain }
   const answer = row.answer;
   const sources = answer?.citations.filter(citation => targetDomain(citation.url)) ?? [];
   const app = row.surface === 'consumer_interface';
-  const recordedCost = row.costBasis === 'includes_estimates' ? 'Estimated ' + usd(row.spentUsd)
-    : row.spentUsd > 0 ? 'Recorded charge ' + usd(row.spentUsd) : 'No charge recorded';
-  const status = row.state === 'answered' ? { tone: 'completed', text: row.provider === 'chatgpt' ? 'Answered' : 'Answered, ' + usd(row.spentUsd) + (row.costBasis === 'includes_estimates' ? ' est.' : '') }
+  const recordedCost = row.costBasis === 'includes_estimates' ? 'Estimated ' + usdSpent(row.spentUsd)
+    : row.spentUsd > 0 ? 'Recorded charge ' + usdSpent(row.spentUsd) : 'No charge recorded';
+  const status = row.state === 'answered' ? { tone: 'completed', text: row.provider === 'chatgpt' ? 'Answered' : 'Answered, ' + usdSpent(row.spentUsd) + (row.costBasis === 'includes_estimates' ? ' est.' : '') }
     : row.state === 'collecting' ? { tone: 'running', text: 'Collecting' }
     : row.state === 'paused' ? { tone: 'paused', text: 'Paused' }
     : row.state === 'skipped' ? { tone: 'cancelled', text: 'Skipped' }
@@ -61,9 +63,9 @@ export function AnswerColumn({ row, projectId, brand, domain, reload, askAgain }
       </Disclosure></div>
       <div className="ask-fold"><Disclosure label={`Searches it ran (${answer.searchQueries?.length ?? 0})`}>
         {answer.searchQueries?.length ? <ul className="ask-searches">{answer.searchQueries.map(query => <li key={query}><Search size={12} /><code>{query}</code></li>)}</ul>
-          : <p className="ask-muted">{answer.provider === 'chatgpt' ? 'No searches were reported for this answer.' : 'This engine does not report its searches.'}</p>}
+          : <p className="ask-muted">{reportsSearches(answer.provider) ? 'No searches were reported for this answer.' : 'This engine does not report its searches.'}</p>}
       </Disclosure></div>
-      <p className="ask-provenance">{answer.provider === 'chatgpt' ? retrievalLabel(answer) + '. ' : ''}Collected {new Date(answer.observedAt).toLocaleString()}.</p>
+      <p className="ask-provenance">{reportsSearches(answer.provider) ? retrievalLabel(answer) + '. ' : ''}Collected {new Date(answer.observedAt).toLocaleString()}.</p>
     </>}
 
     {row.state === 'collecting' && <>

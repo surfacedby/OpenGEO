@@ -6,7 +6,7 @@ import packageInfo from "../package.json";
 export const usageNames = ["usage_enabled", "workspace_opened", "setup_completed", "audit_completed", "visibility_completed", "recheck_completed", "analysis_completed", "content_created", "content_revised", "improvement_completed", "report_exported"] as const;
 export const usageEvent = z.object({
   id: z.string().uuid(), day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  name: z.enum(usageNames), provider: z.enum(["chatgpt", "console", "dataforseo", "openrouter"]).nullable(),
+  name: z.enum(usageNames), provider: z.enum(["chatgpt", "console", "dataforseo", "openrouter", "deepseek"]).nullable(),
 }).strict();
 type EventName = typeof usageNames[number];
 type Provider = z.infer<typeof usageEvent>["provider"];
