@@ -14,8 +14,14 @@ const output = join(process.env.LOCALAPPDATA ?? tmpdir(), "OpenGEO", "ask-ux-rev
 mkdirSync(output, { recursive: true });
 const original = globalThis.fetch;
 let providerRequests = 0;
+const deepseekRequests: string[] = [];
 globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
   const address = new URL(String(url));
+  if (address.hostname === "api.deepseek.com") {
+    deepseekRequests.push(address.pathname);
+    if (address.pathname !== "/user/balance") throw new Error("Unexpected DeepSeek review request " + address.pathname);
+    return new Response(JSON.stringify({ is_available: true, balance_infos: [{ currency: "USD", total_balance: "5.00", granted_balance: "0.00", topped_up_balance: "5.00" }] }), { headers: { "Content-Type": "application/json" } });
+  }
   if (address.hostname !== "api.surfacedby.com") return original(url, init);
   providerRequests++;
   const path = address.pathname.replace("/api/v1/console", "");
@@ -52,6 +58,7 @@ try {
       : { key: "synthetic-console-credential" };
     runtime.runner.providers.vault.set(provider, body);
   }
+  runtime.runner.providers.vault.set("deepseek", { provider: "deepseek", key: "synthetic-deepseek-review-key" });
   const discover = runtime.store.enqueue(jobInput.parse({ projectId: project.id, kind: "discover", provider: "chatgpt", auditJobId: randomUUID() }), randomUUID());
   runtime.store.updateJob(discover.id, { status: "completed", result: { questions: [
     { text: "Synthetic review: how do teams compare example dashboards?" }, { text: "Synthetic review: which example reports can be shared publicly?" },
@@ -180,8 +187,76 @@ try {
   await page.locator('.activity-notice').filter({ hasText: retryQuestion }).waitFor();
   await page.locator('.activity-notice').filter({ hasText: retryQuestion }).getByRole('button', { name: 'View progress' }).click();
   await page.getByRole('heading', { name: retryQuestion, exact: true }).waitFor();
+
+  // DeepSeek: a metered engine priced at the most one answer can cost, answered with its own searches.
+  const deepseekQuestion = 'Synthetic review: which example tools cite their sources?';
+  await page.setViewportSize({ width: 1360, height: 900 });
+  await page.getByRole('textbox', { name: 'Ask every engine', exact: true }).fill(deepseekQuestion);
+  for (const width of [1360, 760, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 780 : 900 });
+    if (!(await page.locator('#ask-settings').isVisible())) await page.locator(width > 900 ? '.ask-settings-button' : '.ask-mobile-trigger').first().click();
+    const drawer = page.locator('#ask-settings');
+    await drawer.waitFor();
+    const box = drawer.getByRole('checkbox', { name: /DeepSeek/ });
+    if (!(await box.isChecked())) await box.check();
+    await drawer.getByText(/^up to \$0\.\d+$/).first().waitFor();
+    await drawer.getByText(/DeepSeek's price is the most one answer can cost/).waitFor();
+    await check(page, 'ask-drawer-deepseek', width);
+    await page.keyboard.press('Escape');
+    await drawer.waitFor({ state: 'hidden' });
+  }
+  await page.setViewportSize({ width: 1360, height: 900 });
+  await page.locator('.ask-bar button[type="submit"]').click();
+  await page.locator('#ask-settings').waitFor();
+  const deepseekBox = page.locator('#ask-settings').getByRole('checkbox', { name: /DeepSeek/ });
+  if (!(await deepseekBox.isChecked())) await deepseekBox.check();
+  await page.locator('#ask-settings').getByRole('button', { name: 'Ask 2 engines', exact: true }).click();
+  await page.getByRole('heading', { name: deepseekQuestion, exact: true }).waitFor();
+  const deepseekJob = runtime.store.jobs(project.id).find(job => job.kind === 'ask' && job.provider === 'deepseek')!;
+  assert.equal(deepseekJob.maxCostUsd, 1, 'The only paid engine receives the whole limit');
+  const freeJob = runtime.store.jobs(project.id).find(job => job.askId === deepseekJob.askId && job.provider === 'chatgpt')!;
+  runtime.store.put('ask-answer', project.id, deepseekJob.id, { id: randomUUID(), projectId: project.id, jobId: deepseekJob.id, prompt: deepseekQuestion, provider: 'deepseek', platform: 'deepseek',
+    model: 'deepseek-flash', locale: 'en-US', observedAt: new Date().toISOString(),
+    answer: 'Example Reports cites every source it uses. See [Example reports](https://example.com/reports) and [a comparison](https://example.net/compare).',
+    citations: [{ url: 'https://example.com/reports', title: 'Example reports' }, { url: 'https://example.net/compare', title: 'a comparison' }],
+    surface: 'api', retrieval: 'web_search', webSearchConfirmed: true, searchQueries: ['example tools that cite sources', 'example reports site:example.com'],
+    mentioned: true, cited: true, costUsd: 0.0021 } as Observation);
+  runtime.store.updateJob(deepseekJob.id, { status: 'completed', progress: 'Complete', spentUsd: 0.0021, costBasis: 'includes_estimates' });
+  runtime.store.updateJob(freeJob.id, { status: 'completed', progress: 'Complete' });
+  await page.waitForTimeout(3500);
+  const deepseekColumn = page.locator('.ask-column').filter({ has: page.getByRole('heading', { name: 'DeepSeek', exact: true }) });
+  for (const width of [1360, 760, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 780 : 900 });
+    await deepseekColumn.getByText('Answered, $0.0021 est.', { exact: true }).waitFor();
+    await page.getByText('$0.0021 recorded against your $1.00 limit', { exact: false }).waitFor();
+    await deepseekColumn.getByText(/Web search confirmed/).waitFor();
+    await deepseekColumn.scrollIntoViewIfNeeded();
+    await check(page, 'ask-result-deepseek', width);
+  }
+  assert.deepEqual(deepseekRequests, [], 'Pricing and asking in the review never call DeepSeek');
+
+  // Settings: the DeepSeek card connects with a pasted key, checked against DeepSeek's balance endpoint only.
+  await page.setViewportSize({ width: 1360, height: 900 });
+  await navigate(page, 'Settings');
+  const card = page.locator('.provider-card.deepseek');
+  await card.getByRole('button', { name: 'Manage', exact: true }).click();
+  await card.getByRole('button', { name: 'Disconnect', exact: true }).click();
+  await card.getByText('Not connected', { exact: true }).waitFor();
+  for (const width of [1360, 760, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 780 : 900 });
+    await card.scrollIntoViewIfNeeded();
+    await check(page, 'settings-deepseek', width);
+  }
+  await page.setViewportSize({ width: 1360, height: 900 });
+  if (!(await card.getByLabel('API key', { exact: true }).isVisible())) await card.getByRole('button', { name: 'Connect', exact: true }).click();
+  await card.getByLabel('API key', { exact: true }).fill('synthetic-deepseek-pasted-key');
+  await card.getByRole('button', { name: 'Verify & connect', exact: true }).click();
+  await card.getByText('Connected', { exact: true }).waitFor();
+  assert.deepEqual(deepseekRequests, ['/user/balance']);
+  await card.scrollIntoViewIfNeeded();
+  await check(page, 'settings-deepseek-connected', 1360);
   assert.deepEqual(failures, []);
-  console.log(JSON.stringify({ output, screenshots: shots.length, providerRequests, externalRequests: 0, rendererErrors: failures.length }));
+  console.log(JSON.stringify({ output, screenshots: shots.length, providerRequests, deepseekRequests: deepseekRequests.length, externalRequests: 0, rendererErrors: failures.length }));
 } finally {
   globalThis.fetch = original;
   await browser.close();
