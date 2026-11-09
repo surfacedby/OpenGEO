@@ -21,11 +21,12 @@ Local matching uses brand names and aliases with Unicode word boundaries. A cita
 - **ChatGPT:** Responses API answers. Web search depends on the chosen model and account permissions.
 - **OpenRouter:** model-only API answers, without a search plugin.
 - **DataForSEO:** API answers with web search requested through its LLM Responses endpoint.
+- **DeepSeek (Asks only):** API answers. OpenGEO offers the model DeepSeek's search API as a tool and runs the searches it asks for, up to four per answer.
 - **Supported SurfacedBy checks:** consumer-interface answers, labelled with their collection surface.
 
 API answers can differ from a logged-in consumer chat app. Each observation records its prompt, provider, platform, returned model identity, locale, collection time, answer, citations and retrieval mode.
 
-Citations come from provider annotations, not guessed links in answer text. Requesting search does not prove it ran: ChatGPT confirms search only when the final response contains a completed `web_search_call`. The interface marks other cases, including older records without that flag, as unconfirmed. The searches a completed call reports (its `action.query`) are saved with the answer as given, up to 20 per answer, and older records simply have none. See the [web search response contract](https://developers.openai.com/api/docs/guides/tools-web-search).
+Citations come from provider annotations, not guessed links in answer text. DeepSeek is the exception: its API returns no citation annotations, so OpenGEO records the links written in its final answer. Those links are not matched against the search results, so one can come from the model rather than a search. A DeepSeek search counts as confirmed when at least one search returned results, and every query it ran is saved with the answer. Requesting search does not prove it ran: ChatGPT confirms search only when the final response contains a completed `web_search_call`. The interface marks other cases, including older records without that flag, as unconfirmed. The searches a completed call reports (its `action.query`) are saved with the answer as given, up to 20 per answer, and older records simply have none. See the [web search response contract](https://developers.openai.com/api/docs/guides/tools-web-search).
 
 Supported SurfacedBy selected-question checks preserve the approved question IDs, locale, original answers, citations and collection dates, then use local presence matching. They do not automatically purchase analysis. Failed or cancelled checks can retain answers already collected; full checks keep their separate pricing and analysis workflow.
 

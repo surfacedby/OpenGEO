@@ -8,6 +8,7 @@ Start with the connection you already have. You can also use local audits and pr
 | OpenRouter | API answer checks, analysis and content with a choice of models | An OpenRouter account with available credit. Connect with OAuth or an existing key. Model usage is billed by OpenRouter. |
 | DataForSEO + OpenRouter | API answer collection, followed by AI analysis and content | Both accounts for the full workflow. Each provider charges for its usage. |
 | SurfacedBy API | Managed checks and insights; suggestions, reviews and drafts when supported | An account with credit and a server that supports the requested operation. Availability is checked before it is offered. |
+| DeepSeek | One-off Asks answered with DeepSeek's own web search | A DeepSeek API key with a positive balance. DeepSeek bills tokens and searches. Not used for visibility checks, analysis or content. |
 
 ![OpenGEO connection choices, with no accounts connected](../assets/provider-preview.webp)
 
@@ -41,9 +42,19 @@ OpenGEO checks the connected server's capabilities before offering managed work.
 
 **Managed features are experimental in this beta.** The desktop release does not certify live supplier quality, billing and refund recovery, worker activation, usage delivery or historical imports. Availability depends on the connected service; see the [beta notes](releases/v0.1.0-beta.4.md).
 
+## DeepSeek
+
+DeepSeek answers one-off Asks only. Visibility checks, schedules, analysis and content do not use it. Paste an API key from the [DeepSeek platform](https://platform.deepseek.com/api_keys); OpenGEO checks it against DeepSeek's balance endpoint before saving it. The key is sent to `api.deepseek.com` and nowhere else.
+
+An answer uses DeepSeek's chat API with its [search API](https://api-docs.deepseek.com/guides/search) offered to the model as a tool. The model decides what to search, up to four searches per answer, and OpenGEO runs each search and returns the results. After the fourth search the model must answer with what it has. `deepseek-flash` is the default model, and thinking mode is off.
+
+DeepSeek bills input tokens (less when its cache is hit), output tokens, and $0.75 per 1,000 searches that return results. Peak-hour rates, 01:00 to 04:00 and 06:00 to 10:00 UTC on weekdays, are twice the off-peak rates. OpenGEO keeps a dated copy of the [published prices](https://api-docs.deepseek.com/quick_start/pricing) and costs each answer from the token counts DeepSeek reports, at the rate in force when each request started. DeepSeek does not report a charge, so the recorded cost is labelled as an estimate. DeepSeek bills Chinese public holidays off-peak; OpenGEO costs them at peak, which errs high.
+
+The Ask price reads "up to": it is the most one answer can cost, with every request at peak rates, the full output allowance and all four searches. A typical answer costs a fraction of a cent. An answer starts only when that maximum fits the engine's share of your limit. An insufficient balance pauses the answer, and no other provider is used.
+
 ## Spending, pauses and cancellation
 
-An ask uses ChatGPT on your plan by default; your plan limits apply. Choose paid engines explicitly for each ask. They share the spending approval evenly, rounded down to the cent. SurfacedBy checks its current quote against that engine's share before submitting work. DataForSEO uses your saved per-request estimate, so its actual charge can differ; OpenGEO records the reported cost and stops further work if it exceeds the limit. Provider charges and refunds apply. After an ask, selection returns to ChatGPT on your plan.
+An ask uses ChatGPT on your plan by default; your plan limits apply. Choose paid engines explicitly for each ask. They share the spending approval evenly, rounded down to the cent. SurfacedBy checks its current quote against that engine's share before submitting work. DataForSEO uses your saved per-request estimate, so its actual charge can differ; OpenGEO records the reported cost and stops further work if it exceeds the limit. DeepSeek starts only when its most expensive possible answer fits its share, and records an estimate from its reported usage. Provider charges and refunds apply. After an ask, selection returns to ChatGPT on your plan.
 
 If a response is lost, retry with the same settings. OpenGEO keeps the original request key and returns the same Ask instead of starting it twice. A request key cannot add engines or raise an existing Ask's approval. One-off answers remain in Ask history even after you track the question; future visibility checks collect their own answers.
 
