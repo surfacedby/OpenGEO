@@ -104,6 +104,10 @@ const searchTool = {
   },
 };
 
+/** The answer is shown and scored as written, so the model must not narrate its searching (a live answer opened with
+ * "I've hit my search limit" before this rule). */
+const answerRules = "Write only the answer for the reader. Do not mention your searches, the search tool or any search limit.";
+
 const text = (value: unknown, max: number) => typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, max) : "";
 function trimResults(results: unknown) {
   if (!Array.isArray(results)) return [];
@@ -150,7 +154,7 @@ export async function deepseekComplete(
 ): Promise<DeepSeekAnswer> {
   const priced = deepseekPrices.models[model];
   if (!priced) throw new ProviderError("capability", "Choose a DeepSeek model OpenGEO has prices for.");
-  const messages: any[] = [{ role: "system", content: instructions }, { role: "user", content: input }];
+  const messages: any[] = [{ role: "system", content: instructions + (webSearch ? " " + answerRules : "") }, { role: "user", content: input }];
   const queries: string[] = [];
   let cost: number | null = 0, searches = 0, confirmed = false;
   for (let call = 0; call <= maxSearches; call++) {
@@ -172,7 +176,7 @@ export async function deepseekComplete(
         let query = "";
         try { query = text(JSON.parse(tool?.function?.arguments ?? "{}")?.query, 128); } catch { /* answered below as a bad request */ }
         if (tool?.function?.name !== "web_search") content = { error: "Unknown tool." };
-        else if (searches >= maxSearches) content = { error: "Search limit reached. Answer with what you have." };
+        else if (searches >= maxSearches) content = { error: "No more searches are available. Answer from the results you have." };
         else if (!query) content = { error: "Give a search query of 1 to 128 characters." };
         else {
           searches++;

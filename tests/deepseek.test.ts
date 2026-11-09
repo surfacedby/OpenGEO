@@ -118,7 +118,8 @@ test('a model that keeps searching gets four searches, then a call without the t
     const calls = f.chats().map(r => r.body);
     assert.equal(calls.length, 3);
     assert.ok(calls[0].tools && calls[1].tools && !calls[2].tools, 'the last call must not offer the tool');
-    assert.match(calls[2].messages.at(-1).content, /Search limit reached/);
+    assert.match(calls[2].messages.at(-1).content, /No more searches are available/);
+    assert.match(calls[0].messages[0].content, /Do not mention your searches, the search tool or any search limit\./, 'the answer must not narrate the search loop');
     assert.equal(maxSearches, 4);
   } finally { await f.close(); }
 });
