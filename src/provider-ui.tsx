@@ -31,7 +31,7 @@ export function ProviderIcon({ provider, size = 22 }: { provider: string; size?:
 export function Capabilities({ provider, consoleContent = false }: { provider: Provider; consoleContent?: boolean }) {
   const features = provider === "dataforseo" ? [[MessagesSquare, "AI answers"], [Globe, "Web citations"]] as const :
     provider === "console" ? [[MessagesSquare, "AI answers"], [Globe, "Web citations"], [Lightbulb, "Analysis & opportunities"], ...(consoleContent ? [[FilePenLine, "Content"] as const] : [])] as const :
-    provider === "deepseek" ? [[MessagesSquare, "One-off Asks"], [Globe, "Web search and citations"]] as const :
+    provider === "deepseek" ? [[ChartNoAxesCombined, "Visibility checks"], [MessagesSquare, "One-off Asks"], [Globe, "Web search and citations"]] as const :
     [[MessagesSquare, provider === "openrouter" ? "AI answers (API only)" : "AI answers"], [Lightbulb, "Analysis"], [FilePenLine, "Content"]] as const;
   return <div className="capability-list">{features.map(([Icon, label]) => <span key={label}><Icon size={14} />{label}</span>)}</div>;
 }

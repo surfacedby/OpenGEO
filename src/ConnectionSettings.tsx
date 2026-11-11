@@ -22,7 +22,7 @@ const descriptions = {
   console: "See your visibility across AI search, understand what holds you back and get prioritized improvements through one connection.",
   dataforseo: "Collect AI answers and citations. Pair with OpenRouter to turn your results into analysis and content.",
   openrouter: "Analyze your DataForSEO results and create content with your choice of AI model.",
-  deepseek: "Ask DeepSeek one-off questions. It answers with DeepSeek's own web search, using your DeepSeek API key.",
+  deepseek: "Check your visibility in DeepSeek and ask it one-off questions. It answers with DeepSeek's own web search, using your DeepSeek API key.",
 };
 export function ConnectionSettings({ connected, profiles, run: execute, variant = "settings", provider = "chatgpt", connectionsRequest = 0, beforeConnect }: { connected: Record<string, boolean>; profiles: ChatGPTProfiles; run: Run; variant?: "settings" | "onboarding"; provider?: Provider; connectionsRequest?: number; beforeConnect?: () => Promise<void> }) {
   const [tab, setTab] = useState<string>('Connections'), [expanded, setExpanded] = useState<Provider | null>(null),
@@ -103,7 +103,7 @@ export function ConnectionSettings({ connected, profiles, run: execute, variant 
           </div>
           {provider === "console" && capabilityError && <div className="button-row"><p role="status" className="small">{capabilityError}</p><button className="text-button" disabled={loadingCapabilities} onClick={() => setCapabilityRevision(value => value + 1)}>Retry platform check</button></div>}
           {provider === "console" && connected.console && !consoleContent && !loadingCapabilities && !capabilityError && <p className="provider-availability">Content is not available on this connection yet.</p>}
-          <div className="provider-footer"><small>{provider === "chatgpt" ? "Plus or Pro plan required. Your plan limits apply." : provider === "console" ? "Pay as you go." : provider === "dataforseo" ? "DataForSEO usage charges apply." : provider === "deepseek" ? "Pay DeepSeek for tokens and searches. Used for Ask only." : "Pay for the model usage you choose."}</small>
+          <div className="provider-footer"><small>{provider === "chatgpt" ? "Plus or Pro plan required. Your plan limits apply." : provider === "console" ? "Pay as you go." : provider === "dataforseo" ? "DataForSEO usage charges apply." : provider === "deepseek" ? "Pay DeepSeek for tokens and searches. Recommendations and content stay with your other connections." : "Pay for the model usage you choose."}</small>
             <button disabled={busy} className={provider === "chatgpt" && !connected.chatgpt && pending?.provider !== "chatgpt" ? "primary" : "secondary"} onClick={() => { feedback.setError(""); provider === "chatgpt" && !connected.chatgpt ? connect("chatgpt") : setExpanded(expanded === provider ? null : provider); }}><KeyRound size={14} />{connected[provider] ? "Manage" : provider === "chatgpt" ? openingProvider === provider ? "Opening sign-in..." : pending?.provider === "chatgpt" ? "Start sign-in again" : "Continue with ChatGPT" : "Connect"}</button></div>
           {expanded === provider && <div className="provider-config">
             {provider === "chatgpt" ? <>

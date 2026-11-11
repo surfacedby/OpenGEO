@@ -38,6 +38,7 @@ import {
   Flag,
 } from "lucide-react";
 import { percent, shortDate, relativeTime, dateTime, usd } from "./format";
+import { deepseekAnswerEstimate, deepseekCheckBudget } from "../server/deepseek-pricing";
 import { api } from "./api";
 import { ConnectionSettings, type ChatGPTProfiles } from "./ConnectionSettings";
 import { Onboarding } from "./Onboarding";
@@ -68,7 +69,7 @@ import { PageHeader, EmptyState, emptyIcon, ActionCard, Disclosure, MetricCard a
 import { OverviewSummary } from './OverviewSummary';
 import { ActivityNotice } from './ui/ActivityNotice';
 import { Dialog as Modal } from './ui/Dialog';
-import { completedBrandMeasurement, completedMeasurement, completedAnalysisResult, analysisInProgress, analysisMeasurementId } from "../server/portable-results";
+import { completedBrandMeasurement, completedMeasurement, completedAnalysisResult, analysisInProgress, analysisMeasurementId, analysisBasisCheck, completedAnalysisBasis } from "../server/portable-results";
 import type { TopicSummary } from "../server/topics";
 import { TopicLens, Topics, TopicVisibility, useTopicView } from "./Topics";
 import { TopicDialog } from "./TopicDialog";
@@ -249,7 +250,8 @@ export function App() {
   const opportunities = opportunityFindings(w?.findings ?? []);
   const topicJobs = topicPage ? (w?.jobs ?? []).filter(job => (job.topicId ?? w?.jobs.find(item => item.id === analysisMeasurementId(job))?.topicId) === topicPage) : [];
   const topicOpportunities = opportunities.filter(finding => topicJobs.some(job => job.id === finding.jobId));
-  const topicMeasurement = topicJobs.find(completedMeasurement);
+  // Recommendations read the newest check from an engine that prepares them; a DeepSeek check never displaces them.
+  const topicMeasurement = topicJobs.find(analysisBasisCheck);
   const topicAnalysis = topicMeasurement && topicJobs.find(job => completedAnalysisResult(job)?.measurementJobId === topicMeasurement.id);
   const topicPending = topicJobs.find(job => analysisInProgress(job) || ['measure', 'recheck'].includes(job.kind) && ['queued', 'running', 'paused'].includes(job.status));
   const ownCitations = w?.presentation.outcomes.find((group) => group.kind === "cited");
@@ -300,7 +302,7 @@ export function App() {
   if (page !== "Settings" && (!setupState.completed || !projects.length || newProject || setupState.draft)) return <Onboarding openSettings={openConnections} connected={connected} profiles={profiles} refresh={refresh} draft={setupState.draft} savedProject={projects.find((project) => project.id === setupState.draft?.projectId)} initialStep={setupState.completed && Object.values(connected).some(Boolean) ? 1 : 0} cancel={projects.length && setupState.completed ? () => setNewProject(false) : undefined} finish={async (project, startVisibility) => { if (startVisibility) setJobDialog("measure"); selectedRef.current = project.id; setSelected(project.id); setNewProject(false); changePage("Overview"); await refresh(); }} />;
   const audited = !!w?.pages.length, measured = !!w?.metrics.completed;
   const comparison = w?.comparison?.status === "comparable" && w.jobs.find(completedBrandMeasurement)?.id === w.measurement?.id ? w.comparison as { previousAt: string; mentionPoints: number | null; citationPoints: number | null } : null;
-  const analysisMeasurement = w?.jobs.find(completedBrandMeasurement);
+  const analysisMeasurement = w?.jobs.find(completedAnalysisBasis);
   const activeMeasurement = w?.jobs.find(job => ['measure', 'recheck'].includes(job.kind) && !job.topicId && ['queued', 'running', 'paused'].includes(job.status) && !completedMeasurement(job));
   const activeScan = w?.jobs.find(job => ['measure', 'recheck'].includes(job.kind) && !job.topicId && ['queued', 'running', 'paused'].includes(job.status) && (!completedMeasurement(job) || job.prepareRecommendations));
   const completedAnalysis = analysisMeasurement && w!.jobs.find(job => completedAnalysisResult(job)?.measurementJobId === analysisMeasurement.id);
@@ -308,11 +310,10 @@ export function App() {
   const analysisReceipt = completedAnalysis ? completedAnalysisResult(completedAnalysis) : null;
   const omittedSuggestions = analysisReceipt?.omittedSuggestions ?? 0;
   const activeAnalysis = w?.jobs.find(job => analysisInProgress(job) && !job.topicId && ['queued', 'running'].includes(job.status));
-  const pausedAnalysis = w?.jobs.find(job => analysisInProgress(job) && !job.topicId && job.status === 'paused' && (!w.measurement || job.createdAt >= w.measurement.createdAt));
+  const pausedAnalysis = w?.jobs.find(job => analysisInProgress(job) && !job.topicId && job.status === 'paused' && (!analysisMeasurement || job.createdAt >= analysisMeasurement.createdAt));
   const canAnalyze = connected.chatgpt || connected.console || connected.openrouter;
   const activeAudit = w?.jobs.find((job) => job.kind === "audit" && ["running", "queued"].includes(job.status));
-  // Ask-only connections (DeepSeek) cannot run a visibility check, so they do not unlock it.
-  const canMeasure = providerOptions(connected, ["chatgpt", "console", "dataforseo", "openrouter"]).length > 0;
+  const canMeasure = providerOptions(connected, ["chatgpt", "console", "dataforseo", "openrouter", "deepseek"]).length > 0;
   const measurementAction = activeScan
     ? { label: activeScan.status === 'paused' ? 'Review paused check' : 'View current check', action: () => changePage('Visibility') }
     : canMeasure
@@ -923,22 +924,29 @@ function JobDialog({
   const choices: Provider[] =
     ["diagnose", "content", "revise", "competitors"].includes(kind)
         ? ["chatgpt", "console", "openrouter"]
-        : ["chatgpt", "console", "dataforseo", "openrouter"];
+        : ["chatgpt", "console", "dataforseo", "openrouter", "deepseek"];
   const baseline = kind === 'recheck' ? previousMeasurement : null;
-  const [provider, setProvider] = useState<Provider>(
-      baseline?.provider ?? choices.find((p) => connected[p]) ?? choices[0],
-    ),
+  const initialProvider: Provider = baseline?.provider ?? choices.find((p) => connected[p]) ?? choices[0];
+  const [provider, setProvider] = useState<Provider>(initialProvider),
     [models, setModels] = useState<Model[]>([]),
     [model, setModel] = useState(""),
-    [platform, setPlatform] = useState(baseline?.platform ?? "chat_gpt"),
+    [platform, setPlatform] = useState(baseline?.platform ?? (initialProvider === "deepseek" ? "deepseek" : "chat_gpt")),
     [consolePlatforms, setConsolePlatforms] = useState<{ key: string; name: string; enabled: boolean }[]>([]),
     [selectedQuestionPlatforms, setSelectedQuestionPlatforms] = useState<string[]>([]),
     [loading, setLoading] = useState(false),
     [budget, setBudget] = useState(0),
+    budgetEdited = useRef(false),
     [contentMode, setContentMode] = useState<'article' | 'page_update'>(finding && finding.opportunity?.type !== 'new_content' ? 'page_update' : 'article'),
     [discoveryError, setDiscoveryError] = useState(""),
     [discoveryRevision, setDiscoveryRevision] = useState(0),
     [submitting, setSubmitting] = useState(false);
+  // DeepSeek is paid per answer: suggest a budget that lets the whole check finish, until the person edits it.
+  const questionCount = (topic ? topic.prompts : project.prompts).length;
+  const deepseekModel = provider === "deepseek" && ['measure', 'recheck'].includes(kind) ? models.find((entry) => entry.id === model) : undefined;
+  const deepseekWorst = deepseekModel ? deepseekAnswerEstimate(deepseekModel, 1700, 4096) : null;
+  useEffect(() => {
+    if (deepseekModel && !budgetEdited.current) setBudget(deepseekCheckBudget(questionCount, deepseekModel));
+  }, [deepseekModel?.id, questionCount]);
   // A lost response must not turn retrying the same approval into another paid run.
   const submission = useRef<{ fingerprint: string; key: string } | null>(null);
   const feedback = useFormFeedback(), { setError } = feedback;
@@ -1088,7 +1096,7 @@ function JobDialog({
             ].map(({ value, title, detail, Icon }) => <label key={value} className={contentMode === value ? 'selected' : ''}><input type="radio" name="contentMode" value={value} checked={contentMode === value} onChange={() => setContentMode(value)} /><Icon size={21} /><span><strong>{title}</strong><small>{detail}</small></span><Check size={16} aria-hidden="true" /></label>)}</fieldset>}
             <label>
               Connection
-              <Select label="Connection" {...feedback.field("provider")} value={provider} placeholder="Choose a connected provider" options={providerOptions(connected, choices)} onChange={(value) => { setProvider(value as Provider); setPlatform(value === baseline?.provider ? baseline.platform : 'chat_gpt'); setError(""); }} />
+              <Select label="Connection" {...feedback.field("provider")} value={provider} placeholder="Choose a connected provider" options={providerOptions(connected, choices)} onChange={(value) => { setProvider(value as Provider); setPlatform(value === baseline?.provider ? baseline.platform : value === 'deepseek' ? 'deepseek' : 'chat_gpt'); setError(""); }} />
             </label>
             <p className="small">
               {kind === "competitors" ? "Reviews your saved answers and website evidence. No visibility questions are asked again. Your connection's usage limits or charges apply." : provider === "chatgpt"
@@ -1097,7 +1105,9 @@ function JobDialog({
                   ? kind === "content" ? "A researched draft with source links and review notes. Pay as you go, within your approved maximum." : kind === "diagnose" ? "Find useful page improvements and new content ideas from your saved evidence. Pay as you go, within your approved maximum." : "Managed measurement and analysis through one connection. Pay as you go."
                   : provider === "dataforseo"
                     ? "Collect visibility evidence for local analysis. Provider charges apply."
-                    : "Checks answers from your chosen model. OpenRouter usage charges apply."}
+                    : provider === "deepseek"
+                      ? "Checks answers from DeepSeek, which runs its own web searches. Answers only: recommendations come from your other connections. DeepSeek usage charges apply."
+                      : "Checks answers from your chosen model. OpenRouter usage charges apply."}
             </p>
             {topic && <p className="small" role="note">Asks this topic's {topic.prompts.length} {topic.prompts.length === 1 ? 'question' : 'questions'}. Your other {project.prompts.length - topic.prompts.length} are not asked. The answers count in this topic and in your brand's check history, where this check shows as a partial check.</p>}
             {provider === 'console' && ['measure', 'recheck'].includes(kind) && !loading && !discoveryError && <p className="small">
@@ -1149,11 +1159,13 @@ function JobDialog({
                   step="0.01"
                   required
                   value={budget || ""}
-                  onChange={(e) => setBudget(Number(e.target.value))}
+                  onChange={(e) => { budgetEdited.current = true; setBudget(Number(e.target.value)); }}
                 />
                 <small>
                   {provider === "dataforseo"
                     ? "Further calls stop at this budget. A single request can exceed its estimate; set a provider-side spending limit too."
+                    : deepseekWorst !== null
+                    ? `Suggested for ${questionCount} ${questionCount === 1 ? "question" : "questions"}. Each answer starts only if its most expensive case (up to ${usd(deepseekWorst)}) still fits. The recorded cost comes from DeepSeek's reported tokens and searches and is usually far lower.`
                     : "The workflow stops before a step that exceeds its estimated budget."}
                 </small>
               </label>

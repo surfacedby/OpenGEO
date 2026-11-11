@@ -61,7 +61,7 @@ export function MeasurementScope({
   return (
     <div className="measurement-scope" aria-label="Current measurement scope">
       {measurement.provider &&
-        !["chatgpt", "openrouter"].includes(measurement.provider) && (
+        !["chatgpt", "openrouter", "deepseek"].includes(measurement.provider) && (
           <span>
             <ProviderIcon provider={measurement.provider} size={16} />
             {measurement.provider === "console"

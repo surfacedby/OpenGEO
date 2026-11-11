@@ -334,10 +334,10 @@ export function ScheduleControls({ run, connected }: { run: (f: () => Promise<un
     finally { setSaving(false); }
   }
   const availableConnections: Record<string, boolean> = { ...connected, console: connected.console && (kind === "content" ? consoleAvailability?.content : consoleAvailability?.answers) === true },
-    allowed: Provider[] = kind === "content" ? ["chatgpt", "console", "openrouter"] : ["chatgpt", "console", "dataforseo", "openrouter"],
+    allowed: Provider[] = kind === "content" ? ["chatgpt", "console", "openrouter"] : ["chatgpt", "console", "dataforseo", "openrouter", "deepseek"],
     choices = providerOptions(availableConnections, allowed), local = kind === "audit",
     workflows = [{ value: "audit", label: "Website health", detail: "No provider required" },
-      ...(connected.chatgpt || connected.openrouter || connected.dataforseo || connected.console && consoleAvailability?.answers ? [{ value: "recheck", label: "Visibility recheck" }] : []),
+      ...(connected.chatgpt || connected.openrouter || connected.dataforseo || connected.deepseek || connected.console && consoleAvailability?.answers ? [{ value: "recheck", label: "Visibility recheck" }] : []),
       ...(connected.chatgpt || connected.openrouter || connected.console && consoleAvailability?.content ? [{ value: "content", label: "Content draft" }] : [])];
   useEffect(() => {
     let stopped = false;
