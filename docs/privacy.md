@@ -18,7 +18,7 @@ Backups can still contain sensitive evidence. Keep them private. Restore through
 | Your website | Requests for public pages and sitemaps during an audit |
 | ChatGPT or OpenRouter | Prompts, instructions, source excerpts and project context needed for the selected operation |
 | DataForSEO | Prompts, models and supported locale parameters |
-| DeepSeek | For Asks only: the question, the answer instructions with the project locale, the searches the model chooses and the results returned to it. DeepSeek is a company based in China. |
+| DeepSeek | Each question in a visibility check or Ask, the answer instructions with the project locale, the searches the model chooses and the results returned to it. No website pages, saved answers or business notes. DeepSeek is a company based in China. |
 | SurfacedBy API | Domain configuration and requested tasks. Evidence-based role reviews and recommendations also send selected saved answers, their IDs and timestamps, citation links and selected owned page URLs. |
 
 SurfacedBy may read those public pages and return dated excerpts. Each provider has its own data policy; check it before submitting sensitive material.

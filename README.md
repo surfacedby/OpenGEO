@@ -47,7 +47,7 @@ The desktop app includes its runtime and browser. You do not need Node.js, Docke
 
 ## Choose your connection
 
-Use an eligible **ChatGPT subscription**, connect **OpenRouter**, or pair **DataForSEO with OpenRouter** for measurement, analysis and content. An optional **SurfacedBy API** connection offers the managed operations available on your server. Connect **DeepSeek** with an API key to add it to one-off Asks.
+Use an eligible **ChatGPT subscription**, connect **OpenRouter**, or pair **DataForSEO with OpenRouter** for measurement, analysis and content. An optional **SurfacedBy API** connection offers the managed operations available on your server. Connect **DeepSeek** with an API key to add it to visibility checks, schedules and one-off Asks.
 
 Local audits and project storage are free to use without a provider. Connected services have their own eligibility rules, limits and charges. OpenGEO asks for spending approval where required and never silently switches you to a paid provider. [Compare the connections](docs/connections.md).
 

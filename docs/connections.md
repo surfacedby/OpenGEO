@@ -8,7 +8,7 @@ Start with the connection you already have. You can also use local audits and pr
 | OpenRouter | API answer checks, analysis and content with a choice of models | An OpenRouter account with available credit. Connect with OAuth or an existing key. Model usage is billed by OpenRouter. |
 | DataForSEO + OpenRouter | API answer collection, followed by AI analysis and content | Both accounts for the full workflow. Each provider charges for its usage. |
 | SurfacedBy API | Managed checks and insights; suggestions, reviews and drafts when supported | An account with credit and a server that supports the requested operation. Availability is checked before it is offered. |
-| DeepSeek | One-off Asks answered with DeepSeek's own web search | A DeepSeek API key with a positive balance. DeepSeek bills tokens and searches. Not used for visibility checks, analysis or content. |
+| DeepSeek | Visibility checks, schedules and one-off Asks, answered with DeepSeek's own web search | A DeepSeek API key with a positive balance. DeepSeek bills tokens and searches. Recommendations, suggestions and content stay with your other connections. |
 
 ![OpenGEO connection choices, with no accounts connected](../assets/provider-preview.webp)
 
@@ -44,13 +44,17 @@ OpenGEO checks the connected server's capabilities before offering managed work.
 
 ## DeepSeek
 
-DeepSeek answers one-off Asks only. Visibility checks, schedules, analysis and content do not use it. Paste an API key from the [DeepSeek platform](https://platform.deepseek.com/api_keys); OpenGEO checks it against DeepSeek's balance endpoint before saving it. The key is sent to `api.deepseek.com` and nowhere else.
+DeepSeek runs visibility checks (all questions or one topic, on demand or on a schedule) and one-off Asks. It collects answers only: recommendations, question suggestions, competitor reviews and content stay with your other connections. Paste an API key from the [DeepSeek platform](https://platform.deepseek.com/api_keys); OpenGEO checks it against DeepSeek's balance endpoint before saving it. The key is sent to `api.deepseek.com` and nowhere else.
 
 An answer uses DeepSeek's chat API with its [search API](https://api-docs.deepseek.com/guides/search) offered to the model as a tool. The model decides what to search, up to four searches per answer, and OpenGEO runs each search and returns the results. After the fourth search the model must answer with what it has. `deepseek-flash` is the default model, and thinking mode is off.
 
 DeepSeek bills input tokens (less when its cache is hit), output tokens, and $0.75 per 1,000 searches that return results. Peak-hour rates, 01:00 to 04:00 and 06:00 to 10:00 UTC on weekdays, are twice the off-peak rates. OpenGEO keeps a dated copy of the [published prices](https://api-docs.deepseek.com/quick_start/pricing) and costs each answer from the token counts DeepSeek reports, at the rate in force when each request started. DeepSeek does not report a charge, so the recorded cost is labelled as an estimate. DeepSeek bills Chinese public holidays off-peak; OpenGEO costs them at peak, which errs high.
 
 The Ask price reads "up to": it is the most one answer can cost, with every request at peak rates, the full output allowance and all four searches. A typical answer costs a fraction of a cent. An answer starts only when that maximum fits the engine's share of your limit. An insufficient balance pauses the answer, and no other provider is used.
+
+A visibility check applies the same rule to every question: each answer starts only if its most expensive case still fits what is left of the run budget, so a budget that is too small stops the check early and keeps the answers already collected. The check dialog suggests a budget that lets the whole check finish (for 82 questions on `deepseek-flash`, $1.00). A schedule adds a monthly ceiling, and a scheduled check that would not fit what remains of it does not start.
+
+A DeepSeek check is a reading of its own. The brand view shows the newest check from any connection, labelled with its engine, and each engine keeps its own trend and comparison. Recommendations keep reading the newest check from a connection that prepares them, so a DeepSeek check never replaces them.
 
 ## Spending, pauses and cancellation
 

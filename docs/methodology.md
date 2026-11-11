@@ -21,7 +21,7 @@ Local matching uses brand names and aliases with Unicode word boundaries. A cita
 - **ChatGPT:** Responses API answers. Web search depends on the chosen model and account permissions.
 - **OpenRouter:** model-only API answers, without a search plugin.
 - **DataForSEO:** API answers with web search requested through its LLM Responses endpoint.
-- **DeepSeek (Asks only):** API answers. OpenGEO offers the model DeepSeek's search API as a tool and runs the searches it asks for, up to four per answer.
+- **DeepSeek:** API answers, in visibility checks and Asks. OpenGEO offers the model DeepSeek's search API as a tool and runs the searches it asks for, up to four per answer. A DeepSeek check keeps its own trend and comparison, and recommendations do not read it by default: they read the newest check from a connection that prepares them.
 - **Supported SurfacedBy checks:** consumer-interface answers, labelled with their collection surface.
 
 API answers can differ from a logged-in consumer chat app. Each observation records its prompt, provider, platform, returned model identity, locale, collection time, answer, citations and retrieval mode.
