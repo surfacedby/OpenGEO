@@ -1,76 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { Store } from '../server/storage.js';
-import { Vault } from '../server/vault.js';
-import { createApp } from '../server/app.js';
-import { jobInput, projectInput, ProviderError } from '../server/contracts.js';
-import { deepseekAnswerEstimate, deepseekComplete, deepseekModels, deepseekPrices, isPeak, maxSearches } from '../server/deepseek.js';
-
-// Synthetic fixtures only: example.com identities and an invented key. Response shapes follow DeepSeek's
-// documented schemas: https://api-docs.deepseek.com/api/create-chat-completion (chat, tool calls, usage),
-// https://api-docs.deepseek.com/guides/search (search), https://api-docs.deepseek.com/api/get-user-balance and
-// https://api-docs.deepseek.com/api/list-models.
-const session = 'synthetic-deepseek-session';
-const headers = { host: '127.0.0.1:4318', authorization: 'Bearer ' + session };
-const key = 'synthetic-deepseek-fixture-key';
-const question = 'Which example tools publish free reports?';
-const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
-const usage = { prompt_tokens: 1000, completion_tokens: 50, total_tokens: 1050, prompt_cache_hit_tokens: 200, prompt_cache_miss_tokens: 800 };
-const toolReply = (queries: string[]) => ({ id: 'chat-' + randomUUID(), object: 'chat.completion', model: 'deepseek-flash', usage,
-  choices: [{ index: 0, finish_reason: 'tool_calls', message: { role: 'assistant', content: '',
-    tool_calls: queries.map((query, i) => ({ id: 'call_' + i, type: 'function', function: { name: 'web_search', arguments: JSON.stringify({ query }) } })) } }] });
-const answerReply = (content: string, finish = 'stop') => ({ id: 'chat-' + randomUUID(), object: 'chat.completion', model: 'deepseek-flash', usage,
-  choices: [{ index: 0, finish_reason: finish, message: { role: 'assistant', content } }] });
-const answer = 'Example Brand publishes free reports. See [Example reports](https://example.com/reports) and https://example.org/compare.';
-
-type Request = { host: string; path: string; method: string; auth?: string; body: any };
-type Script = { replies: any[]; requests: Request[]; balanceStatus?: number; chatStatus?: number; dropChat?: boolean };
-function fakeDeepSeek(script: Script) {
-  return (async (url: string | URL, init?: RequestInit) => {
-    const address = new URL(String(url)), method = init?.method ?? 'GET', body = init?.body ? JSON.parse(String(init.body)) : null;
-    const auth = (init?.headers as Record<string, string> | undefined)?.Authorization;
-    script.requests.push({ host: address.hostname, path: address.pathname, method, auth, body });
-    assert.equal(address.hostname, 'api.deepseek.com', 'only DeepSeek may be called in these tests');
-    if (address.pathname === '/user/balance') return script.balanceStatus === 401 ? json({ error: { message: 'Authentication Fails', type: 'authentication_error' } }, 401)
-      : json({ is_available: true, balance_infos: [{ currency: 'USD', total_balance: '9.87', granted_balance: '0.00', topped_up_balance: '9.87' }] });
-    if (address.pathname === '/models') return json({ object: 'list', data: ['deepseek-v4-pro', 'deepseek-future', 'deepseek-flash'].map(id => ({ id, object: 'model', owned_by: 'deepseek' })) });
-    if (address.pathname === '/v1/tools/search') return json({ results: body.query.includes('nothing') ? [] : [
-      { rerank_score: 2.5, title: 'Free example reports', url: 'https://example.com/reports', snippet: 'Example Brand shares free reports.', summary: 'Longer summary.', content: '', site_name: 'Example', site_icon: null, date: '2026-10-01T00:00:00Z', authority: 3 },
-      { rerank_score: 1.9, title: 'Comparing example tools', url: 'https://example.org/compare', snippet: 'A comparison.', summary: '', content: '', site_name: null, site_icon: null, date: null, authority: -1 }] });
-    if (address.pathname === '/chat/completions') {
-      if (script.dropChat) throw new TypeError('fetch failed');
-      if (script.chatStatus) return json({ error: { message: 'Insufficient Balance', type: 'unknown_error' } }, script.chatStatus);
-      const reply = script.replies.shift();
-      if (!reply) throw new Error('No scripted DeepSeek reply left');
-      return json(reply);
-    }
-    throw new Error('Unexpected DeepSeek request ' + method + ' ' + address.pathname);
-  }) as typeof fetch;
-}
-
-async function fixture(script: Script, connected = true) {
-  const dir = mkdtempSync(join(tmpdir(), 'opengeo-deepseek-'));
-  const store = new Store(dir);
-  const vault = new Vault(dir, { encrypt: text => Buffer.from(text), decrypt: bytes => bytes.toString() });
-  if (connected) vault.set('deepseek', { provider: 'deepseek', key });
-  const original = globalThis.fetch;
-  globalThis.fetch = fakeDeepSeek(script);
-  const { app, runner } = await createApp(store, vault, session);
-  const project = store.createProject(projectInput.parse({ domain: 'example.com', brand: 'Example Brand', prompts: ['Which example dashboards are free?'] }));
-  const ask = (payload: object) => app.inject({ method: 'POST', url: `/api/projects/${project.id}/asks`, headers: { ...headers, 'idempotency-key': 'ask-' + randomUUID() }, payload });
-  const read = async (askId: string) => (await app.inject({ url: `/api/projects/${project.id}/asks/${askId}`, headers })).json();
-  const chats = () => script.requests.filter(r => r.path === '/chat/completions');
-  return { store, vault, app, runner, project, ask, read, chats,
-    async close() { globalThis.fetch = original; await app.close(); store.close(); rmSync(dir, { recursive: true, force: true }); } };
-}
-const costOf = (calls: number, searches: number, at: Date) => {
-  const r = isPeak(at) ? deepseekPrices.models['deepseek-flash'].peak : deepseekPrices.models['deepseek-flash'].offPeak;
-  return calls * (200 * r.hit + 800 * r.miss + 50 * r.output) / 1e6 + searches * deepseekPrices.searchUsd;
-};
+import { jobInput, ProviderError } from '../server/contracts.js';
+import { deepseekAnswerEstimate, deepseekComplete, deepseekModels, isPeak, maxSearches } from '../server/deepseek.js';
+import { answer, answerReply, costOf, fakeDeepSeek, fixture, headers, key, question, toolReply, type Script } from './deepseek-fixture.js';
 
 test('a DeepSeek ask runs its own searches, cites links in the answer, records an estimated cost and stays out of evidence', async () => {
   const script: Script = { requests: [], replies: [toolReply(['free example report tools']), toolReply(['example reports site:example.com', 'nothing matches this']), answerReply(answer)] };
@@ -204,15 +137,20 @@ test('connecting checks the key with DeepSeek, keeps the previous key on failure
   } finally { await f.close(); }
 });
 
-test('DeepSeek answers one-off Asks only, and the Ask catalog prices it as metered', async () => {
-  const projectId = randomUUID();
-  assert.equal(jobInput.safeParse({ projectId, kind: 'measure', provider: 'deepseek' }).success, false);
-  assert.equal(jobInput.safeParse({ projectId, kind: 'ask', provider: 'deepseek', platform: 'deepseek', askId: randomUUID(), question }).success, true);
+test('DeepSeek runs Asks and visibility checks but no analysis or content, and the Ask catalog prices it as metered', async () => {
+  const projectId = randomUUID(), only = 'DeepSeek runs Asks and visibility checks only';
+  const refusal = (input: object) => { const r = jobInput.safeParse(input); return r.success ? null : r.error.issues.map(i => i.message); };
+  assert.equal(refusal({ projectId, kind: 'measure', provider: 'deepseek', maxCostUsd: 1 }), null);
+  assert.equal(refusal({ projectId, kind: 'recheck', provider: 'deepseek', maxCostUsd: 1 }), null);
+  assert.equal(refusal({ projectId, kind: 'ask', provider: 'deepseek', platform: 'deepseek', askId: randomUUID(), question }), null);
+  for (const input of [{ kind: 'diagnose' }, { kind: 'content', topic: 'Free example reports' }, { kind: 'discover', auditJobId: randomUUID() },
+    { kind: 'competitors', measurementJobId: randomUUID() }, { kind: 'revise', contentId: randomUUID(), revisionInstructions: 'Add sources' }])
+    assert.deepEqual(refusal({ projectId, provider: 'deepseek', maxCostUsd: 1, ...input }), [only], input.kind);
+  assert.ok(refusal({ projectId, kind: 'measure', provider: 'deepseek', maxCostUsd: 1, prepareRecommendations: true })?.length,
+    'a DeepSeek check never prepares recommendations');
   const script: Script = { requests: [], replies: [] };
   const f = await fixture(script);
   try {
-    const refused = await f.app.inject({ method: 'POST', url: '/api/jobs', headers, payload: { projectId: f.project.id, kind: 'measure', provider: 'deepseek', maxCostUsd: 1 } });
-    assert.notEqual(refused.statusCode, 200);
     const catalog = (await f.app.inject({ url: `/api/projects/${f.project.id}/asks/engines`, headers })).json();
     const engine = catalog.engines.find((e: any) => e.id === 'deepseek');
     assert.deepEqual([engine.available, engine.price, engine.label], [true, 'metered', 'DeepSeek']);

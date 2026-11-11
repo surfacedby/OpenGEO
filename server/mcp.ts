@@ -43,11 +43,11 @@ server.registerTool(
   "start_workflow",
   {
     description:
-      "Run a selected provider workflow with an explicitly approved USD budget. Never substitute providers.",
+      "Run a selected provider workflow with an explicitly approved USD budget. Never substitute providers. DeepSeek runs measure and recheck only; recommendations, suggestions, competitors and content stay with the other providers.",
     inputSchema: {
       projectId: z.string().uuid(),
       kind: z.enum(["discover", "measure", "recheck", "diagnose", "competitors", "content", "revise"]),
-      provider: z.enum(["chatgpt", "openrouter", "dataforseo", "console"]),
+      provider: z.enum(["chatgpt", "openrouter", "dataforseo", "console", "deepseek"]),
       model: z.string().optional(),
       maxCostUsd: z.number().nonnegative(),
       topic: z.string().optional(),

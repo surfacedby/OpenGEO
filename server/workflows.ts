@@ -8,7 +8,7 @@ import { renderedFetch } from "./render.js";
 import { CrawlBackoff, CrawlDeferred, crawlFetch, publicUrl, sameSiteHost } from "./network.js";
 import { pageSearchExclusion } from './page-classification.js';
 import { scheduledBudgetCeiling } from "./scheduler.js";
-import { completedBrandMeasurement, completedMeasurement } from "./portable-results.js";
+import { completedAnalysisBasis, completedMeasurement } from "./portable-results.js";
 import { topicScope } from "./topics.js";
 import { askScope } from "./ask-scope.js";
 import { deepseekAnswerEstimate } from "./deepseek.js";
@@ -671,7 +671,7 @@ export class Runner {
       let evidence;
       if (priorEvidence?.body) evidence = JSON.parse(priorEvidence.body);
       else {
-        const latest = measurementJobId ? this.store.job(measurementJobId) : this.store.jobs(project.id).find(completedBrandMeasurement);
+        const latest = measurementJobId ? this.store.job(measurementJobId) : this.store.jobs(project.id).find(completedAnalysisBasis);
         if (!latest || latest.projectId !== project.id || !completedMeasurement(latest)) throw new ProviderError("evidence", "Choose a completed visibility check for this brand.");
         if (!this.ensureAnalysisWebsite(job, project)) return { waitingForWebsite: true, measurementJobId: latest.id };
         const { pages } = this.analysisPages(project);

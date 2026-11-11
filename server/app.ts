@@ -552,7 +552,7 @@ export async function createApp(
     p.models(
       z.enum(providers).parse((req.params as any).provider),
       z
-        .enum(["chat_gpt", "gemini", "perplexity"])
+        .enum(["chat_gpt", "gemini", "perplexity", "deepseek"])
         .parse((req.query as any)?.platform ?? "chat_gpt"),
     ),
   );

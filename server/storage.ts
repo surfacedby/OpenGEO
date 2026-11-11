@@ -6,7 +6,7 @@ import { ProviderError, contentTask } from "./contracts.js";
 import { topicNames } from "./topic-migration.js";
 import { PageCatalog } from './page-catalog.js';
 import { askScope } from './ask-scope.js';
-import { completedBrandMeasurement, completedMeasurement, analysisInProgress } from './portable-results.js';
+import { completedAnalysisBasis, completedMeasurement, analysisInProgress } from './portable-results.js';
 import type {
   Project,
   ProjectInput,
@@ -169,6 +169,9 @@ export class Store {
     return JSON.parse(r.body);
   }
   enqueue(input: JobInput, key: string): Job {
+    // DeepSeek answers only as itself. The platform is part of a check's comparison key and its label, so it is set
+    // here for every caller (the check dialog sends its default "chat_gpt"), before the idempotency comparison.
+    if (input.provider === "deepseek") input = { ...input, platform: "deepseek" };
     return this.db.transaction(() => {
       const r = this.db
         .prepare("SELECT body FROM jobs WHERE idempotency=?")
@@ -193,7 +196,7 @@ export class Store {
       if (input.kind === 'diagnose' && this.jobs(input.projectId).some(job => analysisInProgress(job) && ['queued', 'running'].includes(job.status)))
         throw new ProviderError('in_progress', 'An improvement plan is already being prepared. Follow its progress in Opportunities.');
       const analysisMeasurement = input.kind === 'diagnose' ? input.measurementJobId
-        ? this.job(input.measurementJobId) : this.jobs(input.projectId).find(completedBrandMeasurement) : undefined;
+        ? this.job(input.measurementJobId) : this.jobs(input.projectId).find(completedAnalysisBasis) : undefined;
       if (analysisMeasurement && (analysisMeasurement.projectId !== input.projectId || !completedMeasurement(analysisMeasurement)))
         throw new ProviderError('evidence', 'Choose a completed visibility check for this brand.');
       if (input.kind === 'competitors' && this.jobs(input.projectId).some(job => job.kind === 'competitors' && job.measurementJobId === input.measurementJobId && ['queued', 'running', 'paused'].includes(job.status)))

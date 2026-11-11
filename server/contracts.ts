@@ -194,7 +194,7 @@ export const jobInput = z
   .refine(input => !input.background || input.kind === 'audit', 'Only website checks run in paced background batches')
   .refine((input) => !input.topicId || ["measure", "recheck"].includes(input.kind), "Only visibility checks can be limited to a topic")
   .refine((input) => input.kind === "ask" ? Boolean(input.askId && input.question) : !input.askId && !input.question, "An ask needs one question and its identifier")
-  .refine((input) => input.provider !== "deepseek" || input.kind === "ask", "DeepSeek answers one-off Asks only")
+  .refine((input) => input.provider !== "deepseek" || ["ask", "measure", "recheck"].includes(input.kind), "DeepSeek runs Asks and visibility checks only")
   .refine((input) => input.kind !== 'revise' || (!!input.contentId && !!input.revisionInstructions), 'Choose a draft and describe the revision')
   .refine((input) => input.kind !== 'competitors' || !!input.measurementJobId, 'Choose a saved visibility check')
   .refine((input) => (input.kind === 'discover') === !!input.auditJobId, 'Question suggestions read one website audit')
