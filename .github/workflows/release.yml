@@ -143,6 +143,10 @@ jobs:
           node-version: '24.4.1'
           package-manager-cache: false
       - run: npm ci --ignore-scripts
+      - name: Fetch pinned scanners and verify detection before payload review
+        run: |
+          node --input-type=module -e "import {scannerImages} from './scripts/scanner-config.mjs'; import {execFileSync} from 'node:child_process'; for (const image of Object.values(scannerImages)) execFileSync('docker', ['pull', image], {stdio:'inherit'});"
+          npm run audit:canaries
       - name: Audit exact private payload, upstream provenance and complete history
         env:
           GH_TOKEN: ${{ github.token }}

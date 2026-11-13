@@ -1,6 +1,6 @@
 {
   "name": "opengeo",
-  "version": "0.1.0-beta.6",
+  "version": "0.1.0-beta.7",
   "private": true,
   "type": "module",
   "description": "Open-source generative engine optimization (GEO) workspace: track AI visibility, mentions and citations, audit your site and create evidence-based content.",
