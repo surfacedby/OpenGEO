@@ -43,14 +43,25 @@ export function runScanner(scanner, directory, report, history = false) {
     provenance = { transport: 'native', version: release.version, sha256: release.sha256, credentialVerification: false, networkIsolated: false };
   } else {
     const name = 'opengeo-audit-' + randomUUID();
-    const docker = (args) => execFileSync('docker', args, { encoding: 'utf8', maxBuffer: 128 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
+    // WSL is optional for Windows Docker bridges that lose command output.
+    // Every transport must return a valid terminal state before a scan can pass.
+    const wsl = process.platform === 'win32' && process.env.OPENGEO_DOCKER_TRANSPORT === 'wsl';
+    const docker = (args) => execFileSync(wsl ? 'wsl' : 'docker', wsl ? ['--exec', 'docker', ...args] : args,
+      { encoding: 'utf8', maxBuffer: 128 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
+    const localPath = path => wsl
+      ? execFileSync('wsl', ['--exec', 'wslpath', '-a', '-u', resolve(path)], { encoding: 'utf8' }).trim()
+      : resolve(path);
     try {
-      docker(['create', '--name', name, '--network', 'none', scannerImages[scanner], ...command]);
-      docker(['cp', directory + '/.', name + ':/repo']);
+      // Scan the exact files without making another copy of dependencies or builds.
+      docker(['create', '--pull', 'never', '--name', name, '--network', 'none',
+        '--mount', 'type=bind,source=' + localPath(directory) + ',target=/repo,readonly', scannerImages[scanner], ...command]);
       docker(['start', name]); docker(['wait', name]);
-      exit = Number(docker(['inspect', name, '--format', '{{.State.ExitCode}}']).trim());
+      const status = JSON.parse(docker(['inspect', name, '--format', '{{json .State}}']));
+      if (status.Running || status.OOMKilled || status.Status !== 'exited' || !Number.isInteger(status.ExitCode))
+        throw new Error('Scanner did not exit normally.');
+      exit = status.ExitCode;
       logs = docker(['logs', name]);
-      if (scanner === 'gitleaks') docker(['cp', name + ':/tmp/report.json', report]);
+      if (scanner === 'gitleaks') docker(['cp', name + ':/tmp/report.json', localPath(report)]);
     } finally { try { docker(['rm', '-f', name]); } catch {} }
     provenance = { transport: 'docker', image: scannerImages[scanner], credentialVerification: false, networkIsolated: true };
   }
