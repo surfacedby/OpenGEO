@@ -29,9 +29,9 @@ The desktop app includes its runtime and browser. You do not need Node.js, Docke
 
 | Your computer | Download |
 | --- | --- |
-| Windows x64 | [Windows installer](https://github.com/surfacedby/OpenGEO/releases/download/v0.1.0-beta.6/OpenGEO-0.1.0-beta.6-windows-x64.exe) |
-| Mac with an Apple M-series chip | [Apple Silicon DMG](https://github.com/surfacedby/OpenGEO/releases/download/v0.1.0-beta.6/OpenGEO-0.1.0-beta.6-macos-arm64.dmg) |
-| Mac with an Intel processor | [Intel DMG](https://github.com/surfacedby/OpenGEO/releases/download/v0.1.0-beta.6/OpenGEO-0.1.0-beta.6-macos-x64.dmg) |
+| Windows x64 | [Windows installer](https://github.com/surfacedby/OpenGEO/releases/download/v0.1.0-beta.7/OpenGEO-0.1.0-beta.7-windows-x64.exe) |
+| Mac with an Apple M-series chip | [Apple Silicon DMG](https://github.com/surfacedby/OpenGEO/releases/download/v0.1.0-beta.7/OpenGEO-0.1.0-beta.7-macos-arm64.dmg) |
+| Mac with an Intel processor | [Intel DMG](https://github.com/surfacedby/OpenGEO/releases/download/v0.1.0-beta.7/OpenGEO-0.1.0-beta.7-macos-x64.dmg) |
 
 **This is a public beta.** Windows is unsigned; Mac downloads are ad hoc signed and not notarized. Your computer may show a warning or block installation. Both Mac versions were tested on macOS 15. Read the [installation guide](docs/distribution.md) for checksums, first-launch instructions and current limitations. Linux users can [run from source or use Docker](docs/distribution.md#docker).
 
