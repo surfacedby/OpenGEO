@@ -13,15 +13,17 @@ import { consolePlatformKey, localPlatformKey, platformName } from './platforms.
 import { publicObservation } from './public-results.js';
 import { quotedCreditUsd, usdString } from './console-pricing.js';
 import { sumUsd } from './usd.js';
+import { deepseekAskEstimate } from './deepseek.js';
 
 /** Direct connections have implemented adapters; managed engines come from Console's live contract. */
 const directEngines = {
+  deepseek: { provider: 'deepseek', platform: 'deepseek', label: 'DeepSeek', detail: 'Your DeepSeek connection' },
   chatgpt: { provider: "chatgpt", platform: "chat_gpt", label: "ChatGPT", detail: "Your ChatGPT connection" },
   "dataforseo-chatgpt": { provider: "dataforseo", platform: "chat_gpt", label: "ChatGPT", detail: "Your DataForSEO connection" },
   "dataforseo-gemini": { provider: "dataforseo", platform: "gemini", label: "Gemini", detail: "Your DataForSEO connection" },
   "dataforseo-perplexity": { provider: "dataforseo", platform: "perplexity", label: "Perplexity", detail: "Your DataForSEO connection" },
 } as const;
-type EngineDefinition = { id: string; provider: 'chatgpt' | 'dataforseo' | 'console'; platform: string; label: string; detail: string };
+type EngineDefinition = { id: string; provider: 'chatgpt' | 'dataforseo' | 'console' | 'deepseek'; platform: string; label: string; detail: string };
 const defaultLimitUsd = 1;
 
 export type AskDeps = {
@@ -74,7 +76,7 @@ export async function engineCatalog(deps: AskDeps) {
     const menu = engine.provider === 'console' && !reason
       ? surfacedBy.pricing?.measurement?.platforms.find(row => row.platform === consolePlatformKey(engine.platform)) : undefined;
     return { id, ...engine, available: !reason, ...(reason ? { reason } : {}),
-      price: engine.provider === "chatgpt" ? "free" as const : engine.provider === "console" ? "quote" as const : "per_request" as const,
+      price: engine.provider === "chatgpt" ? "free" as const : engine.provider === "console" ? "quote" as const : engine.provider === 'deepseek' ? 'metered' as const : "per_request" as const,
       ...(engine.provider === "dataforseo" && requestEstimate > 0 ? { estimateUsd: requestEstimate } : {}),
       ...(menu ? { estimateUsd: Number(menu.one_answer_usd) } : {}) };
   });
@@ -83,7 +85,10 @@ export async function engineCatalog(deps: AskDeps) {
 }
 
 const question = z.string().trim().min(3, "Ask a question of at least 3 characters").max(500);
-export const askEngineKey = z.string().regex(/^(chatgpt|dataforseo-[a-z][a-z0-9_]{0,63}|surfacedby-[a-z][a-z0-9_]{0,63})$/);
+export const askEngineKey = z.union([
+  z.enum(Object.keys(directEngines) as [keyof typeof directEngines, ...(keyof typeof directEngines)[]]),
+  z.string().regex(/^(surfacedby|dataforseo)-[a-z][a-z0-9_]{0,63}$/),
+]);
 const engineList = z.array(askEngineKey).min(1, "Choose at least one engine").max(44)
   .refine(list => new Set(list).size === list.length, "Choose each engine once");
 const askInput = z.object({ question, engines: engineList, maxCostUsd: z.number().finite().min(0).max(1000).default(0) }).strict();
@@ -124,6 +129,7 @@ function questionQuoter(deps: AskDeps, project: Project, text: string) {
   let domainLookup: ReturnType<Runner['findConsoleDomain']> | undefined;
   return async (engine: EngineDefinition & { estimateUsd?: number }) => {
     if (engine.provider === 'chatgpt') return { estimateUsd: 0 };
+    if (engine.provider === 'deepseek') return { estimateUsd: Math.ceil(deepseekAskEstimate(text) * 100) / 100 };
     if (engine.provider === 'dataforseo') return { estimateUsd: engine.estimateUsd ?? null };
     try {
       domainLookup ??= deps.runner.findConsoleDomain(project.domain, AbortSignal.timeout(15000));

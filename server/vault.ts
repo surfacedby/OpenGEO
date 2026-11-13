@@ -73,7 +73,7 @@ export class Vault {
   }
   status() {
     return Object.fromEntries(
-      ["chatgpt", "openrouter", "dataforseo", "console"].map((p) => [
+      ["chatgpt", "openrouter", "dataforseo", "console", "deepseek"].map((p) => [
         p,
         p === "chatgpt"
           ? Boolean(

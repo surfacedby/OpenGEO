@@ -43,6 +43,20 @@ Engine availability comes from your connected account. Full checks and single-qu
 
 **Managed features are experimental in this beta.** The desktop release does not certify live supplier quality, billing and refund recovery, worker activation, usage delivery or historical imports. Availability depends on the connected service; see the [beta notes](releases/v0.1.0-beta.4.md).
 
+## DeepSeek
+
+DeepSeek runs visibility checks (all questions or one topic, on demand or on a schedule) and one-off Asks. It collects answers only: recommendations, question suggestions, competitor reviews and content stay with your other connections. Paste an API key from the [DeepSeek platform](https://platform.deepseek.com/api_keys); OpenGEO checks it against DeepSeek's balance endpoint before saving it. The key is sent to `api.deepseek.com` and nowhere else.
+
+An answer uses DeepSeek's chat API with its [search API](https://api-docs.deepseek.com/guides/search) offered to the model as a tool. The model decides what to search, up to four searches per answer, and OpenGEO runs each search and returns the results. After the fourth search the model must answer with what it has. `deepseek-flash` is the default model, and thinking mode is off.
+
+DeepSeek bills input tokens (less when its cache is hit), output tokens, and $0.75 per 1,000 searches that return results. Peak-hour rates, 01:00 to 04:00 and 06:00 to 10:00 UTC on weekdays, are twice the off-peak rates. OpenGEO keeps a dated copy of the [published prices](https://api-docs.deepseek.com/quick_start/pricing) and costs each answer from the token counts DeepSeek reports, at the rate in force when each request started. DeepSeek does not report a charge, so the recorded cost is labelled as an estimate. DeepSeek bills Chinese public holidays off-peak; OpenGEO costs them at peak, which errs high.
+
+The Ask price reads "up to": it reserves an allowance for the answer and its searches at peak rates. Before each paid request, OpenGEO checks that the remaining allowance covers its input, output and search charges. A growing search conversation can pause before another request. Actual usage can be lower; the provider's billing record remains authoritative. An insufficient balance also pauses the answer without switching providers.
+
+A visibility check applies the same rule to every question. Each answer starts only if its allowance fits the remaining check budget. The suggested budget is a starting point, not a guarantee that every answer will finish. If it runs out, the check pauses and keeps completed answers. A schedule adds a monthly spending ceiling; a scheduled check that cannot fit does not start. These limits control spending, not a subscription or expiring credits.
+
+A DeepSeek check is a reading of its own. The brand view shows the newest check from any connection, labelled with its engine, and each engine keeps its own trend and comparison. Recommendations keep reading the newest check from a connection that prepares them, so a DeepSeek check never replaces them.
+
 ## Spending, pauses and cancellation
 
 Ask uses your ChatGPT plan by default. Choose paid engines for each question. One spending limit covers them together. For example, two answers quoted at $0.10 and $0.30 fit a $0.40 limit.

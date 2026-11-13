@@ -21,6 +21,7 @@ Local matching uses brand names and aliases with Unicode word boundaries. A cita
 - **ChatGPT:** answers with web search requested, subject to your account permissions.
 - **OpenRouter:** answers without live web search.
 - **DataForSEO:** answers with web search requested.
+- **DeepSeek:** answers with web search available. Only links also returned by its search are counted as citations; other retrieved pages remain separate.
 - **SurfacedBy:** answers from the engines currently available for the requested check.
 
 Results can differ from a conversation in a chat app. Each public answer keeps its question, engine, language, collection time and citations. Internal model identifiers and collection details stay out of result screens, public response metadata and project exports. Direct connections still let you choose your own answer settings.

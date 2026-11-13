@@ -9,7 +9,7 @@ import { AnswerSources } from '../AnswerSources';
 import { Disclosure } from '../ui/Primitives';
 import type { AskEngine } from './useAsk';
 
-const via = (provider?: string) => provider === 'console' ? 'SurfacedBy' : provider === 'dataforseo' ? 'DataForSEO' : 'ChatGPT';
+const via = (provider?: string) => provider === 'console' ? 'SurfacedBy' : provider === 'dataforseo' ? 'DataForSEO' : provider === 'deepseek' ? 'DeepSeek' : 'ChatGPT';
 /** Pause reasons that only need a fresh start; anything with an uncertain request needs a review first. */
 const reviewFirst = new Set(['interrupted', 'waiting', 'cost_unknown', 'invalid_response', 'approval']);
 

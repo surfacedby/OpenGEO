@@ -60,6 +60,23 @@ export function completedBrandMeasurement(job: Job) {
 }
 
 /**
+ * Engines whose checks are readings of their own and never the default basis for recommendations.
+ * A DeepSeek check stays in the brand view and its own trend, while recommendations keep reading the
+ * newest check from an engine that prepares them, so a weekly DeepSeek check never displaces them.
+ */
+export const comparisonOnlyProviders: readonly string[] = ["deepseek"];
+
+/** A completed check that recommendations may read by default, brand-wide or for a topic. */
+export function analysisBasisCheck(job: Job) {
+  return completedMeasurement(job) && !comparisonOnlyProviders.includes(job.provider ?? "");
+}
+
+/** The check that brand recommendations read by default: the newest brand check outside comparison-only engines. */
+export function completedAnalysisBasis(job: Job) {
+  return !job.topicId && analysisBasisCheck(job);
+}
+
+/**
  * The measurement the workspace presents. A run still collecting replaces the last completed
  * check only once it has saved answers, and a run that failed for good never replaces one:
  * otherwise a single interrupted recheck would hide every earlier result.

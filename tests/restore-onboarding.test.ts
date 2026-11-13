@@ -44,7 +44,7 @@ test("first restore opens saved history without scheduling work or inheriting co
     assert.equal(destination.setting("usageConsent", null), null);
     assert.equal(runtime.usage.status().enabled, false);
     assert.equal((destination.db.prepare("SELECT count(*) AS n FROM usage_outbox").get() as { n: number }).n, 0);
-    assert.deepEqual((await app.inject({ url: "/api/providers", headers })).json().connected, { chatgpt: false, openrouter: false, dataforseo: false, console: false });
+    assert.deepEqual((await app.inject({ url: "/api/providers", headers })).json().connected, { chatgpt: false, openrouter: false, dataforseo: false, console: false, deepseek: false });
     const draft = { step: 1, provider: "chatgpt", localOnly: false, questionRows: [] };
     destination.set("setupDraft", draft);
     const replay = await app.inject({ method: "POST", url: "/api/backup/restore", headers, payload: { format: "opengeo-backup", version: 1, projects: [body] } });

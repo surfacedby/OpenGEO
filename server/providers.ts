@@ -8,6 +8,7 @@ import {
   type CredentialInput,
 } from "./contracts.js";
 import { providerJson, isPublicEvidenceUrl } from "./network.js";
+import { deepseekComplete, deepseekJson, deepseekModels } from './deepseek.js';
 import { Agent } from 'undici';
 const chatGPTTimeoutMs = 15 * 60 * 1000;
 const chatGPTAgent = new Agent({ headersTimeout: chatGPTTimeoutMs, bodyTimeout: chatGPTTimeoutMs });
@@ -31,6 +32,8 @@ export type Completion = {
   model: string;
   webSearchConfirmed?: boolean;
   searchQueries?: string[];
+  /** The cost was computed by OpenGEO from reported usage and published rates, not reported in dollars. */
+  costEstimated?: boolean;
 };
 function reportedCost(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
@@ -92,6 +95,11 @@ export class Providers {
     readonly vault: Vault,
     readonly connections: Connections,
   ) {}
+  deepseekKey(): string {
+    const key = this.vault.get("deepseek")?.key;
+    if (typeof key !== "string" || !key) throw new ProviderError("auth", "Connect DeepSeek in Settings.");
+    return key;
+  }
   headers(provider: Provider): Record<string, string> {
     const c = this.vault.get(provider);
     if (!c)
@@ -100,6 +108,12 @@ export class Providers {
   }
   /** Validate with read-only account endpoints before replacing a working local credential. */
   async validateConnection(input: CredentialInput) {
+    if (input.provider === "deepseek") {
+      const balance = await deepseekJson("/user/balance", input.key);
+      if (typeof balance.is_available !== "boolean" || !Array.isArray(balance.balance_infos))
+        throw new ProviderError("invalid_response", "DeepSeek did not confirm this connection. Your previous connection was kept.");
+      return;
+    }
     const urls = {
       openrouter: "https://openrouter.ai/api/v1/key",
       dataforseo: "https://api.dataforseo.com/v3/appendix/user_data",
@@ -180,6 +194,10 @@ export class Providers {
           outputUsd: 0,
         }));
     }
+    if (provider === "deepseek") {
+      const b = await deepseekJson("/models", this.deepseekKey());
+      return deepseekModels((b.data ?? []).map((m: any) => m?.id).filter((id: unknown) => typeof id === "string"));
+    }
     // Managed jobs have a quoted price; their model metadata is not a token-price catalog.
     return [];
   }
@@ -237,6 +255,11 @@ export class Providers {
         citations: safeCitations(choice.message?.annotations ?? []),
         model: b.model,
       };
+    }
+    if (provider === "deepseek") {
+      const answer = await deepseekComplete(this.deepseekKey(), model, instructions, input, signal, maxTokens, webSearch);
+      return { text: answer.text, costUsd: answer.costUsd, costEstimated: true, citations: safeCitations(answer.links), retrievedSources: safeCitations(answer.retrievedSources), model: answer.model,
+        webSearchConfirmed: answer.webSearchConfirmed, searchQueries: answer.searchQueries };
     }
     if (provider !== "chatgpt")
       throw new ProviderError(

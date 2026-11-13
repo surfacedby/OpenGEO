@@ -4,6 +4,7 @@ export const providers = [
   "openrouter",
   "dataforseo",
   "console",
+  "deepseek",
 ] as const;
 export type Provider = (typeof providers)[number];
 export const topicInput = z
@@ -194,6 +195,7 @@ export const jobInput = z
   .refine(input => !input.background || input.kind === 'audit', 'Only website checks run in paced background batches')
   .refine((input) => !input.topicId || ["measure", "recheck"].includes(input.kind), "Only visibility checks can be limited to a topic")
   .refine((input) => input.kind === "ask" ? Boolean(input.askId && input.question) : !input.askId && !input.question, "An ask needs one question and its identifier")
+  .refine((input) => input.provider !== "deepseek" || ["ask", "measure", "recheck"].includes(input.kind), "DeepSeek runs Asks and visibility checks only")
   .refine((input) => input.kind !== 'revise' || (!!input.contentId && !!input.revisionInstructions), 'Choose a draft and describe the revision')
   .refine((input) => input.kind !== 'competitors' || !!input.measurementJobId, 'Choose a saved visibility check')
   .refine((input) => (input.kind === 'discover') === !!input.auditJobId, 'Question suggestions read one website audit')
@@ -253,6 +255,9 @@ export const credentialInput = z.discriminatedUnion("provider", [
     .strict(),
   z
     .object({ provider: z.literal("console"), key: z.string().min(10) })
+    .strict(),
+  z
+    .object({ provider: z.literal("deepseek"), key: z.string().trim().min(10).max(500) })
     .strict(),
 ]);
 export type CredentialInput = z.infer<typeof credentialInput>;

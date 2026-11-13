@@ -552,7 +552,7 @@ export async function createApp(
   });
   app.get("/api/providers/:provider/models", async (req) => {
     const provider = z.enum(providers).parse((req.params as any).provider);
-    const { platform, previousCheck } = z.object({ platform: z.enum(['chat_gpt', 'gemini', 'perplexity']).default('chat_gpt'),
+    const { platform, previousCheck } = z.object({ platform: z.enum(['chat_gpt', 'gemini', 'perplexity', 'deepseek']).default('chat_gpt'),
       previousCheck: z.string().uuid().optional() }).parse(req.query);
     const previous = previousCheck ? store.job(previousCheck) : null;
     const models = await p.models(provider, platform);

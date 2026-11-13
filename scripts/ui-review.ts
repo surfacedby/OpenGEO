@@ -128,7 +128,7 @@ try {
   await page.getByRole("button", { name: "Connect for AI checks", exact: true }).click();
   await page.getByRole("heading", { name: "Your connections" }).waitFor();
   assert.equal(await page.getByRole("tab", { name: "Connections", exact: true }).getAttribute("aria-selected"), "true");
-  assert.deepEqual(await page.locator(".provider-card h2").allTextContents(), ["ChatGPT", "SurfacedBy API", "DataForSEO", "OpenRouter"]);
+  assert.deepEqual(await page.locator(".provider-card h2").allTextContents(), ["ChatGPT", "SurfacedBy API", "DataForSEO", "OpenRouter", "DeepSeek"]);
   await page.getByRole("tab", { name: "Schedules", exact: true }).click();
   await page.getByRole("button", { name: "Add schedule", exact: true }).click();
   assert.equal(await page.getByRole("button", { name: "Schedule connection", exact: true }).count(), 0);

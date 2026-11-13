@@ -18,6 +18,7 @@ Backups can still contain sensitive evidence. Keep them private. Restore through
 | Your website | Requests for public pages and sitemaps during an audit |
 | ChatGPT or OpenRouter | Prompts, instructions, source excerpts and project context needed for the selected operation |
 | DataForSEO | Prompts, models and supported locale parameters |
+| DeepSeek | Each question in a visibility check or Ask, the answer instructions with the project locale, the searches the model chooses and the results returned to it. No website pages, saved answers or business notes. DeepSeek is a company based in China. |
 | SurfacedBy API | Domain configuration and requested tasks. Evidence-based role reviews and recommendations also send selected saved answers, their IDs and timestamps, citation links and selected owned page URLs. |
 
 SurfacedBy may read those public pages and return dated excerpts. Each provider has its own data policy; check it before submitting sensitive material.
@@ -54,7 +55,7 @@ Disable the fallback in **Settings > Data & privacy** to abort active cache requ
 
 ## Paid work and schedules
 
-Run budgets control whether another request starts. They cannot reverse a completed charge. Direct DataForSEO requests can exceed an estimate, so use conservative estimates and provider-side spending controls. OpenRouter uses bounded output and model-rate estimates. Managed work uses the supported server preview or quote. See [connections and costs](connections.md#spending-pauses-and-cancellation).
+Run budgets control whether another request starts. They cannot reverse a completed charge. Direct DataForSEO requests can exceed an estimate, so use conservative estimates and provider-side spending controls. OpenRouter uses bounded output and model-rate estimates. DeepSeek starts only when its most expensive possible answer fits the approval, then records an estimate from its reported usage. Managed work uses the supported server preview or quote. See [connections and costs](connections.md#spending-pauses-and-cancellation).
 
 OpenGEO retains completed paid work and never automatically replays a request with an uncertain outcome. Review the provider account before approving a retry. It does not silently switch providers.
 

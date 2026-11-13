@@ -64,6 +64,7 @@ try {
       : { key: "synthetic-console-credential" };
     runtime.runner.providers.vault.set(provider, body);
   }
+  runtime.runner.providers.vault.set("deepseek", { provider: "deepseek", key: "synthetic-deepseek-review-key" });
   const discover = runtime.store.enqueue(jobInput.parse({ projectId: project.id, kind: "discover", provider: "chatgpt", auditJobId: randomUUID() }), randomUUID());
   runtime.store.updateJob(discover.id, { status: "completed", result: { questions: [
     { text: "Synthetic review: how do teams compare example dashboards?" }, { text: "Synthetic review: which example reports can be shared publicly?" },

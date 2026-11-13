@@ -38,7 +38,7 @@ export function AskDrawer({ ask, brand, domain, locale }: {
   const available = ask.catalog?.engines.filter(engine => engine.available) ?? [];
   const missing = ask.catalog?.engines.filter(engine => !engine.available) ?? [];
   const unavailableGroups = [...new Map(missing.map(engine => [engine.provider + '|' + engine.reason, missing.filter(row => row.provider === engine.provider && row.reason === engine.reason)])).values()];
-  const providerName = (provider: string) => ({ chatgpt: 'ChatGPT', console: 'SurfacedBy', dataforseo: 'DataForSEO' } as Record<string, string>)[provider] ?? provider;
+  const providerName = (provider: string) => ({ chatgpt: 'ChatGPT', console: 'SurfacedBy', dataforseo: 'DataForSEO', deepseek: 'DeepSeek' } as Record<string, string>)[provider] ?? provider;
   const priceText = (id: string) => {
     const engine = ask.catalog!.engines.find(row => row.id === id)!;
     if (engine.price === 'free') return 'Uses your ChatGPT plan';
@@ -47,7 +47,7 @@ export function AskDrawer({ ask, brand, domain, locale }: {
     if (value === null && engine.estimateUsd !== undefined &&
         (ask.question.trim().length < 3 || !ask.choice.includes(id)))
       return (engine.provider === 'console' ? 'Up to ' : 'est. ') + usd(engine.estimateUsd) + ' per answer';
-    return value === null ? (ask.estimating ? 'Checking price...' : 'Estimate unavailable') : 'est. ' + usd(value);
+    return value === null ? (ask.estimating ? 'Checking price...' : 'Estimate unavailable') : (engine.price === 'metered' ? 'Up to ' : 'est. ') + usd(value);
   };
   const askLabel = 'Ask ' + engineCount(ask.choice.length);
   return <Dialog title="Ask a question" close={close} variant="drawer" dismissible={!ask.busy}>
@@ -104,6 +104,7 @@ export function AskDrawer({ ask, brand, domain, locale }: {
             ? <>{ask.totalUsd === null ? <>Some prices are unavailable. SurfacedBy rechecks each quote before work starts.</> : <>Estimated <strong>{usd(ask.totalUsd)}</strong> total. Your limit covers all selected engines.</>} {ask.paid.some(engine => engine.provider === 'dataforseo') && <>DataForSEO uses your saved estimate; its actual charge may differ.</>}</>
             : <>Uses your ChatGPT plan. Your plan limits apply.</>)}
             {ask.menuPrices.length > 0 && <> SurfacedBy confirms its published prices after registering this website.</>}
+            {ask.paid.some(engine => engine.provider === 'deepseek') && <> DeepSeek includes an allowance for web searches. Recorded costs are estimated from its reported usage.</>}
             {ask.estimateExpiresAt && <> Quote expires at {new Date(ask.estimateExpiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}. Refreshed automatically.</>}
           </span>
           {ask.paid.length > 0 && ask.totalUsd === null && !ask.estimating && ask.question.trim().length >= 3 && <button type="button" className="secondary" disabled={ask.busy} onClick={ask.refreshPrices}>Refresh prices</button>}
