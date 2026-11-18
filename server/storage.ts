@@ -44,8 +44,11 @@ export class Store {
     this.db.exec(`CREATE TABLE IF NOT EXISTS content_recovery(content_id TEXT PRIMARY KEY REFERENCES artifacts(id),project_id TEXT NOT NULL REFERENCES projects(id),session TEXT NOT NULL,sequence INTEGER NOT NULL,body TEXT);
  INSERT OR IGNORE INTO migrations VALUES(2);`);
     // Rename only known scope fields, atomically; answer text and other user data stay untouched.
+    // Version 5 repeats the rename once everywhere: from beta.1 to beta.4 the usage outbox also recorded version 3,
+    // so an install started then skipped it. The rename only changes fields still under the old names.
+    const recorded = (version: number) => this.db.prepare('SELECT version FROM migrations WHERE version=?').get(version);
     try {
-    if (!this.db.prepare('SELECT version FROM migrations WHERE version=3').get()) this.db.transaction(() => {
+    if (!recorded(3) || !recorded(5)) this.db.transaction(() => {
       for (const table of ['projects', 'jobs'] as const) {
         for (const row of this.db.prepare(`SELECT id, body FROM ${table}`).all() as { id: string; body: string }[]) {
           const body = JSON.stringify(topicNames(JSON.parse(row.body), table === 'projects'));
@@ -62,7 +65,7 @@ export class Store {
         const receipt = JSON.parse(row.body);
         if (receipt.input?.job) this.set(row.key, { ...receipt, input: { ...receipt.input, job: topicNames(receipt.input.job) } });
       }
-      this.db.prepare('INSERT INTO migrations VALUES(3)').run();
+      this.db.prepare('INSERT OR IGNORE INTO migrations VALUES(3),(5)').run();
     })();
     this.pageCatalog = new PageCatalog(this.db);
     } catch (error) {

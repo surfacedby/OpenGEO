@@ -134,6 +134,29 @@ test('a conflicting migration rolls back all projects and leaves the original da
   } finally { rmSync(f.dir, { recursive: true, force: true }); }
 });
 
+test('an install whose version 3 was recorded before the rename existed still gets the rename', () => {
+  const f = fixture();
+  let reopened: Store | undefined;
+  try {
+    const launch = topic('Launch', [prompts[0]]);
+    const project = f.store.createProject(projectInput.parse({ domain: 'example.com', brand: 'Example', prompts }));
+    const current = f.store.enqueue(measure(project.id), 'early-check');
+    const { topics, ...legacyProject } = project;
+    f.store.db.prepare('UPDATE projects SET body=? WHERE id=?').run(JSON.stringify({ ...legacyProject, campaigns: [launch] }), project.id);
+    f.store.db.prepare('UPDATE jobs SET body=? WHERE id=?').run(JSON.stringify({ ...current, campaignId: launch.id }), current.id);
+    // From beta.1 to beta.4 the usage outbox recorded version 3 at every start, before any rename existed.
+    f.store.db.prepare('DELETE FROM migrations WHERE version=5').run();
+    assert.ok(f.store.db.prepare('SELECT version FROM migrations WHERE version=3').get());
+    f.store.close();
+    reopened = new Store(f.dir);
+    assert.equal(reopened.project(project.id).topics[0].id, launch.id);
+    assert.equal('campaigns' in reopened.project(project.id), false);
+    assert.equal(reopened.job(current.id).topicId, launch.id);
+    assert.equal('campaignId' in reopened.job(current.id), false);
+    assert.ok(reopened.db.prepare('SELECT version FROM migrations WHERE version=5').get());
+  } finally { reopened?.close(); if (f.store.db.open) f.store.close(); rmSync(f.dir, { recursive: true, force: true }); }
+});
+
 test('duplicate visibility starts are refused while retries keep the original receipt', () => {
   const f = fixture();
   try {

@@ -19,6 +19,18 @@ function fixture(send: typeof fetch = fetch) {
 }
 const response = (accepted: string[]) => new Response(JSON.stringify({ accepted }), { headers: { "Content-Type": "application/json" } });
 
+test("starting usage sharing records no schema version, so it cannot hide a store migration", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "opengeo-usage-test-")), store = new Store(directory);
+  const versions = () => store.db.prepare("SELECT version FROM migrations ORDER BY version").all().map((row: any) => row.version);
+  try {
+    store.db.prepare("DELETE FROM migrations WHERE version=3").run();
+    const before = versions();
+    const usage = new UsageSharing(store);
+    assert.deepEqual(versions(), before);
+    await usage.close();
+  } finally { store.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
 test("new setup preselects sharing without sending; existing choices and workspaces stay unchanged", async () => {
   let calls = 0;
   const f = fixture((async () => { calls++; return response([]); }) as typeof fetch);

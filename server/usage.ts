@@ -19,7 +19,7 @@ export class UsageSharing {
   private request?: AbortController;
   private pending?: Promise<void>;
   constructor(private store: Store, private send: typeof fetch = fetch, private clock = () => new Date()) {
-    store.db.exec("CREATE TABLE IF NOT EXISTS usage_outbox(id TEXT PRIMARY KEY,day TEXT NOT NULL,body TEXT NOT NULL); INSERT OR IGNORE INTO migrations VALUES(3);");
+    store.db.exec("CREATE TABLE IF NOT EXISTS usage_outbox(id TEXT PRIMARY KEY,day TEXT NOT NULL,body TEXT NOT NULL);");
     if (store.setting<boolean | null>("usageSetupDefault", null) === null)
       store.set("usageSetupDefault", !store.setting<any>("onboarding", null)?.completed && store.projects().length === 0);
   }
