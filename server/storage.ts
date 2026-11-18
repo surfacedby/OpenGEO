@@ -6,7 +6,7 @@ import { ProviderError, contentTask } from "./contracts.js";
 import { topicNames } from "./topic-migration.js";
 import { PageCatalog } from './page-catalog.js';
 import { askScope } from './ask-scope.js';
-import { completedAnalysisBasis, completedMeasurement, analysisInProgress } from './portable-results.js';
+import { analysisBasisCheck, completedAnalysisBasis, completedMeasurement, analysisInProgress } from './portable-results.js';
 import type {
   Project,
   ProjectInput,
@@ -199,6 +199,8 @@ export class Store {
         ? this.job(input.measurementJobId) : this.jobs(input.projectId).find(completedAnalysisBasis) : undefined;
       if (analysisMeasurement && (analysisMeasurement.projectId !== input.projectId || !completedMeasurement(analysisMeasurement)))
         throw new ProviderError('evidence', 'Choose a completed visibility check for this brand.');
+      if (analysisMeasurement && !analysisBasisCheck(analysisMeasurement))
+        throw new ProviderError('evidence', 'Recommendations use a check from a connection that prepares them. DeepSeek checks collect answers only.');
       if (input.kind === 'competitors' && this.jobs(input.projectId).some(job => job.kind === 'competitors' && job.measurementJobId === input.measurementJobId && ['queued', 'running', 'paused'].includes(job.status)))
         throw new ProviderError('in_progress', 'A competitor review is already saved for this check. Resume it or follow its progress.');
       if (input.kind === 'revise' && !this.artifacts<any>(input.projectId, 'content').some((doc) => doc.id === input.contentId))

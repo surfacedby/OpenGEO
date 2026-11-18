@@ -1,5 +1,5 @@
 import type { Finding, Job, Observation, PageSummary } from "./contracts.js";
-import { portableJobResult, completedMeasurement, completedAnalysisResult, analysisMeasurementId } from "./portable-results.js";
+import { portableJobResult, completedMeasurement, completedAnalysisResult, analysisMeasurementId, analysisBasisCheck } from "./portable-results.js";
 
 export type SourceRow = {
   key: string;
@@ -58,10 +58,11 @@ export function currentFindings(findings: Finding[], jobs: Job[], auditJobId?: s
   const generations = new Map(jobs.map(job => [job.id, job]));
   const scope = (job: Job) => job.topicId ?? generations.get(analysisMeasurementId(job) ?? '')?.topicId ?? '';
   const measurements = new Map<string, Job>(), analyses = new Map<string, Job>();
-  // A newer partial check replaces advice only for its own Topic, never the brand or another Topic.
+  // A newer partial check replaces advice only for its own Topic, never the brand or another Topic. Only a
+  // check that can prepare advice starts a new period: a comparison-only check (DeepSeek) never retires it.
   for (const job of jobs) {
     const key = scope(job);
-    if (completedMeasurement(job) && !measurements.has(key)) measurements.set(key, job);
+    if (analysisBasisCheck(job) && !measurements.has(key)) measurements.set(key, job);
     if ((completedAnalysisResult(job) || job.kind === 'diagnose' && job.status === 'completed') && !analyses.has(key)) analyses.set(key, job);
   }
   return findings.filter(finding => {
