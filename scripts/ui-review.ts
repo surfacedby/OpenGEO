@@ -60,20 +60,22 @@ try {
   assert.equal(await page.getByRole("button", { name: "Checking your website...", exact: true }).isDisabled(), true);
   await navigate(page, 'Overview');
   await page.getByRole("heading", { name: "Your site audit is queued", exact: true }).waitFor();
-  await page.route("**/api/projects/*/workspace", route => route.abort("failed"));
+  // The app reads `/workspace?pages=lazy`; a glob ending in `/workspace` would never match the query string.
+  const workspaceRead = (url: URL) => /\/api\/projects\/[^/]+\/workspace$/.test(url.pathname);
+  await page.route(workspaceRead, route => route.abort("failed"));
   await page.getByRole("button", { name: "Refresh workspace", exact: true }).click();
   const staleNotice = page.getByRole("alert").filter({ hasText: "Could not refresh your workspace." });
   await staleNotice.waitFor();
   assert.match(await staleNotice.textContent() ?? "", /Showing the last loaded results/);
   await page.getByRole("heading", { name: "Your site audit is queued", exact: true }).waitFor();
-  await page.unroute("**/api/projects/*/workspace");
+  await page.unroute(workspaceRead);
   await staleNotice.getByRole("button", { name: "Try again", exact: true }).click();
   await staleNotice.waitFor({ state: "detached" });
   let releaseOldRefresh!: () => void, receivedOldRefresh!: () => void;
   const oldRefreshReceived = new Promise<void>(resolve => { receivedOldRefresh = resolve; });
   const oldRefreshRelease = new Promise<void>(resolve => { releaseOldRefresh = resolve; });
   let captured = false;
-  await page.route("**/api/projects/*/workspace", async route => {
+  await page.route(workspaceRead, async route => {
     if (captured) { await route.continue(); return; }
     captured = true;
     const response = await route.fetch();
@@ -85,12 +87,12 @@ try {
   await oldRefreshReceived;
   runtime.store.updateJob(runtime.store.jobs()[0].id, { progress: "A newer audit checkpoint" });
   await page.getByText("A newer audit checkpoint", { exact: true }).waitFor();
-  const oldRefreshCompleted = page.waitForResponse(response => response.url().endsWith("/workspace"));
+  const oldRefreshCompleted = page.waitForResponse(response => workspaceRead(new URL(response.url())));
   releaseOldRefresh();
   await oldRefreshCompleted;
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   assert.equal(await page.getByText("A newer audit checkpoint", { exact: true }).count(), 1, "An older response cannot replace newer evidence");
-  await page.unroute("**/api/projects/*/workspace");
+  await page.unroute(workspaceRead);
   assert.equal(await page.getByRole("button", { name: /Recheck the same questions/ }).isDisabled(), true);
   await page.getByRole("button", { name: "Website", exact: true }).click();
   await page.getByRole("combobox", { name: "Search website", exact: true }).fill("example");
@@ -128,7 +130,7 @@ try {
   await page.getByRole("button", { name: "Connect for AI checks", exact: true }).click();
   await page.getByRole("heading", { name: "Your connections" }).waitFor();
   assert.equal(await page.getByRole("tab", { name: "Connections", exact: true }).getAttribute("aria-selected"), "true");
-  assert.deepEqual(await page.locator(".provider-card h2").allTextContents(), ["ChatGPT", "SurfacedBy API", "DataForSEO", "OpenRouter", "DeepSeek"]);
+  assert.deepEqual(await page.locator(".provider-card h2").allTextContents(), ["ChatGPT", "SurfacedBy", "DataForSEO", "OpenRouter", "DeepSeek"]);
   await page.getByRole("tab", { name: "Schedules", exact: true }).click();
   await page.getByRole("button", { name: "Add schedule", exact: true }).click();
   assert.equal(await page.getByRole("button", { name: "Schedule connection", exact: true }).count(), 0);
@@ -247,12 +249,15 @@ try {
   await page.getByRole('heading', { name: 'Opportunities', exact: true }).waitFor();
   assert.equal(runtime.store.artifacts(projectId, 'content').length, 2);
   await navigate(page, 'Scans');
+  // Page checks are listed per page; a page's open checks appear once its review button is opened.
+  await page.getByRole('button', { name: '1 to review', exact: true }).click();
   await page.getByText('Synthetic technical page check', { exact: true }).waitFor();
   await page.screenshot({ path: join(screenshots, 'site-audit-desktop-test-data.png') });
   assert.equal(await page.getByText(finding.title, { exact: true }).count(), 0);
   assert.equal(await page.locator("select").count(), 0);
   assert.equal(await page.getByRole("alert").count(), 0);
   assert.deepEqual(failures, []);
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
   await page.setViewportSize({ width: 390, height: 780 });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   await page.getByRole("button", { name: "Mobile website", exact: true }).click();
