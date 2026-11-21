@@ -86,7 +86,7 @@ requires an exact full commit on `master` and a private draft release targeting
 that commit. Draft review assets must never be published.
 
 1. **Prepare:** build on Windows x64 and both native Mac architectures; install
-   beta.4 in an isolated profile, update it, verify the project, audit evidence,
+   the pinned previous public beta in an isolated profile, update it, verify the project, audit evidence,
    disabled usage sharing and OS-encrypted storage survive, then exercise a fresh
    installation. Verify the Mac resource seal and retain complete payload
    inventories. Also build and operate Docker on Linux amd64 and arm64. Upload

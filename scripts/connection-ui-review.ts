@@ -16,11 +16,16 @@ globalThis.fetch = (async url => {
   assert.equal(String(url), "https://api.surfacedby.com/api/v1/console/capabilities");
   requests++;
   if (requests === 1) await validation;
-  return new Response(JSON.stringify({ data: { platforms: [{ key: "chatgpt", name: "ChatGPT", enabled: true }], content_available: contentAvailable, operations: contentAvailable ? ["content"] : [] } }), {
+  const platforms = [
+    { key: "chatgpt", name: "ChatGPT", enabled: true },
+    { key: "example_engine", name: "Example Engine", enabled: true },
+    { key: "gemini", name: "Gemini", enabled: false },
+  ];
+  return new Response(JSON.stringify({ data: { platforms, content_available: contentAvailable, operations: contentAvailable ? ["content"] : [] } }), {
     status: requests === 2 ? 503 : 200, headers: { "Content-Type": "application/json" },
   });
 }) as typeof fetch;
-const browser = await chromium.launch({ channel: "chrome", headless: true });
+const browser = await chromium.launch({ ...(process.env.OPENGEO_TEST_BROWSER ? { executablePath: process.env.OPENGEO_TEST_BROWSER } : { channel: "chrome" }), headless: true });
 try {
   await runtime.runner.stop(); runtime.scheduler.stop();
   runtime.store.createProject(projectInput.parse({ domain: "example.com", brand: "Example" }));
@@ -49,7 +54,9 @@ try {
   assert.equal(await card.getByText("Loading supported platforms", { exact: true }).count(), 0);
   assert.equal(await card.getByRole("button", { name: "Retry platform check", exact: true }).count(), 1);
   await card.getByRole("button", { name: "Retry platform check", exact: true }).click();
-  await card.locator(".platform-list").getByText("ChatGPT", { exact: true }).waitFor();
+  const platforms = card.locator(".platform-list");
+  await platforms.getByText("Example Engine", { exact: true }).waitFor();
+  assert.deepEqual(await platforms.locator("span").allTextContents(), ["ChatGPT", "Example Engine"]);
   assert.equal(await card.getByRole("button", { name: "Retry platform check", exact: true }).count(), 0);
   assert.equal(requests, 3);
   await page.getByRole("tab", { name: "Schedules", exact: true }).click();
@@ -60,7 +67,7 @@ try {
   await page.getByRole("option", { name: "Visibility recheck", exact: true }).click();
   await page.getByRole("button", { name: "Schedule connection", exact: true }).click();
   assert.equal(await page.getByRole("option", { name: "ChatGPT", exact: true }).count(), 0);
-  await page.getByRole("option", { name: "SurfacedBy API", exact: true }).click();
+  await page.getByRole("option", { name: "SurfacedBy", exact: true }).click();
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   contentAvailable = true;
   await page.getByRole("tab", { name: "Connections", exact: true }).click();
@@ -70,12 +77,12 @@ try {
   await page.getByRole("option", { name: "Content draft", exact: true }).waitFor();
   await page.getByRole("option", { name: "Content draft", exact: true }).click();
   await page.getByLabel("Topic", { exact: true }).waitFor();
-  assert.equal(await page.getByRole("button", { name: "Schedule connection", exact: true }).innerText(), "SurfacedBy API");
+  assert.equal(await page.getByRole("button", { name: "Schedule connection", exact: true }).innerText(), "SurfacedBy");
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await page.getByRole("tab", { name: "Connections", exact: true }).click();
   await card.getByRole("button", { name: "Disconnect", exact: true }).click();
-  await card.getByRole("button", { name: "4 more", exact: true }).waitFor();
-  assert.equal(await card.locator(".platform-list").getByText("Gemini", { exact: true }).count(), 1);
+  await platforms.getByText("Connect to see available engines", { exact: true }).waitFor();
+  assert.deepEqual(await platforms.locator("span").allTextContents(), ["Connect to see available engines"]);
   assert.equal(await card.getByText("Platform availability could not be checked.", { exact: true }).count(), 0);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   assert.deepEqual(failures, []);

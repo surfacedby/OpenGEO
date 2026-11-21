@@ -24,13 +24,14 @@ build = root / 'release' / ('candidate' if suffix == '.exe' else 'mac-sealed')
 files = list(build.glob('*' + suffix))
 assert len(files) == 1
 shutil.copyfile(files[0], candidate)
+previous_version = '0.1.0-beta.7'
 old_hash = {
-    'windows-x64': '89942580cf267f30dfdb397a770275b33b36baf598cd175e7375d8e35f54ede8',
-    'macos-arm64': 'c6f5c2c6cfa1c17d7aa705c96c1b817f36fa2c1b1b177afaeb9fe5234380dcb8',
-    'macos-x64': 'aebe7bb9c0e8a80a6953240289865b33eb1e6c010c3a67cd3d0ee3fa4ff38072',
+    'windows-x64': '031534c9d979cafbb708d6b52d55297874a09d5b8fb0924b04b6c9ccf4934dc9',
+    'macos-arm64': 'bd87a5a5124a888ea280eb15a73fa7d2e892a4a83250ee91a88f950b00839e04',
+    'macos-x64': '388d26263a2eacb02949abeca4f8fe277e041acd8eb7728cf2a674b156ad4033',
 }[target]
 previous = out / ('previous' + suffix)
-download_public('https://github.com/surfacedby/OpenGEO/releases/download/v0.1.0-beta.4/OpenGEO-0.1.0-beta.4-' + target + suffix, previous, old_hash)
+download_public(f'https://github.com/surfacedby/OpenGEO/releases/download/v{previous_version}/OpenGEO-{previous_version}-{target}{suffix}', previous, old_hash)
 profile = out / 'upgrade-profile'
 profile.mkdir()
 receipt = out / 'upgrade-workspace.json'
