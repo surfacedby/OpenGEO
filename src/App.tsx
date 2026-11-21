@@ -297,6 +297,7 @@ export function App() {
   const activeScan = w?.jobs.find(job => ['measure', 'recheck'].includes(job.kind) && !job.topicId && ['queued', 'running', 'paused'].includes(job.status) && (!completedMeasurement(job) || job.prepareRecommendations));
   const completedAnalysis = analysisMeasurement && w!.jobs.find(job => completedAnalysisResult(job)?.measurementJobId === analysisMeasurement.id);
   const analyzed = !!completedAnalysis;
+  const consoleFullCheckAnalyzed = completedAnalysis?.provider === 'console' && completedAnalysis.id === analysisMeasurement?.id;
   const analysisReceipt = completedAnalysis ? completedAnalysisResult(completedAnalysis) : null;
   const omittedSuggestions = analysisReceipt?.omittedSuggestions ?? 0;
   const activeAnalysis = w?.jobs.find(job => analysisInProgress(job) && !job.topicId && ['queued', 'running'].includes(job.status));
@@ -322,7 +323,7 @@ export function App() {
     : page === "Prompts" ? activeScan ? null : measurementAction
     : page === "Visibility" ? activeScan ? null : measurementAction
     : page === "Overview" ? activeMeasurement ? { label: "View current check", action: () => changePage('Visibility') } : !measured ? measurementAction : activeAnalysis ? null : pausedAnalysis ? { label: "Review paused analysis", action: () => changePage('Opportunities') } : !analyzed && canAnalyze ? { label: "Find opportunities", action: () => setJobDialog('diagnose') } : { label: "Review opportunities", action: () => changePage("Opportunities") }
-    : page === "Opportunities" && measured && !activeAnalysis && !pausedAnalysis ? { label: "Find opportunities", action: () => canAnalyze ? setJobDialog("diagnose") : openConnections() }
+    : page === "Opportunities" && measured && !activeAnalysis && !pausedAnalysis && !consoleFullCheckAnalyzed ? { label: "Find opportunities", action: () => canAnalyze ? setJobDialog("diagnose") : openConnections() }
     : page === "Content" && audited && !!w?.content.length ? { label: "Create content", action: () => { setContentFinding(null); setContentTopic(""); setJobDialog("content"); } } : null;
   return (
     <div className="shell">
@@ -634,7 +635,7 @@ export function App() {
               )}
               {page === "Opportunities" && <>
                 {(analysisMeasurement || omittedSuggestions > 0) && <div className="opportunity-context">
-                  {analysisMeasurement && <p className="small">Based on answers collected {shortDate(analysisMeasurement.createdAt)} and the pages reviewed on your website.</p>}
+                  {analysisMeasurement && <p className="small">Based on answers from your {shortDate(analysisMeasurement.createdAt)} visibility check.</p>}
                   {omittedSuggestions > 0 && <p className="small">{omittedSuggestions} {omittedSuggestions === 1 ? 'suggestion was' : 'suggestions were'} left out because the supporting evidence could not be verified.</p>}
                   {analysisReceipt?.pagesReviewed !== undefined && <p className="small">{analysisReceipt.pagesReviewed} {analysisReceipt.pagesReviewed === 1 ? 'public page' : 'public pages'} reviewed.</p>}
                   {!!analysisReceipt?.uncertainties?.length && <Disclosure label="Review notes"><ul>{analysisReceipt.uncertainties.map((note, index) => <li key={index}>{note}</li>)}</ul></Disclosure>}

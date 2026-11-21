@@ -1246,7 +1246,7 @@ export class Runner {
         "waiting",
         "SurfacedBy is still processing. Resume later to collect results.",
       );
-    await this.once(job, "console-evidence", async () => {
+    const reviewed = await this.once<{ observations: number; findings?: number }>(job, "console-evidence", async () => {
       const evidence = await this.consolePages(
         "/scans/" + scanId + "/observations",
         signal,
@@ -1264,6 +1264,7 @@ export class Runner {
             signal,
           )),
         );
+      const receipt = { observations: evidence.length, findings: findings.length };
       this.store.db.transaction(() => {
         const observationIds = new Map<string, string>();
         for (const row of evidence) {
@@ -1311,15 +1312,12 @@ export class Runner {
             evidenceAsOf: row.evidence_as_of,
             remoteScanId: row.scan_id,
           });
-        this.store.setStep(job.id, "console-evidence", "done", {
-          observations: evidence.length,
-        });
+        this.store.setStep(job.id, "console-evidence", "done", receipt);
       })();
-      return { observations: evidence.length };
+      return receipt;
     });
     const requested = state.answers_total;
-    const evidenceCount = JSON.parse(this.store.step(job.id, "console-evidence")!.body!).observations;
-    if (!Number.isSafeInteger(requested) || requested < 1 || requested < evidenceCount)
+    if (!Number.isSafeInteger(requested) || requested < 1 || requested < reviewed.observations)
       throw new ProviderError("invalid_response", "The collected answers are saved, but the API returned an inconsistent check total. Review this check before comparing results.");
     this.store.updateJob(job.id, { requestedAnswers: requested });
     return {
@@ -1328,6 +1326,11 @@ export class Runner {
         requested,
       ),
       consoleScore: state.visibility_score,
+      analysis: {
+        measurementJobId: job.id,
+        // Older checkpoints already saved the findings atomically without recording their count.
+        findings: reviewed.findings ?? this.store.artifacts(project.id, "finding", job.id).length,
+      },
       comparisonKey: comparisonKey(
         project,
         job,
