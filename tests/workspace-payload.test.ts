@@ -45,6 +45,35 @@ test('workspace and report preserve brand advice while a Topic recheck retires o
   } finally { await app.close(); store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('a later DeepSeek check keeps the advice prepared from the ChatGPT check', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'opengeo-advice-basis-')), store = new Store(dir);
+  const vault = new Vault(dir, { encrypt: text => Buffer.from(text), decrypt: bytes => bytes.toString() });
+  const { app } = await createApp(store, vault, session);
+  try {
+    const project = store.createProject(projectInput.parse({ domain: 'example.com', brand: 'Example', prompts: ['How do reports work?'] }));
+    const scan = store.enqueue(jobInput.parse({ projectId: project.id, kind: 'measure', provider: 'chatgpt' }), randomUUID());
+    store.updateJob(scan.id, { status: 'completed' });
+    const analysis = store.enqueue(jobInput.parse({ projectId: project.id, kind: 'diagnose', provider: 'chatgpt', measurementJobId: scan.id }), randomUUID());
+    const advice = { id: randomUUID(), projectId: project.id, jobId: analysis.id, title: 'Brand advice', description: 'Review the report explanation.', priority: 'medium', kind: 'analysis', status: 'open', targetUrl: 'https://example.com/reports', steps: ['Explain report exports.'], evidenceIds: [], confidence: 'inferred' };
+    store.put('finding', project.id, analysis.id, advice);
+    store.updateJob(analysis.id, { status: 'completed', result: { findings: 1, measurementJobId: scan.id } });
+    // DeepSeek collects answers only, so its check finishing later must not retire advice it can never replace.
+    const deepseek = store.enqueue(jobInput.parse({ projectId: project.id, kind: 'measure', provider: 'deepseek', maxCostUsd: 1 }), randomUUID());
+    store.updateJob(deepseek.id, { status: 'completed' });
+    const workspace = await app.inject({ url: `/api/projects/${project.id}/workspace`, headers });
+    assert.equal(workspace.json().measurement.id, deepseek.id, 'the brand view still shows the newest check');
+    assert.deepEqual(workspace.json().findings.map((finding: any) => finding.id), [advice.id]);
+    assert.match(reportMarkdown(store, project.id), /Brand advice/);
+    assert.throws(() => store.enqueue(jobInput.parse({ projectId: project.id, kind: 'diagnose', provider: 'chatgpt', measurementJobId: deepseek.id }), randomUUID()),
+      /DeepSeek checks collect answers only/, 'an analysis never reads a comparison-only check');
+    // A newer ChatGPT check still retires the advice until it is analyzed, as before.
+    const fresh = store.enqueue(jobInput.parse({ projectId: project.id, kind: 'measure', provider: 'chatgpt' }), randomUUID());
+    store.updateJob(fresh.id, { status: 'completed' });
+    const retired = await app.inject({ url: `/api/projects/${project.id}/workspace`, headers });
+    assert.deepEqual(retired.json().findings, []);
+  } finally { await app.close(); store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('the polled workspace leaves page text and links to the evidence views', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'opengeo-workspace-'));
   const store = new Store(dir);

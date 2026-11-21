@@ -745,8 +745,8 @@ export function App() {
           revision={revision}
           initialTopic={contentTopic}
           finding={contentFinding}
-          measurementJobId={jobDialog === 'competitors' ? competitorCheck : w?.measurement?.id}
-          previousMeasurement={w?.jobs.find(completedBrandMeasurement) ?? null}
+          measurementJobId={jobDialog === 'competitors' ? competitorCheck : jobDialog === 'diagnose' ? analysisMeasurement?.id : w?.measurement?.id}
+          previousMeasurement={(jobDialog === 'diagnose' ? analysisMeasurement : w?.jobs.find(completedBrandMeasurement)) ?? null}
           topic={jobDialog === "measure" && jobTopic ? p.topics.find((topic) => topic.id === jobTopic) ?? null : null}
           run={run}
           onStarted={job => {
