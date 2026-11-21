@@ -30,6 +30,19 @@ test("a later completed run of the same family resolves an earlier failure", () 
   assert.deepEqual(runsNeedingAttention([run("audit-done", "audit", "completed", "2026-10-02T09:00:00Z"), failed]).map((job) => job.id), ["check-failed"], "another kind of run does not resolve it");
 });
 
+test("a successful check only resolves collection failures in its own scope", () => {
+  const earlier = '2026-10-01T09:00:00Z', later = '2026-10-02T09:00:00Z';
+  const brand = run('brand-failed', 'measure', 'failed', earlier);
+  const firstTopic = { ...run('topic-a-failed', 'measure', 'failed', earlier), topicId: 'topic-a' };
+  const secondTopic = { ...run('topic-b-failed', 'measure', 'failed', earlier), topicId: 'topic-b' };
+  const completed = { ...run('topic-a-finished', 'recheck', 'completed', later), topicId: 'topic-a' };
+  const unresolved = [brand, firstTopic, secondTopic];
+
+  assert.deepEqual(runsNeedingAttention([completed, ...unresolved]), [brand, secondTopic]);
+  assert.deepEqual(runsNeedingAttention([{ ...completed, prepareRecommendations: true }, ...unresolved]), [brand, secondTopic]);
+  assert.deepEqual(runsNeedingAttention([run('brand-finished', 'recheck', 'completed', later), ...unresolved]), [firstTopic, secondTopic]);
+});
+
 test("failures resolve per piece of work, can be dismissed, and setup-only or answered runs stay out", () => {
   const draftFailed = { ...run("draft-x-failed", "content", "failed", "2026-10-01T09:00:00Z"), findingId: "finding-x" } as Job;
   const otherDraft = { ...run("draft-y-done", "content", "completed", "2026-10-02T09:00:00Z"), findingId: "finding-y" } as Job;
@@ -48,6 +61,8 @@ test('failed automatic follow-up remains visible even though its answers are ava
     result: { comparisonKey: 'a'.repeat(64), collectionCompletedAt: '2026-10-01T09:00:00Z',
       metrics: { requested: 1, completed: 1, missing: 0, mentionRate: 100, citationRate: 0, citations: 0 } } } as Job;
   assert.deepEqual(runsNeedingAttention([failed]).map(job => job.id), [id]);
+  const newerCheck = { ...run('newer-check', 'recheck', 'completed', '2026-10-02T09:00:00Z'), prepareRecommendations: true };
+  assert.deepEqual(runsNeedingAttention([newerCheck, failed]), [failed]);
   const recovery = { ...run('analysis', 'diagnose', 'completed', '2026-10-02T09:00:00Z'), measurementJobId: id } as Job;
   assert.deepEqual(runsNeedingAttention([recovery, failed]), []);
 });

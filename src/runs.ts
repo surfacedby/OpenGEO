@@ -3,12 +3,12 @@ import { completedMeasurement } from "../server/portable-results";
 
 /** The work a run produces. A later success on the same work resolves an earlier failure. */
 function target(job: Job) {
-  if (job.prepareRecommendations && completedMeasurement(job)) return 'analysis:' + job.id;
+  if (job.status === 'failed' && job.prepareRecommendations && completedMeasurement(job)) return 'analysis:' + job.id;
   if (job.kind === 'diagnose' && job.measurementJobId) return 'analysis:' + job.measurementJobId;
   switch (job.kind) {
     case "measure":
     case "recheck":
-      return "measure";
+      return "measure:" + (job.topicId ?? "");
     case "content":
       return "content:" + (job.findingId ?? job.topic ?? "");
     case "revise":
