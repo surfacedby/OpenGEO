@@ -24,11 +24,11 @@ build = root / 'release' / ('candidate' if suffix == '.exe' else 'mac-sealed')
 files = list(build.glob('*' + suffix))
 assert len(files) == 1
 shutil.copyfile(files[0], candidate)
-previous_version = '0.1.0-beta.8'
+previous_version = '0.1.0-beta.9'
 old_hash = {
-    'windows-x64': '344a8d6713a213e5458c1b7258a8018d790f79fbbeb531a6b8d3757aaa827528',
-    'macos-arm64': '55f4c9a8f6fa443329aaed3fddc695d67236d73988db7036b4f3bc83674d635e',
-    'macos-x64': '778b10942eeadb36b0d078b166f20d27e20603431de9549ab1f4bae6ef4e4d1d',
+    'windows-x64': '807daed084de359653e26d83812d6fb7c2a7143388b983c5796a49bbb78f9266',
+    'macos-arm64': '68c3c963482b3fbf5f6846a1955be42e4a4a677923ab78e2377963ce0153bce2',
+    'macos-x64': 'b11dcc385037d080885f14a3fde90e33df543fb32b17c21367ca6b057d79badb',
 }[target]
 previous = out / ('previous' + suffix)
 download_public(f'https://github.com/surfacedby/OpenGEO/releases/download/v{previous_version}/OpenGEO-{previous_version}-{target}{suffix}', previous, old_hash)
