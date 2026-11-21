@@ -41,8 +41,11 @@ import {
 const consoleDomainBinding = z.object({ id: z.string().uuid(), domain: z.string().min(1) });
 const consoleScanBinding = z.object({ scan_id: z.string().regex(/^[a-z0-9_-]+$/i) });
 const consoleScanReceipt = consoleScanBinding.extend({ credits_charged: z.number().int().nonnegative() }).passthrough();
+const consoleCheckStatus = z.object({
+  id: z.string(), domain_id: z.string(), status: z.string().min(1),
+  answers_total: z.unknown().optional(), completed_at: z.unknown().optional(), visibility_score: z.unknown().optional(),
+});
 type ConsoleAnswerCheckpoint = { observations: number; observationIds: [string, string][] };
-type ConsoleScanCompletion = { answers_total?: unknown; completed_at?: unknown; visibility_score?: unknown };
 
 function requireConsoleScanReceipt(value: unknown) {
   const parsed = consoleScanReceipt.safeParse(value);
@@ -1232,16 +1235,10 @@ export class Runner {
     this.store.updateJob(job.id, { spentUsd: creditsUsd(scan.credits_charged, unitUsd) });
     for (let n = 0; n < 180; n++) {
       signal.throwIfAborted();
-      const state = (
-        await this.providers.console(
-          "/scans/" + scanId,
-          undefined,
-          undefined,
-          signal,
-        )
-      ).data;
-      if (state.status !== "completed" && Number.isSafeInteger(state.answers_total) && state.answers_total > 0)
-        this.store.updateJob(job.id, { requestedAnswers: state.answers_total });
+      const state = await this.readConsoleCheckStatus(scanId, domain.id, signal);
+      const requested = state.answers_total;
+      if (state.status !== "completed" && typeof requested === 'number' && Number.isSafeInteger(requested) && requested > 0)
+        this.store.updateJob(job.id, { requestedAnswers: requested });
       if (state.status === "completed") {
         const { result, answers, checkpointed } = await this.collectConsoleMeasurement(job, project, scanId, state, signal);
         const progress = "Answers saved. Waiting for SurfacedBy recommendations.";
@@ -1278,6 +1275,14 @@ export class Runner {
       : "SurfacedBy is still processing. Resume later to collect results.");
   }
 
+  private async readConsoleCheckStatus(scanId: string, domainId: string, signal: AbortSignal) {
+    const { data } = await this.providers.console('/scans/' + scanId, undefined, undefined, signal);
+    const parsed = consoleCheckStatus.safeParse(data);
+    if (!parsed.success || parsed.data.id !== scanId || parsed.data.domain_id !== domainId)
+      throw new ProviderError('invalid_response', 'SurfacedBy did not confirm this status belongs to your check and website. Saved results were kept.');
+    return parsed.data;
+  }
+
   /** A check may finish between stopping the local worker and asking Console to cancel. */
   private async recoverCompletedConsoleScan(job: Job, scanId: string, chargedCredits: number) {
     try {
@@ -1285,8 +1290,8 @@ export class Runner {
       const project = snapshot?.body ? JSON.parse(snapshot.body) as Project : this.store.project(job.projectId);
       const domain = boundConsoleDomain(JSON.parse(this.store.step(job.id, 'console-domain')?.body ?? 'null'), project.domain);
       const signal = AbortSignal.timeout(20000);
-      const state = (await this.providers.console('/scans/' + scanId, undefined, undefined, signal)).data;
-      if (state?.id !== scanId || state.domain_id !== domain.id || state.status !== 'completed') return false;
+      const state = await this.readConsoleCheckStatus(scanId, domain.id, signal);
+      if (state.status !== 'completed') return false;
       const originalCharge = creditsUsd(chargedCredits, this.consoleScanCreditUnit(job));
       const { result } = await this.collectConsoleMeasurement(job, project, scanId, state, signal);
       this.store.updateJob(job.id, { error: null, spentUsd: originalCharge, requestedAnswers: result.metrics.requested, result, prepareRecommendations: true,
@@ -1297,7 +1302,7 @@ export class Runner {
     }
   }
 
-  private async collectConsoleMeasurement(job: Job, project: Project, scanId: string, state: ConsoleScanCompletion, signal: AbortSignal) {
+  private async collectConsoleMeasurement(job: Job, project: Project, scanId: string, state: z.infer<typeof consoleCheckStatus>, signal: AbortSignal) {
     const completedAt = z.string().datetime({ offset: true }).safeParse(state.completed_at);
     const collectionCompletedAt = completedAt.success ? new Date(completedAt.data).toISOString() : new Date().toISOString();
     const previous = this.store.step(job.id, 'console-evidence');

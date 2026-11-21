@@ -98,7 +98,11 @@ test('Console cancellation returns a confirmed pending-check refund to the local
     f.store.updateJob(job.id, { status: 'paused', spentUsd: 1 });
     f.store.setStep(job.id, 'console-scan', 'done', { scan_id: 'remote-check', credits_charged: 10 });
     let calls = 0;
-    const runner = new Runner(f.store, { console: async (path: string) => { assert.equal(path, '/scans/remote-check/cancel'); calls++; return { data: { refunded_credits: 10, prior_status: 'pending' } }; } } as any);
+    const runner = new Runner(f.store, { console: async (path: string) => {
+      assert.equal(path, '/scans/remote-check/cancel');
+      calls++;
+      return { data: { id: 'remote-check', status: 'cancelled', refunded_credits: 10, prior_status: 'pending' } };
+    } } as any);
     await runner.cancel(job.id);
     assert.equal(f.store.job(job.id).status, 'cancelled');
     assert.equal(f.store.job(job.id).spentUsd, 0);

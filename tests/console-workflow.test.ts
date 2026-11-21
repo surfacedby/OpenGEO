@@ -91,7 +91,7 @@ test('full-check approval and refunds retain the advertised rate through price c
       return json({ scan_id: 'fixture-scan', credits_charged: 2 });
     }
     if (path.endsWith('/cancel')) return json({ id: cancelledRemote, status: 'cancelled', refunded_credits: 1, prior_status: 'running' });
-    if (path === '/scans/fixture-scan') return json({ status: 'failed' });
+    if (path === '/scans/fixture-scan') return json({ id: 'fixture-scan', domain_id: 'd373ba88-779f-41ce-926e-28a40103c97e', status: 'failed' });
     throw new Error('Unexpected external request: ' + path);
   }) as typeof fetch;
   try {
@@ -212,7 +212,7 @@ test("Console check totals and public citations survive project edits, dashboard
       assert.equal(JSON.parse(init!.body as string).max_credits, 2);
       return json({ scan_id: "fixture-scan", credits_charged: 2 });
     }
-    if (path === "/scans/fixture-scan") return json({ status: "completed", answers_total: finalCount,
+    if (path === "/scans/fixture-scan") return json({ id: 'fixture-scan', domain_id: 'd373ba88-779f-41ce-926e-28a40103c97e', status: "completed", answers_total: finalCount,
       visibility_score: 75, completed_at: "2026-10-01T10:00:00+00:00" });
     if (path.endsWith("/analysis")) return analysis();
     if (path.endsWith("/observations")) {
@@ -372,22 +372,23 @@ test('a Console check rejects mixed scopes and duplicate answers without replaci
   vault.set('console', { key: 'synthetic-console-key' });
   const runtime = await createApp(store, vault, 'synthetic-local-session');
   const original = globalThis.fetch;
-  const scanId = randomUUID(), other = randomUUID();
+  const scanId = randomUUID(), other = randomUUID(), domainId = randomUUID();
   const answer = { id: randomUUID(), scan_id: scanId, status: 'collected', platform: 'chatgpt', prompt: 'What is an example?',
     answer_text: 'A locally scoped answer.', presence: 'named', citations: [] };
   const second = { ...answer, id: randomUUID(), prompt: 'Which other examples exist?' };
   const finding = { id: randomUUID(), scan_id: scanId, recommendation_eligible: true, title: 'Show an example', description: 'Explain how it works.',
     target_url: 'https://example.com/examples', evidence: [{ observation_id: answer.id }], steps: ['Add a concrete example.'] };
   let observations = [answer, { ...second, scan_id: other }], analysisScan = other, findings = [{ ...finding, scan_id: other }];
+  let check = { id: other, domain_id: domainId, status: 'completed', answers_total: 70 };
   let submissions = 0, evidenceReads = 0;
   globalThis.fetch = (async (url) => {
     const path = new URL(String(url)).pathname.replace('/api/v1/console', '');
     if (path === '/capabilities') return json({ platforms: [{ key: 'chatgpt', name: 'ChatGPT', enabled: true }], pricing: { credit_usd: .1 } });
-    if (path === '/domains') return json([{ id: 'd373ba88-779f-41ce-926e-28a40103c97e', domain: 'example.com' }]);
+    if (path === '/domains') return json([{ id: domainId, domain: 'example.com' }]);
     if (path.endsWith('/brand')) return json({});
     if (path === '/scans/preview') return json({ credits_required: 2, query_count: 2 });
     if (path === '/scans') { submissions++; return json({ scan_id: scanId, credits_charged: 2 }); }
-    if (path === `/scans/${scanId}`) return json({ status: 'completed', answers_total: 2 });
+    if (path === `/scans/${scanId}`) return json(check);
     if (path === `/scans/${scanId}/observations`) { evidenceReads++; return json(observations); }
     if (path === `/scans/${scanId}/analysis`) return json({ scan_id: analysisScan, analysis_status: 'available' });
     if (path.endsWith('/insights/diagnoses')) return json([]);
@@ -405,6 +406,16 @@ test('a Console check rejects mixed scopes and duplicate answers without replaci
       assert.equal(store.job(job.id).spentUsd, .2);
     };
     await runtime.runner.tick();
+    refuse();
+    assert.equal(evidenceReads, 0);
+    assert.equal(store.job(job.id).requestedAnswers, 2);
+    check = { ...check, id: scanId, domain_id: other, status: 'failed' };
+    await resume();
+    refuse();
+    assert.equal(evidenceReads, 0);
+    assert.equal(store.job(job.id).requestedAnswers, 2);
+    check = { ...check, domain_id: domainId, status: 'completed', answers_total: 2 };
+    await resume();
     refuse();
     assert.equal(store.observations(project.id, job.id).length, 0);
     observations = [answer, { ...second, id: answer.id }];
