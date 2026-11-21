@@ -102,11 +102,18 @@ test("Console check totals and public citations survive project edits, dashboard
         { id: "remote-answer-3", prompt: "Third question?", platform: "chatgpt", status: "missing_observation", answer_text: null },
       ]);
     }
-    if (path.endsWith("/insights/opportunities") && hasRecommendation) return json([{
-      id: "remote-finding-1", title: "Compare the available examples", description: "Show which examples fit each use case.",
-      priority: "medium", target_url: "https://example.com/", evidence: [{ observation_id: "remote-answer-1" }],
-      steps: ["Explain who each example is for."],
-    }]);
+    if (path.endsWith("/insights/opportunities")) return json([
+      {
+        id: "historical-gap", title: "AI answers without citing you", description: "No page action is decided for this question yet.",
+        priority: "medium", target_url: null, recommendation_eligible: false,
+        evidence: [{ observation_id: "remote-answer-1" }], steps: [],
+      },
+      ...(hasRecommendation ? [{
+        id: "remote-finding-1", title: "Compare the available examples", description: "Show which examples fit each use case.",
+        priority: "medium", target_url: "https://example.com/examples", recommendation_eligible: true,
+        evidence: [{ observation_id: "remote-answer-1" }], steps: ["Explain who each example is for."],
+      }] : []),
+    ]);
     if (path.includes("/insights/")) return json([]);
     throw new Error("Unexpected external request: " + path);
   }) as typeof fetch;
@@ -128,7 +135,10 @@ test("Console check totals and public citations survive project edits, dashboard
       { findings: 1, measurementJobId: job.id });
     const answerId = check.observations.find((answer: { prompt: string }) => answer.prompt === "First question?").id;
     assert.deepEqual(check.findings.map((finding: { evidenceIds: string[] }) => finding.evidenceIds), [[answerId]]);
+    assert.equal(check.findings[0].targetUrl, "https://example.com/examples");
+    assert.deepEqual(check.findings[0].steps, ["Explain who each example is for."]);
     assert.match(reportMarkdown(store, project.id), /Answers collected: 2 of 3/);
+    assert.doesNotMatch(reportMarkdown(store, project.id), /No page action is decided/);
     const portable = exportProject(store, project.id);
     assert.equal(JSON.stringify(portable).includes("synthetic-hidden-field"), false);
     assert.deepEqual(portable.observations[0].citations, []);

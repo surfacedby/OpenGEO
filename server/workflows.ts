@@ -1310,8 +1310,11 @@ export class Runner {
     if (saved?.state === "done")
       return (JSON.parse(saved.body!).findings as number | undefined) ?? this.store.artifacts(project.id, "finding", job.id).length;
     const findings: any[] = [];
-    for (const kind of ["diagnoses", "opportunities"])
-      findings.push(...await this.consolePages("/domains/" + domainId + "/insights/" + kind + "?scan_id=" + scanId, signal));
+    for (const kind of ["diagnoses", "opportunities"]) {
+      const rows = await this.consolePages("/domains/" + domainId + "/insights/" + kind + "?scan_id=" + scanId, signal);
+      // A historical gap may explain an answer before SurfacedBy has qualified a change.
+      findings.push(...rows.filter(row => row.recommendation_eligible === true));
+    }
     signal.throwIfAborted();
     const observationIds = new Map(answers.observationIds);
     this.store.db.transaction(() => {
