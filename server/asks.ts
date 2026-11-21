@@ -81,7 +81,8 @@ export async function engineCatalog(deps: AskDeps) {
       ...(engine.provider === "dataforseo" && requestEstimate > 0 ? { estimateUsd: requestEstimate } : {}),
       ...(menu ? { estimateUsd: Number(menu.one_answer_usd), publishedCredits: menu.one_answer_credits } : {}) };
   });
-  return { engines, availabilityNote: surfacedBy.reason ?? (!connected.console ? 'Connect SurfacedBy to see its available engines.' : undefined),
+  return { engines, consoleConnected: !!connected.console,
+    availabilityNote: surfacedBy.reason ?? (!connected.console ? 'Connect SurfacedBy to see its available engines.' : undefined),
     ...(consolePriceMenu?.platforms.length ? { consoleEstimateValiditySeconds: consolePriceMenu.estimate_validity_seconds } : {}),
     defaultLimitUsd: deps.store.setting<number>("askLimitUsd", defaultLimitUsd) };
 }

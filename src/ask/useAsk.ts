@@ -46,11 +46,13 @@ export function useAskController(projectId: string | undefined, onAsked: (askId:
   const [estimate, setEstimate] = useState<{ key: string; value: Estimate } | null>(null);
   const [estimating, setEstimating] = useState(false);
   const [priceRevision, setPriceRevision] = useState(0);
+  const [refreshingScope, setRefreshingScope] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const freeOf = (list: Catalog | null) => list?.engines.filter(engine => engine.available && engine.price === 'free').map(engine => engine.id) ?? [];
   const freeChoice = useMemo(() => freeOf(catalog), [catalog]);
   const scope = projectId + '|' + connectionRevision;
+  const refreshingPrices = refreshingScope === scope;
   const currentScope = useRef(scope);
   currentScope.current = scope;
   const onAskedRef = useRef(onAsked);
@@ -63,9 +65,9 @@ export function useAskController(projectId: string | undefined, onAsked: (askId:
   const cache = useRef<{ scope: string; value: Catalog; expires: number } | null>(null);
   const loading = useRef<{ scope: string; promise: Promise<Catalog | null> } | null>(null);
   // Recheck on interaction after a short window, and immediately after a connection or brand change.
-  const ensureCatalog = useCallback(() => {
+  const ensureCatalog = useCallback((refresh = false) => {
     if (!projectId) return Promise.resolve(null);
-    if (cache.current?.scope === scope && cache.current.expires > Date.now()) return Promise.resolve(cache.current.value);
+    if (!refresh && cache.current?.scope === scope && cache.current.expires > Date.now()) return Promise.resolve(cache.current.value);
     if (loading.current?.scope === scope) return loading.current.promise;
     const promise = api<Catalog>('/projects/' + projectId + '/asks/engines')
       .then(next => {
@@ -87,7 +89,7 @@ export function useAskController(projectId: string | undefined, onAsked: (askId:
     loading.current = { scope, promise };
     return promise;
   }, [projectId, scope]);
-  useEffect(() => { cache.current = null; setCatalog(null); setChoice([]); setOpen(false); setEstimate(null); setError(''); }, [scope]);
+  useEffect(() => { cache.current = null; setCatalog(null); setChoice([]); setOpen(false); setEstimate(null); setRefreshingScope(null); setError(''); }, [scope]);
   useEffect(() => { setQuestion(''); }, [projectId]);
   useEffect(() => { if (open) void ensureCatalog(); }, [open, ensureCatalog]);
   useEffect(() => {
@@ -119,7 +121,7 @@ export function useAskController(projectId: string | undefined, onAsked: (askId:
   useEffect(() => {
     let current = true;
     setEstimating(false);
-    if (!projectId || !paid.length || trimmed.length < 3) return;
+    if (!projectId || refreshingPrices || !paid.length || trimmed.length < 3) return;
     if (estimate?.key === estimateKey && (!estimate.value.expiresAt || Date.parse(estimate.value.expiresAt) > Date.now())) return;
     const timer = setTimeout(() => {
       setEstimating(true);
@@ -129,7 +131,7 @@ export function useAskController(projectId: string | undefined, onAsked: (askId:
         .finally(() => { if (current) setEstimating(false); });
     }, 600);
     return () => { current = false; clearTimeout(timer); };
-  }, [estimateKey, priceRevision]);
+  }, [estimateKey, priceRevision, refreshingPrices]);
 
   useEffect(() => {
     if (!estimate?.value.expiresAt || estimate.key !== estimateKey) return;
@@ -137,7 +139,7 @@ export function useAskController(projectId: string | undefined, onAsked: (askId:
     return () => clearTimeout(timer);
   }, [estimate, estimateKey]);
 
-  const current = estimate?.key === estimateKey && (!estimate.value.expiresAt || Date.parse(estimate.value.expiresAt) > Date.now()) ? estimate.value : null;
+  const current = !refreshingPrices && estimate?.key === estimateKey && (!estimate.value.expiresAt || Date.parse(estimate.value.expiresAt) > Date.now()) ? estimate.value : null;
   const priceOf = (id: string) => {
     const engine = catalog?.engines.find(row => row.id === id);
     if (engine?.price === 'free') return 0;
@@ -151,8 +153,20 @@ export function useAskController(projectId: string | undefined, onAsked: (askId:
   const quoteNotice = blockedQuote && 'note' in blockedQuote ? blockedQuote.note : undefined;
   const priced = !paid.length || (!!current && !estimating && !blockedQuote);
 
+  async function refreshPrices() {
+    if (!projectId || refreshingPrices || submitting.current) return;
+    setRefreshingScope(scope);
+    setError('');
+    // Refresh the engine list first so a withdrawn engine cannot request another quote.
+    await ensureCatalog(true);
+    if (currentScope.current !== scope) return;
+    setEstimate(null);
+    setRefreshingScope(null);
+    setPriceRevision(value => value + 1);
+  }
+
   async function submit(requested?: string[]) {
-    if (submitting.current) return;
+    if (submitting.current || refreshingPrices) return;
     submitting.current = true;
     setBusy(true); setError('');
     try {
@@ -187,7 +201,7 @@ export function useAskController(projectId: string | undefined, onAsked: (askId:
   return {
     catalog, ensureCatalog, question, setQuestion, choice, setChoice, limit, setLimit, open, setOpen, error, setError, busy,
     chosen, paid, priceOf, fit, totalUsd, estimating, priced, quoteNotice, menuPrices, freeChoice, submit, estimateExpiresAt: current?.expiresAt ?? null,
-    refreshPrices: () => { setEstimate(null); setError(''); setPriceRevision(value => value + 1); },
+    refreshPrices, refreshingPrices,
     toggle: (id: string) => setChoice(list => list.includes(id) ? list.filter(item => item !== id) : [...list, id]),
     /** Opens settings with a question and engines filled in, for example to ask again with a higher limit. */
     prefill: (text: string, engines?: string[]) => {

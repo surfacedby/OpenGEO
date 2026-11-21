@@ -1,5 +1,5 @@
 import { type RefObject } from 'react';
-import { AlertTriangle, ChevronDown, ChevronUp, Search, SlidersHorizontal } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronUp, RefreshCw, Search, SlidersHorizontal } from 'lucide-react';
 import { Dialog } from '../ui/Dialog';
 import { ProviderIcon } from '../provider-ui';
 import { usd } from '../format';
@@ -27,7 +27,7 @@ export function AskBar({ ask, settingsButton }: { ask: AskController; settingsBu
     <label htmlFor="ask-question" className="visually-hidden">Ask every engine</label>
     <input id="ask-question" value={ask.question} onFocus={() => void ask.ensureCatalog()} onChange={event => ask.setQuestion(event.target.value)} placeholder="Ask any question" maxLength={500} autoComplete="off" />
     {settings}
-    <button type="submit" className="ask-submit" disabled={ask.busy}>Ask</button>
+    <button type="submit" className="ask-submit" disabled={ask.busy || ask.refreshingPrices}>Ask</button>
   </form>;
 }
 
@@ -45,6 +45,7 @@ export function AskDrawer({ ask, brand, domain, locale }: {
   const available = ask.catalog?.engines.filter(engine => engine.available) ?? [];
   const missing = ask.catalog?.engines.filter(engine => !engine.available) ?? [];
   const consoleEstimateValidity = ask.catalog?.consoleEstimateValiditySeconds;
+  const priceUnavailable = ask.paid.length > 0 && ask.totalUsd === null && !ask.estimating && ask.question.trim().length >= 3;
   const unavailableGroups = [...new Map(missing.map(engine => [engine.provider + '|' + engine.reason, missing.filter(row => row.provider === engine.provider && row.reason === engine.reason)])).values()];
   const providerName = (provider: string) => ({ chatgpt: 'ChatGPT', console: 'SurfacedBy', dataforseo: 'DataForSEO', deepseek: 'DeepSeek' } as Record<string, string>)[provider] ?? provider;
   const priceText = (id: string) => {
@@ -74,7 +75,7 @@ export function AskDrawer({ ask, brand, domain, locale }: {
             onChange={event => ask.setQuestion(event.target.value)}
             onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void ask.submit(); } }} />
         </label>
-        <fieldset className="ask-engines" disabled={ask.busy}>
+        <fieldset className="ask-engines" disabled={ask.busy || ask.refreshingPrices}>
           <legend>Engines</legend>
           {consoleEstimateValidity !== undefined &&
             <p className="ask-muted">SurfacedBy estimates are free and valid for {estimateDuration(consoleEstimateValidity)}. Unused reserved credits are returned.</p>}
@@ -96,6 +97,11 @@ export function AskDrawer({ ask, brand, domain, locale }: {
             </div>)}
           </div>
         </fieldset>
+        {(ask.catalog?.consoleConnected || priceUnavailable || ask.refreshingPrices) && <div className="button-row">
+          <button type="button" className="text-button" disabled={ask.busy || ask.refreshingPrices} onClick={() => void ask.refreshPrices()}>
+            <RefreshCw size={15} />{ask.refreshingPrices ? 'Refreshing engines and prices...' : 'Refresh engines and prices'}
+          </button>
+        </div>}
         {ask.paid.length > 0 && ask.priced && ask.fit.overLimit && <div className="ask-over-limit" role="alert">
           <AlertTriangle size={18} />
             <div><strong>The selected engines exceed your spending limit</strong>
@@ -118,8 +124,7 @@ export function AskDrawer({ ask, brand, domain, locale }: {
             {ask.paid.some(engine => engine.provider === 'deepseek') && <> DeepSeek includes an allowance for web searches. Recorded costs are estimated from its reported usage.</>}
             {ask.estimateExpiresAt && <> Quote expires at {new Date(ask.estimateExpiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}. Refreshed automatically.</>}
           </span>
-          {ask.paid.length > 0 && ask.totalUsd === null && !ask.estimating && ask.question.trim().length >= 3 && <button type="button" className="secondary" disabled={ask.busy} onClick={ask.refreshPrices}>Refresh prices</button>}
-          <button type="submit" className="primary" disabled={ask.busy || !ask.choice.length || (ask.paid.length > 0 && (!ask.priced || ask.fit.overLimit))}><Search size={15} />{ask.busy ? 'Starting...' : askLabel}</button>
+          <button type="submit" className="primary" disabled={ask.busy || ask.refreshingPrices || !ask.choice.length || (ask.paid.length > 0 && (!ask.priced || ask.fit.overLimit))}><Search size={15} />{ask.busy ? 'Starting...' : askLabel}</button>
         </div>
       </form>
     </section>
