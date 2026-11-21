@@ -39,9 +39,22 @@ import {
   type Model,
 } from "./contracts.js";
 const consoleDomainBinding = z.object({ id: z.string().uuid(), domain: z.string().min(1) });
-const consoleScanBinding = z.object({ scan_id: z.string() });
+const consoleScanBinding = z.object({ scan_id: z.string().regex(/^[a-z0-9_-]+$/i) });
+const consoleScanReceipt = consoleScanBinding.extend({ credits_charged: z.number().int().nonnegative() }).passthrough();
 type ConsoleAnswerCheckpoint = { observations: number; observationIds: [string, string][] };
 type ConsoleScanCompletion = { answers_total?: unknown; completed_at?: unknown; visibility_score?: unknown };
+
+function requireConsoleScanReceipt(value: unknown) {
+  const parsed = consoleScanReceipt.safeParse(value);
+  if (parsed.success) return parsed.data;
+  if (!consoleScanBinding.safeParse(value).success)
+    throw new ProviderError('invalid_response', 'SurfacedBy did not confirm this check. Review SurfacedBy Console before continuing.', true);
+  throw new ProviderError('cost_unknown', 'SurfacedBy did not confirm the charge for this check. Review it in SurfacedBy Console before continuing.', true);
+}
+
+function unconfirmedConsoleScanError() {
+  return new ProviderError('interrupted', 'The SurfacedBy submission is still unconfirmed. Review the check and any charge in SurfacedBy Console.', true);
+}
 
 function boundConsoleDomain(value: unknown, hostname: string) {
   const parsed = consoleDomainBinding.safeParse(value);
@@ -160,11 +173,12 @@ export class Runner {
   }
   private async cancelWork(id: string) {
     const job = this.store.job(id);
-    if (["completed", "failed"].includes(job.status) || (job.status === "cancelled" && job.error !== "cancel_remote")) return job;
+    const unconfirmed = job.provider === 'console' && this.store.unconfirmedConsoleScan(id);
+    if (["completed", "failed"].includes(job.status) || (job.status === "cancelled" && job.error !== "cancel_remote" && !unconfirmed)) return job;
     const fullCheckState = job.provider === 'console' ? this.store.step(id, 'console-scan')?.state : undefined;
     this.store.updateJob(id, {
       status: "cancelled",
-      ...(fullCheckState === 'done' || fullCheckState === 'started' ? { error: 'cancel_remote' } : {}),
+      ...(fullCheckState === 'done' || unconfirmed ? { error: 'cancel_remote' } : {}),
       progress: job.kind === 'audit' && !job.provider ? 'Website check stopped. Pages already checked are saved.' : "Cancelled. Completed provider calls may still be billable.",
     });
     const slot = this.active?.id === id ? this.active : this.askSlots.get(id);
@@ -197,7 +211,10 @@ export class Runner {
       }
       const saved = this.store.step(id, 'console-scan');
       if (saved?.state === 'done') {
-        const scan = JSON.parse(saved.body!);
+        const receipt = consoleScanReceipt.safeParse(JSON.parse(saved.body!));
+        if (!receipt.success)
+          return this.store.updateJob(id, { error: 'cancel_remote', progress: unconfirmedConsoleScanError().message });
+        const scan = receipt.data;
         try {
           const result = await this.providers.console('/scans/' + scan.scan_id + '/cancel', {}, id + ':cancel', AbortSignal.timeout(20000));
           const receipt = result.data, refund = receipt?.refunded_credits;
@@ -215,15 +232,16 @@ export class Runner {
             await this.recoverCompletedConsoleScan(job, scan.scan_id, scan.credits_charged)) return this.store.job(id);
           this.store.updateJob(id, { error: 'cancel_remote', progress: 'Stopped locally. Cancellation was not confirmed. Check SurfacedBy Console before starting another check.' });
         }
-      } else if (saved?.state === 'started') {
-        this.store.updateJob(id, { error: 'cancel_remote', progress: 'Stopped locally. Submission was not confirmed. Review SurfacedBy Console for a running check and any charge.' });
+      } else if (this.store.unconfirmedConsoleScan(id)) {
+        this.store.updateJob(id, { error: 'cancel_remote', progress: unconfirmedConsoleScanError().message });
       }
     }
     return this.store.job(id);
   }
   resumePreview(id: string) {
     const job = this.store.job(id);
-    const uncertain = this.store.db.prepare("SELECT COUNT(*) AS count FROM steps WHERE job_id=? AND state='started'").get(id) as { count: number };
+    const uncertain = this.store.db.prepare("SELECT COUNT(*) AS count FROM steps WHERE job_id=? AND " +
+      "(state='started' OR (step='console-scan' AND state='approved-retry'))").get(id) as { count: number };
     return { maxCostUsd: job.maxCostUsd, spentUsd: job.spentUsd, uncertainRequests: uncertain.count, provider: job.provider, reason: job.error, scheduledBudgetCeilingUsd: scheduledBudgetCeiling(this.store, job) };
   }
   resume(id: string, reviewed: boolean, maxCostUsd?: number) {
@@ -231,6 +249,7 @@ export class Runner {
     const stoppedDiscovery = job.status === 'cancelled' && job.kind === 'audit' && job.background && !job.provider;
     if (job.status !== "paused" && !stoppedDiscovery) throw new Error("Only paused jobs or stopped website discovery can resume");
     if (this.cancelling.has(id)) throw new ProviderError('in_progress', 'Wait for website discovery to finish stopping before resuming.');
+    if (this.store.unconfirmedConsoleScan(id)) throw unconfirmedConsoleScanError();
     if (this.resumePreview(id).uncertainRequests && !reviewed)
       throw new ProviderError("review", "Review uncertain provider requests before resuming.");
     if (job.error === "approval" && !reviewed)
@@ -1137,7 +1156,10 @@ export class Runner {
       throw new ProviderError("capability", "This SurfacedBy connection cannot answer a single question on this AI platform. Choose another engine.");
     const platform = job.platform === 'chat_gpt' ? 'chatgpt' : job.platform;
     const priorScan = this.store.step(job.id, 'console-scan');
-    if (this.store.step(job.id, 'console-scan')?.state !== 'done') {
+    // An accepted check can outlive the API replay cache. A second POST is not receipt recovery.
+    if (this.store.unconfirmedConsoleScan(job.id)) throw unconfirmedConsoleScanError();
+    const savedReceipt = priorScan?.state === 'done' ? requireConsoleScanReceipt(JSON.parse(priorScan.body!)) : null;
+    if (!savedReceipt) {
       const capability = await this.providers.console('/capabilities', undefined, undefined, signal);
       if (!capability.data?.platforms?.some((p: any) => p.key === platform && p.enabled === true))
         throw new ProviderError('capability', 'This AI platform is not available on your SurfacedBy connection. Select an enabled platform.');
@@ -1176,7 +1198,7 @@ export class Runner {
       keywords: project.prompts,
       max_credits: creditsWithinBudget(job.maxCostUsd, unitUsd),
     };
-    if (this.store.step(job.id, "console-scan")?.state !== "done") {
+    if (!savedReceipt) {
       const preview = await this.providers.console(
         "/scans/preview",
         request,
@@ -1201,21 +1223,12 @@ export class Runner {
         );
       this.store.updateJob(job.id, { requestedAnswers: preview.data.query_count });
     }
-    const scan = await this.once(
+    const scan = savedReceipt ?? await this.once(
       job,
       "console-scan",
-      async () =>
-        (await this.providers.console("/scans", request, job.id, signal)).data,
+      async () => requireConsoleScanReceipt((await this.providers.console("/scans", request, job.id, signal)).data),
     );
     const scanId = scan.scan_id;
-    if (!scanId)
-      throw new ProviderError(
-        "invalid_response",
-        "SurfacedBy did not confirm this check. Review SurfacedBy Console before continuing.",
-        true,
-      );
-    if (!Number.isSafeInteger(scan.credits_charged) || scan.credits_charged < 0)
-      throw new ProviderError('cost_unknown', 'SurfacedBy did not confirm the charge for this check. Review it in SurfacedBy Console before continuing.', true);
     this.store.updateJob(job.id, { spentUsd: creditsUsd(scan.credits_charged, unitUsd) });
     for (let n = 0; n < 180; n++) {
       signal.throwIfAborted();

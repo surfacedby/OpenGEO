@@ -139,7 +139,8 @@ export class Store {
       if (confirmation !== project.domain)
         throw new ProviderError("confirmation", "Type the website address exactly to delete this brand.");
       const jobs = this.jobs(id);
-      if (jobs.some(job => ["queued", "running", "paused"].includes(job.status) || job.error === "cancel_remote"))
+      if (jobs.some(job => ["queued", "running", "paused"].includes(job.status) || job.error === "cancel_remote"
+          || this.unconfirmedConsoleScan(job.id)))
         throw new ProviderError("in_progress", "Stop or resolve this brand's unfinished scans before deleting it.");
       const ids = new Set(jobs.map(job => job.id));
       const schedules = this.setting<{ id: string; job: { projectId: string } }[]>("schedules", []);
@@ -513,6 +514,10 @@ export class Store {
     return this.db
       .prepare("SELECT state,body FROM steps WHERE job_id=? AND step=?")
       .get(jobId, name) as { state: string; body: string | null } | undefined;
+  }
+  unconfirmedConsoleScan(jobId: string) {
+    const state = this.step(jobId, 'console-scan')?.state;
+    return state === 'started' || state === 'approved-retry';
   }
   setStep(jobId: string, name: string, state: string, body: unknown = null) {
     this.db

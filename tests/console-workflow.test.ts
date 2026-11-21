@@ -16,6 +16,62 @@ const json = (data: unknown) => new Response(JSON.stringify({ data }), {
   headers: { "Content-Type": "application/json" },
 });
 
+test('an unconfirmed full-check submission cannot be resubmitted or discarded by cancellation', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'opengeo-full-check-unconfirmed-'));
+  const store = new Store(directory);
+  const vault = new Vault(directory, { encrypt: text => Buffer.from(text), decrypt: bytes => bytes.toString() });
+  vault.set('console', { key: 'synthetic-console-key' });
+  const runtime = await createApp(store, vault, 'synthetic-local-session');
+  const original = globalThis.fetch;
+  const domain = { id: randomUUID(), domain: 'example.com' };
+  const requests: string[] = [];
+  globalThis.fetch = (async (url) => {
+    const path = new URL(String(url)).pathname.replace('/api/v1/console', '');
+    requests.push(path);
+    if (path === '/capabilities') return json({ platforms: [{ key: 'chatgpt', enabled: true }], pricing: { credit_usd: .25 } });
+    if (path === '/domains') return json([domain]);
+    if (path.endsWith('/brand')) return json({});
+    if (path === '/scans/preview') return json({ credits_required: 2, query_count: 1 });
+    if (path === '/scans') return json({ scan_id: randomUUID() });
+    throw new Error('Unexpected request ' + path);
+  }) as typeof fetch;
+  try {
+    const project = store.createProject(projectInput.parse({ domain: domain.domain, brand: 'Example', prompts: ['Which examples are useful?'] }));
+    const enqueue = (key: string) => store.enqueue(jobInput.parse({ projectId: project.id, kind: 'measure', provider: 'console', maxCostUsd: .5 }), key);
+    const newJob = enqueue('unconfirmed-charge');
+    await runtime.runner.tick();
+    assert.equal(store.job(newJob.id).error, 'cost_unknown');
+    assert.equal(store.step(newJob.id, 'console-scan')?.state, 'started');
+    assert.throws(() => runtime.runner.resume(newJob.id, true, 1), /submission is still unconfirmed/i);
+    assert.equal(store.job(newJob.id).maxCostUsd, .5);
+    assert.equal((await runtime.runner.cancel(newJob.id)).error, 'cancel_remote');
+
+    const former = enqueue('old-approved-retry');
+    store.setStep(former.id, 'console-scan', 'approved-retry');
+    await runtime.runner.tick();
+    assert.equal(store.job(former.id).status, 'paused');
+    assert.equal(runtime.runner.resumePreview(former.id).uncertainRequests, 1);
+    assert.equal((await runtime.runner.cancel(former.id)).error, 'cancel_remote');
+
+    const malformed = enqueue('old-incomplete-receipt');
+    store.setStep(malformed.id, 'console-scan', 'done', { scan_id: randomUUID() });
+    assert.equal((await runtime.runner.cancel(malformed.id)).error, 'cancel_remote');
+    assert.equal(store.step(malformed.id, 'console-scan')?.state, 'done');
+    assert.throws(() => store.deleteProject(project.id, project.domain), /unfinished/);
+
+    const previousBrand = store.createProject(projectInput.parse({ domain: 'example.org', brand: 'Previous' }));
+    const previouslyStopped = store.enqueue(jobInput.parse({ projectId: previousBrand.id, kind: 'measure', provider: 'console', maxCostUsd: .5 }), 'old-local-cancellation');
+    store.setStep(previouslyStopped.id, 'console-scan', 'approved-retry');
+    store.updateJob(previouslyStopped.id, { status: 'cancelled', error: null });
+    assert.throws(() => store.deleteProject(previousBrand.id, previousBrand.domain), /unfinished/);
+    assert.equal((await runtime.runner.cancel(previouslyStopped.id)).error, 'cancel_remote');
+    assert.deepEqual(requests, ['/capabilities', '/domains', `/domains/${domain.id}/brand`, '/scans/preview', '/scans']);
+  } finally {
+    globalThis.fetch = original;
+    await runtime.app.close(); store.close(); rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('full-check approval and refunds retain the advertised rate through price changes and cancellation', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'opengeo-console-price-')), store = new Store(directory);
   const vault = new Vault(directory, { encrypt: text => Buffer.from(text), decrypt: bytes => bytes.toString() });
