@@ -17,6 +17,19 @@ import type {
   PageSummary,
   Finding,
 } from "./contracts.js";
+
+/** A saved terminal receipt closes the Ask even when it arrived after an interruption. */
+function closeSettledConsoleAsk(job: Job): Job {
+  if (job.kind !== "ask" || job.provider !== "console" || job.costBasis !== "reported" ||
+      !["queued", "running", "paused"].includes(job.status)) return job;
+  const result = job.result as { profile?: unknown; terminalStatus?: unknown } | null;
+  if (result?.profile !== "selected_questions") return job;
+  const terminal = result.terminalStatus;
+  if (terminal !== "expired" && terminal !== "cancelled" && terminal !== "failed") return job;
+  return { ...job, status: terminal === "cancelled" ? "cancelled" : "failed", error: "provider",
+    progress: "This check ended. Collected answers and its final charge are saved." };
+}
+
 export class Store {
   readonly db: Database.Database;
   readonly pageCatalog: PageCatalog;
@@ -73,13 +86,19 @@ export class Store {
       this.db.close();
       throw error;
     }
-    // An interrupted provider call must be reconciled by a human, never replayed as a fresh paid request.
-    for (const job of this.jobs().filter((j) => j.status === "running"))
-      this.updateJob(job.id, {
-        status: job.kind === 'audit' && job.background ? 'queued' : 'paused',
-        error: job.kind === 'audit' && job.background ? null : 'interrupted',
-        progress: job.kind === 'audit' && job.background ? 'Continuing your saved website check' : 'Interrupted. Review completed evidence before resuming.',
-      });
+    for (const job of this.jobs()) {
+      const settled = closeSettledConsoleAsk(job);
+      if (settled !== job) {
+        this.updateJob(job.id, { status: settled.status, error: settled.error, progress: settled.progress });
+      } else if (job.status === "running") {
+        // An interrupted provider call requires review before it can resume.
+        this.updateJob(job.id, {
+          status: job.kind === 'audit' && job.background ? 'queued' : 'paused',
+          error: job.kind === 'audit' && job.background ? null : 'interrupted',
+          progress: job.kind === 'audit' && job.background ? 'Continuing your saved website check' : 'Interrupted. Review completed evidence before resuming.',
+        });
+      }
+    }
   }
   projects(): Project[] {
     return this.db
@@ -244,11 +263,11 @@ export class Store {
   }
   updateJob(id: string, patch: Partial<Job>) {
     const previous = this.job(id);
-    const j = {
+    const j = closeSettledConsoleAsk({
       ...previous,
       ...patch,
       updatedAt: new Date().toISOString(),
-    };
+    });
     this.db
       .prepare("UPDATE jobs SET status=?,body=? WHERE id=?")
       .run(j.status, JSON.stringify(j), id);

@@ -26,7 +26,7 @@ type Fake = {
   gate?: Promise<void>; gated?: string; estimates: any[]; purchases: any[]; openai: string[];
   advertised?: { key: string; name: string; enabled: boolean }[]; publicResults?: boolean;
   quotedUsd?: string; quoteExpiry?: Record<string, string>; creditsByPlatform?: Record<string, number>;
-  waiting?: boolean; balanceCredits?: number; rejectedPlatform?: string;
+  waiting?: boolean; expired?: boolean; balanceCredits?: number; rejectedPlatform?: string;
   advertisedCredits?: Record<string, number>; domainReads: number; registrations: number; brandWrites: number;
   registrationResult?: 'concurrent' | 'wrong-domain' | 'other-conflict';
 };
@@ -35,8 +35,10 @@ function fakeProviders(state: Fake) {
   const managed = (id: string) => {
     const { request, input } = remote.get(id);
     const credits = state.creditsByPlatform?.[input.platform] ?? state.credits;
-    return { id, status: state.waiting ? 'waiting_reconciliation' : 'completed', estimated_credits: credits, approved_credits: request.approved_credits, cancel_requested: false, progress: null,
-      receipt: state.waiting ? null : { charged_credits: credits, refunded_credits: request.approved_credits - credits, status: 'completed' } };
+    const status = state.expired ? 'expired' : 'completed';
+    const charge = state.expired ? 0 : credits;
+    return { id, status: state.waiting ? 'waiting_reconciliation' : status, estimated_credits: credits, approved_credits: request.approved_credits, cancel_requested: false, progress: null,
+      receipt: state.waiting ? null : { charged_credits: charge, refunded_credits: request.approved_credits - charge, status } };
   };
   return (async (url: string | URL, init?: RequestInit) => {
     const address = new URL(String(url)), body = init?.body ? JSON.parse(String(init.body)) : null, method = init?.method ?? 'GET';
@@ -674,5 +676,44 @@ test('an affordable Ask reserves the quoted answers without locking its unused s
     assert.equal((await f.read(askId)).spentUsd, .2);
     assert.equal((await f.read(askId)).costBasis, 'reported');
     assert.equal(f.state.purchases.length, 2);
+  } finally { await f.close(); }
+});
+
+test('an expired Console Ask keeps its answer and stops asking for attention across restarts', async () => {
+  const f = await fixture({ waiting: true });
+  try {
+    const { askId, jobs: [jobId] } = (await f.ask({ question, engines: ['surfacedby-chatgpt'], maxCostUsd: .1 })).json();
+    const activity = async () => (await f.app.inject({ url: `/api/projects/${f.project.id}/workspace`, headers })).json().askActivity;
+    await f.runner.tick();
+    assert.equal(f.store.job(jobId).status, 'paused');
+    assert.equal((await activity()).length, 1);
+
+    f.state.waiting = false;
+    f.state.expired = true;
+    f.runner.resume(jobId, true);
+    await f.runner.tick();
+
+    const ended = f.store.job(jobId);
+    const ask = await f.read(askId);
+    assert.equal(ended.status, 'failed');
+    assert.equal(ask.engines[0].state, 'answered');
+    assert.equal(ask.spentUsd, 0);
+    assert.equal(ask.costBasis, 'reported');
+    assert.deepEqual(await activity(), []);
+    assert.equal(f.state.purchases.length, 1);
+    assert.throws(() => f.runner.resume(jobId, true), /Only paused jobs/);
+    const saved = f.store.answers(f.project.id, jobId, 'ask-answer');
+    assert.equal(saved.length, 1);
+
+    // Model an older install that saved the verified receipt and answer as paused.
+    const oldJob = { ...ended, status: 'paused', error: 'provider', progress: 'This check did not finish.' };
+    f.store.db.prepare("UPDATE jobs SET status='paused', body=? WHERE id=?").run(JSON.stringify(oldJob), jobId);
+    const reopened = new Store(f.store.directory);
+    try {
+      assert.equal(reopened.job(jobId).status, 'failed');
+      assert.equal(reopened.job(jobId).spentUsd, 0);
+      assert.deepEqual(reopened.answers(f.project.id, jobId, 'ask-answer'), saved);
+    } finally { reopened.close(); }
+    assert.deepEqual(await activity(), []);
   } finally { await f.close(); }
 });
