@@ -22,7 +22,7 @@ test('full-check approval and refunds retain the advertised rate through price c
   vault.set('console', { key: 'synthetic-console-key' });
   const runtime = await createApp(store, vault, 'synthetic-local-session');
   const original = globalThis.fetch;
-  let unit: unknown = 0.25, submitted = 0;
+  let unit: unknown = 0.25, submitted = 0, cancelledRemote = 'other-scan';
   globalThis.fetch = (async (url, init) => {
     const path = new URL(String(url)).pathname.replace('/api/v1/console', '');
     if (path === '/capabilities') return json({ platforms: [{ key: 'chatgpt', name: 'ChatGPT', enabled: true }], pricing: { credit_usd: unit } });
@@ -34,7 +34,7 @@ test('full-check approval and refunds retain the advertised rate through price c
       assert.equal(JSON.parse(String(init?.body)).max_credits, 2);
       return json({ scan_id: 'fixture-scan', credits_charged: 2 });
     }
-    if (path.endsWith('/cancel')) return json({ refunded_credits: 1, prior_status: 'running' });
+    if (path.endsWith('/cancel')) return json({ id: cancelledRemote, status: 'cancelled', refunded_credits: 1, prior_status: 'running' });
     if (path === '/scans/fixture-scan') return json({ status: 'failed' });
     throw new Error('Unexpected external request: ' + path);
   }) as typeof fetch;
@@ -46,6 +46,10 @@ test('full-check approval and refunds retain the advertised rate through price c
     assert.equal(store.job(job.id).error, 'provider');
     assert.equal(store.job(job.id).spentUsd, .5);
     unit = 0.75;
+    await runtime.runner.cancel(job.id);
+    assert.equal(store.job(job.id).error, 'cancel_remote');
+    assert.equal(store.job(job.id).spentUsd, .5);
+    cancelledRemote = 'fixture-scan';
     await runtime.runner.cancel(job.id);
     assert.equal(store.job(job.id).spentUsd, .25);
     await runtime.runner.cancel(job.id);
@@ -60,6 +64,71 @@ test('full-check approval and refunds retain the advertised rate through price c
       await runtime.runner.cancel(refused.id);
     }
     assert.equal(submitted, 1);
+  } finally {
+    globalThis.fetch = original;
+    await runtime.app.close(); store.close(); rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('a full check that finishes before cancellation keeps its original charge and answers', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'opengeo-console-terminal-cancel-')), store = new Store(directory);
+  const vault = new Vault(directory, { encrypt: text => Buffer.from(text), decrypt: bytes => bytes.toString() });
+  vault.set('console', { key: 'synthetic-console-key' });
+  const runtime = await createApp(store, vault, 'synthetic-local-session');
+  const original = globalThis.fetch;
+  const scanId = randomUUID(), domainId = randomUUID(), otherScan = randomUUID();
+  let completedId = otherScan;
+  let cancelledJobId: string;
+  const routes: string[] = [];
+  globalThis.fetch = (async (url, init) => {
+    const address = new URL(String(url));
+    assert.equal(address.origin, 'https://api.surfacedby.com');
+    const path = address.pathname.replace('/api/v1/console', '');
+    routes.push((init?.method ?? 'GET') + ' ' + path);
+    if (path === `/scans/${scanId}/cancel`) {
+      assert.equal(store.job(cancelledJobId).error, 'cancel_remote');
+      return Response.json({
+        type: 'https://docs.surfacedby.com/v1/api/errors#validation_error', detail: 'This check already ended (completed).',
+      }, { status: 409 });
+    }
+    if (path === `/scans/${scanId}`) return json({ id: completedId, domain_id: domainId, status: 'completed',
+      answers_total: 2, completed_at: '2026-11-01T10:00:00Z' });
+    if (path === `/scans/${scanId}/observations`) return json([{ id: randomUUID(), scan_id: scanId, status: 'collected',
+      platform: 'chatgpt', prompt: 'How can I export a report?', answer_text: 'Export from the reports page.', citations: [] }]);
+    throw new Error('Unexpected external request ' + path);
+  }) as typeof fetch;
+  try {
+    const project = store.createProject(projectInput.parse({ domain: 'example.com', brand: 'Example', prompts: ['How can I export a report?'] }));
+    const job = store.enqueue(jobInput.parse({ projectId: project.id, kind: 'measure', provider: 'console', maxCostUsd: .5 }), 'cancel-completed');
+    cancelledJobId = job.id;
+    store.updateJob(job.id, { status: 'paused', error: 'connection_interrupted' });
+    store.setStep(job.id, 'console-scan', 'done', { scan_id: scanId, credits_charged: 2 });
+    store.setStep(job.id, 'console-scan-credit-usd', 'done', .25);
+    store.setStep(job.id, 'console-domain', 'done', { id: domainId, domain: project.domain });
+
+    await runtime.runner.cancel(job.id);
+    assert.equal(store.job(job.id).error, 'cancel_remote');
+    assert.equal(store.observations(project.id, job.id).length, 0);
+    completedId = scanId;
+    const settled = await runtime.runner.cancel(job.id);
+    assert.equal(settled.status, 'cancelled');
+    assert.equal(settled.error, null);
+    assert.equal(settled.spentUsd, .5);
+    assert.equal(completedMeasurement(settled), true);
+    assert.deepEqual((settled.result as { metrics: unknown }).metrics,
+      { requested: 2, completed: 1, missing: 1, mentionRate: 0, citationRate: 0, citations: 0 });
+    assert.equal(store.observations(project.id, job.id).length, 1);
+    const workspace = await runtime.app.inject({ url: `/api/projects/${project.id}/workspace`,
+      headers: { host: '127.0.0.1:4318', authorization: 'Bearer synthetic-local-session' } });
+    assert.equal(workspace.statusCode, 200);
+    const view = workspace.json();
+    assert.equal(view.measurement.id, job.id);
+    assert.deepEqual(view.metrics, (settled.result as { metrics: unknown }).metrics);
+    assert.equal(view.observations.length, 1);
+    assert.equal(view.findings.length, 0);
+    assert.deepEqual(await runtime.runner.cancel(job.id), settled);
+    assert.deepEqual(routes, [`POST /scans/${scanId}/cancel`, `GET /scans/${scanId}`, `POST /scans/${scanId}/cancel`,
+      `GET /scans/${scanId}`, `GET /scans/${scanId}/observations`]);
   } finally {
     globalThis.fetch = original;
     await runtime.app.close(); store.close(); rmSync(directory, { recursive: true, force: true });

@@ -41,6 +41,7 @@ import {
 const consoleDomainBinding = z.object({ id: z.string().uuid(), domain: z.string().min(1) });
 const consoleScanBinding = z.object({ scan_id: z.string() });
 type ConsoleAnswerCheckpoint = { observations: number; observationIds: [string, string][] };
+type ConsoleScanCompletion = { answers_total?: unknown; completed_at?: unknown; visibility_score?: unknown };
 
 function boundConsoleDomain(value: unknown, hostname: string) {
   const parsed = consoleDomainBinding.safeParse(value);
@@ -160,8 +161,10 @@ export class Runner {
   private async cancelWork(id: string) {
     const job = this.store.job(id);
     if (["completed", "failed"].includes(job.status) || (job.status === "cancelled" && job.error !== "cancel_remote")) return job;
+    const fullCheckState = job.provider === 'console' ? this.store.step(id, 'console-scan')?.state : undefined;
     this.store.updateJob(id, {
       status: "cancelled",
+      ...(fullCheckState === 'done' || fullCheckState === 'started' ? { error: 'cancel_remote' } : {}),
       progress: job.kind === 'audit' && !job.provider ? 'Website check stopped. Pages already checked are saved.' : "Cancelled. Completed provider calls may still be billable.",
     });
     const slot = this.active?.id === id ? this.active : this.askSlots.get(id);
@@ -197,16 +200,19 @@ export class Runner {
         const scan = JSON.parse(saved.body!);
         try {
           const result = await this.providers.console('/scans/' + scan.scan_id + '/cancel', {}, id + ':cancel', AbortSignal.timeout(20000));
-          const refund = result.data?.refunded_credits;
-          if (!Number.isSafeInteger(refund) || refund < 0 || !Number.isSafeInteger(scan.credits_charged) || refund > scan.credits_charged)
+          const receipt = result.data, refund = receipt?.refunded_credits;
+          if (receipt?.id !== scan.scan_id || receipt.status !== 'cancelled' || !['pending', 'running'].includes(receipt.prior_status) ||
+            !Number.isSafeInteger(refund) || refund < 0 || !Number.isSafeInteger(scan.credits_charged) || refund > scan.credits_charged)
             throw new Error('Invalid cancellation receipt');
           this.store.updateJob(id, {
             error: null,
             spentUsd: creditsUsd(scan.credits_charged - refund, this.consoleScanCreditUnit(job)),
             progress: refund > 0 ? 'Cancelled on SurfacedBy. Unused credits were returned.' : 'Cancelled on SurfacedBy. Work already started remains billable.',
-            result: { cancellation: { refundedCredits: refund, priorStatus: result.data.prior_status } },
+            result: { cancellation: { refundedCredits: refund, priorStatus: receipt.prior_status } },
           });
-        } catch {
+        } catch (error) {
+          if (error instanceof ProviderError && error.httpStatus === 409 && error.remoteCode === 'validation_error' &&
+            await this.recoverCompletedConsoleScan(job, scan.scan_id, scan.credits_charged)) return this.store.job(id);
           this.store.updateJob(id, { error: 'cancel_remote', progress: 'Stopped locally. Cancellation was not confirmed. Check SurfacedBy Console before starting another check.' });
         }
       } else if (saved?.state === 'started') {
@@ -1224,27 +1230,10 @@ export class Runner {
       if (state.status !== "completed" && Number.isSafeInteger(state.answers_total) && state.answers_total > 0)
         this.store.updateJob(job.id, { requestedAnswers: state.answers_total });
       if (state.status === "completed") {
-        const completedAt = z.string().datetime({ offset: true }).safeParse(state.completed_at);
-        const collectionCompletedAt = completedAt.success ? new Date(completedAt.data).toISOString() : new Date().toISOString();
-        const previous = this.store.step(job.id, "console-evidence");
-        // Before answers had a separate checkpoint, this step saved the answers and findings together.
-        const answers: ConsoleAnswerCheckpoint = previous?.state === "done"
-          ? { observations: JSON.parse(previous.body!).observations, observationIds: [] }
-          : await this.saveConsoleAnswers(job, project, scanId, collectionCompletedAt, signal);
-        const requested = state.answers_total;
-        if (!Number.isSafeInteger(requested) || requested < 1 || requested < answers.observations)
-          throw new ProviderError("invalid_response", "The collected answers are saved, but the API returned an inconsistent check total. Review this check before comparing results.");
-        const current = this.store.job(job.id);
-        let result = portableJobResult(current);
+        const { result, answers, checkpointed } = await this.collectConsoleMeasurement(job, project, scanId, state, signal);
         const progress = "Answers saved. Waiting for SurfacedBy recommendations.";
-        if (!result?.collectionCompletedAt) {
-          const observations = this.store.observations(project.id, job.id);
-          result = { metrics: summarize(observations, requested), consoleScore: state.visibility_score,
-            comparisonKey: comparisonKey(project, job, observations), collectionCompletedAt };
-          this.store.updateJob(job.id, { requestedAnswers: requested, result, prepareRecommendations: true, progress });
-        } else if (current.progress !== progress) {
-          this.store.updateJob(job.id, { progress });
-        }
+        if (!checkpointed) this.store.updateJob(job.id, { requestedAnswers: result.metrics.requested, result, prepareRecommendations: true, progress });
+        else if (this.store.job(job.id).progress !== progress) this.store.updateJob(job.id, { progress });
         const analysis = (
           await this.providers.console(
             "/scans/" + scanId + "/analysis",
@@ -1274,6 +1263,45 @@ export class Runner {
     throw new ProviderError("waiting", completedMeasurement(this.store.job(job.id))
       ? "Your answers are saved. Resume later to collect SurfacedBy recommendations."
       : "SurfacedBy is still processing. Resume later to collect results.");
+  }
+
+  /** A check may finish between stopping the local worker and asking Console to cancel. */
+  private async recoverCompletedConsoleScan(job: Job, scanId: string, chargedCredits: number) {
+    try {
+      const snapshot = this.store.step(job.id, 'project');
+      const project = snapshot?.body ? JSON.parse(snapshot.body) as Project : this.store.project(job.projectId);
+      const domain = boundConsoleDomain(JSON.parse(this.store.step(job.id, 'console-domain')?.body ?? 'null'), project.domain);
+      const signal = AbortSignal.timeout(20000);
+      const state = (await this.providers.console('/scans/' + scanId, undefined, undefined, signal)).data;
+      if (state?.id !== scanId || state.domain_id !== domain.id || state.status !== 'completed') return false;
+      const originalCharge = creditsUsd(chargedCredits, this.consoleScanCreditUnit(job));
+      const { result } = await this.collectConsoleMeasurement(job, project, scanId, state, signal);
+      this.store.updateJob(job.id, { error: null, spentUsd: originalCharge, requestedAnswers: result.metrics.requested, result, prepareRecommendations: true,
+        progress: 'SurfacedBy finished collecting before cancellation. Your answers and the original charge are saved.' });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async collectConsoleMeasurement(job: Job, project: Project, scanId: string, state: ConsoleScanCompletion, signal: AbortSignal) {
+    const completedAt = z.string().datetime({ offset: true }).safeParse(state.completed_at);
+    const collectionCompletedAt = completedAt.success ? new Date(completedAt.data).toISOString() : new Date().toISOString();
+    const previous = this.store.step(job.id, 'console-evidence');
+    // Before answers had a separate checkpoint, this step saved the answers and findings together.
+    const answers: ConsoleAnswerCheckpoint = previous?.state === 'done'
+      ? { observations: JSON.parse(previous.body!).observations, observationIds: [] }
+      : await this.saveConsoleAnswers(job, project, scanId, collectionCompletedAt, signal);
+    const requested = state.answers_total;
+    if (typeof requested !== 'number' || !Number.isSafeInteger(requested) || requested < 1 || requested < answers.observations)
+      throw new ProviderError('invalid_response', 'The collected answers are saved, but the API returned an inconsistent check total. Review this check before comparing results.');
+    const saved = portableJobResult(this.store.job(job.id));
+    if (saved?.collectionCompletedAt) return { result: saved, answers, checkpointed: true };
+    const observations = this.store.observations(project.id, job.id);
+    const consoleScore = typeof state.visibility_score === 'number' && Number.isFinite(state.visibility_score) ? state.visibility_score : null;
+    const result = { metrics: summarize(observations, requested), consoleScore,
+      comparisonKey: comparisonKey(project, job, observations), collectionCompletedAt };
+    return { result, answers, checkpointed: false };
   }
 
   /** Save settled answers before asking whether the separate recommendation pass has finished. */
