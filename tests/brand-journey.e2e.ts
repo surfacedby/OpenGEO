@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -8,7 +9,8 @@ import { expect } from '@playwright/test';
 import { Store } from '../server/storage.js';
 import { Vault } from '../server/vault.js';
 import { createApp } from '../server/app.js';
-import { projectInput } from '../server/contracts.js';
+import { jobInput, projectInput } from '../server/contracts.js';
+import { managedStep } from '../server/console-managed.js';
 
 test('brand journey separates prompts and results, saves edits and confirms deletion', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'opengeo-journey-'));
@@ -91,5 +93,48 @@ test('brand journey separates prompts and results, saves edits and confirms dele
     await page.getByRole('button', { name: 'App settings', exact: true }).click();
     await expect(page.getByRole('tab', { name: 'About', exact: true })).toBeVisible();
     assert.deepEqual(errors, []);
+  } finally { await browser.close(); await app.close(); store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('an interrupted Ask offers review before resuming a saved provider request', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'opengeo-ask-review-'));
+  const store = new Store(dir);
+  const vault = new Vault(dir, { encrypt: text => Buffer.from(text), decrypt: bytes => bytes.toString() });
+  store.set('usageConsent', { enabled: false });
+  store.set('onboarding', { completed: true });
+  const project = store.createProject(projectInput.parse({ domain: 'example.com', brand: 'Example' }));
+  const askId = randomUUID(), question = 'Which tools export team reports?';
+  const { jobs: [jobId] } = store.enqueueAsk(askId, project.id, 'fixture-input', [jobInput.parse({
+    projectId: project.id, kind: 'ask', askId, question, provider: 'console', platform: 'gemini', maxCostUsd: .2,
+  })]);
+  const step = managedStep(store.job(jobId), 'submit');
+  store.setStep(jobId, step, 'started');
+  store.updateJob(jobId, { status: 'paused', error: 'connection_interrupted', progress: 'The connection was interrupted.' });
+  const { app } = await createApp(store, vault, undefined, resolve('dist'));
+  const browser = await chromium.launch({ executablePath: process.env.OPENGEO_TEST_BROWSER || undefined });
+  try {
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    const address = app.server.address(); assert.ok(address && typeof address !== 'string');
+    const origin = 'http://127.0.0.1:' + address.port;
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    await page.route('**/*', route => {
+      const url = new URL(route.request().url());
+      return url.origin === origin && !url.pathname.endsWith('/site-icon') ? route.continue() : route.abort();
+    });
+    await page.goto(origin);
+    await page.getByRole('button', { name: 'Ask history', exact: true }).click();
+    await page.getByRole('region', { name: 'Past asks' }).getByText(question, { exact: true }).click();
+    const gemini = page.locator('.ask-column').filter({ has: page.getByRole('heading', { name: 'Gemini', exact: true }) });
+    await gemini.getByRole('button', { name: 'Resume', exact: true }).click();
+    const review = gemini.getByRole('button', { name: 'Resume after review', exact: true });
+    await expect(review).toBeVisible();
+    assert.equal(store.job(jobId).status, 'paused');
+    assert.equal(store.step(jobId, step)?.state, 'started');
+    await review.click();
+    await expect(gemini.getByText('Collecting', { exact: true })).toBeVisible();
+    assert.equal(store.job(jobId).status, 'queued');
+    assert.equal(store.job(jobId).maxCostUsd, .2);
+    assert.equal(store.step(jobId, step)?.state, 'approved-retry');
+    assert.equal(store.jobs(project.id).length, 1);
   } finally { await browser.close(); await app.close(); store.close(); rmSync(dir, { recursive: true, force: true }); }
 });

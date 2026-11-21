@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { LoaderCircle, Search } from 'lucide-react';
 import { markdownHtml } from '../../server/markdown';
+import type { Runner } from '../../server/workflows';
 import { api } from '../api';
 import { targetDomain } from '../finding-groups';
 import { usd } from '../format';
@@ -10,17 +11,23 @@ import { Disclosure } from '../ui/Primitives';
 import type { AskEngine } from './useAsk';
 
 const via = (provider?: string) => provider === 'console' ? 'SurfacedBy' : provider === 'dataforseo' ? 'DataForSEO' : provider === 'deepseek' ? 'DeepSeek' : 'ChatGPT';
-/** Pause reasons that only need a fresh start; anything with an uncertain request needs a review first. */
-const reviewFirst = new Set(['interrupted', 'waiting', 'cost_unknown', 'invalid_response', 'approval']);
+type ResumePreview = ReturnType<Runner['resumePreview']>;
 
 /** One engine's answer as it arrives. A missing answer is never shown as "not mentioned". */
 export function AnswerColumn({ row, projectId, brand, domain, reload, askAgain }: {
   row: AskEngine; projectId: string; brand: string; domain: string; reload: () => Promise<unknown> | void; askAgain: (engine: string) => void;
 }) {
-  const [busy, setBusy] = useState(false), [error, setError] = useState(''), [review, setReview] = useState(false);
+  const [busy, setBusy] = useState(false), [error, setError] = useState(''), [review, setReview] = useState<ResumePreview | null>(null);
   const act = async (action: () => Promise<unknown>) => {
     setBusy(true); setError('');
     try { await action(); await reload(); } catch (failure) { setError((failure as Error).message); } finally { setBusy(false); }
+  };
+  const resumePath = '/jobs/' + row.jobId + '/resume';
+  const reviewOrResume = async () => {
+    // A saved request can require review even when the visible pause reason is a connection error.
+    const preview = await api<ResumePreview>(resumePath + '-preview');
+    if (preview.uncertainRequests || preview.reason === 'approval') { setReview(preview); return; }
+    await api(resumePath, {});
   };
   const answer = row.answer;
   const sources = answer?.citations.filter(citation => targetDomain(citation.url)) ?? [];
@@ -71,9 +78,14 @@ export function AnswerColumn({ row, projectId, brand, domain, reload, askAgain }
       {row.error === 'budget'
         ? <button type="button" className="secondary ask-column-action" onClick={() => askAgain(row.engine!)}>Ask again with a higher limit</button>
         : review
-          ? <div className="ask-review"><p>Check {via(row.provider)} usage for this request before resuming, so nothing is bought twice.</p>
-              <button type="button" className="primary" disabled={busy} onClick={() => void act(() => api('/jobs/' + row.jobId + '/resume', { reviewed: true }))}>Resume after review</button></div>
-          : <button type="button" className="secondary ask-column-action" disabled={busy} onClick={() => reviewFirst.has(row.error ?? '') ? setReview(true) : void act(() => api('/jobs/' + row.jobId + '/resume', {}))}>Resume</button>}
+          ? <div className="ask-review"><p>{review.uncertainRequests
+              ? `Check your ${via(row.provider)} usage before resuming. The earlier request may already have run.`
+              : `Confirm the original ${usd(review.maxCostUsd)} spending limit for this answer.`}</p>
+              <button type="button" className="primary" disabled={busy} onClick={() => void act(async () => {
+                await api(resumePath, { reviewed: true });
+                setReview(null);
+              })}>Resume after review</button></div>
+          : <button type="button" className="secondary ask-column-action" disabled={busy} onClick={() => void act(reviewOrResume)}>Resume</button>}
     </>}
 
     {row.state === 'no_answer' && <p className="ask-note">{via(row.provider)} did not return an answer. A missing answer is not counted as an absent mention. {row.provider === 'chatgpt' ? 'Your ChatGPT plan limits apply.' : recordedCost + '. Check provider usage for any unresolved requests.'}</p>}
