@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, ChevronDown, ExternalLink, Flag, Search } from 'lucide-react';
-import type { Topic, Project } from '../server/contracts';
+import type { Topic, Project, Job } from '../server/contracts';
 import type { TopicSummary, TopicView } from '../server/topics';
 import { completedMeasurement } from '../server/portable-results';
 import { useApiResource } from './useApiResource';
@@ -11,6 +11,7 @@ import { dateTime, percent, shortDate } from './format';
 import './topics.css';
 
 type Evidence = (ids: string[], label: string) => void;
+export type TopicCheckAction = { label: string; action: () => void };
 
 /** A topic's evidence refreshes on the workspace's rhythm, so scoped screens never lag the brand view. */
 export function useTopicView(projectId: string | undefined, topicId: string | null, version: string) {
@@ -40,14 +41,15 @@ function ReviewBy({ date, edit }: { date: string | null; edit: () => void }) {
   return date < today() ? <span className="badge medium">{reviewDate(date)}, passed</span> : <span className="badge low">{reviewDate(date)}</span>;
 }
 
-export function Topics({ project, topics, openId, view, error, open, edit, evidence, openPrompts, openCompetitors, opportunities }: {
+export function Topics({ project, topics, openId, view, error, open, edit, evidence, openPrompts, openCompetitors, opportunities, activeCheck }: {
   project: Project; topics: TopicSummary[]; openId: string | null; view: TopicView | null; error: string;
   open: (id: string | null) => void; edit: (topic: Topic | null) => void;
   evidence: (topic: Topic) => Evidence; openPrompts: () => void; openCompetitors: () => void;
   opportunities: ReactNode;
+  activeCheck?: Job;
 }) {
   const [tab, setTab] = useState<'active' | 'closed'>('active'), [query, setQuery] = useState('');
-  if (openId) return view ? <TopicDetail project={project} view={view} open={open} edit={edit} evidence={evidence(view.topic)} openCompetitors={openCompetitors} opportunities={opportunities} />
+  if (openId) return view ? <TopicDetail project={project} view={view} open={open} edit={edit} evidence={evidence(view.topic)} openCompetitors={openCompetitors} opportunities={opportunities} activeCheck={activeCheck} />
     : <Section>{error ? <p role="alert">{error}</p> : <div className="workspace-loading" role="status"><span className="visually-hidden">Loading this topic</span><div className="panel skeleton tall" aria-hidden="true" /></div>}</Section>;
   if (!topics.length) return <Section><EmptyState icon={Flag} title="Group your questions into topics" action={<button className="primary" onClick={() => edit(null)}>Create a topic</button>}>
     A topic follows a few questions toward one goal: their mentions, citations and target pages, checked together. Your {project.prompts.length} questions keep working as they do today.
@@ -78,10 +80,11 @@ export function Topics({ project, topics, openId, view, error, open, edit, evide
   </>;
 }
 
-function TopicDetail({ project, view, open, edit, evidence, openCompetitors, opportunities }: {
+function TopicDetail({ project, view, open, edit, evidence, openCompetitors, opportunities, activeCheck }: {
   project: Project; view: TopicView; open: (id: string | null) => void; edit: (topic: Topic | null) => void;
   evidence: Evidence; openCompetitors: () => void;
   opportunities: ReactNode;
+  activeCheck?: Job;
 }) {
   const [tab, setTab] = useState<'results' | 'questions' | 'targets' | 'competitors' | 'checks' | 'opportunities'>('results');
   const { topic, metrics, measurement, presentation, targets } = view;
@@ -100,7 +103,10 @@ function TopicDetail({ project, view, open, edit, evidence, openCompetitors, opp
     </div>
     <Tabs label="Topic views" panelId="topic-view" value={tab} onChange={setTab} items={[{ value: 'results', label: 'Results' }, { value: 'questions', label: 'Questions', count: topic.prompts.length }, { value: 'targets', label: 'Target pages', count: targets.length }, { value: 'competitors', label: 'Competitors', count: view.competitors.length }, { value: 'opportunities', label: 'Opportunities' }, { value: 'checks', label: 'Checks', count: view.checks.length }]} />
     <div id="topic-view" role="tabpanel" tabIndex={0} className="topic-view">
-      {tab === 'opportunities' ? opportunities : !measurement && tab !== 'questions' && tab !== 'targets' ? <Section><EmptyState icon={Flag} title="Not checked yet">Check this topic to see its mentions, citations and target pages. A check of all your questions counts here too once it has asked every one of this topic's questions.</EmptyState></Section>
+      {tab === 'opportunities' ? opportunities : !measurement && tab !== 'questions' && tab !== 'targets' ? <Section>
+        {activeCheck ? <EmptyState icon={Flag} title={activeCheck.status === 'paused' ? 'Visibility check paused' : activeCheck.status === 'queued' ? 'Visibility check queued' : 'Visibility check in progress'}><span role="status">{activeCheck.progress || 'Results will appear as answers are saved.'}</span></EmptyState>
+          : <EmptyState icon={Flag} title="Not checked yet">Check this topic to see its mentions, citations and target pages. A check of all your questions counts here too once it has asked every one of this topic's questions.</EmptyState>}
+      </Section>
         : tab === 'results' ? <>
           <div className="metrics">
             <MetricCard title="Brand mentions" value={percent(metrics.mentionRate)} detail="Answers naming your brand" />
@@ -135,11 +141,11 @@ function TopicDetail({ project, view, open, edit, evidence, openCompetitors, opp
 }
 
 /** The lens keeps Visibility's layout and swaps in the topic's evidence, so the two never disagree on how a rate is read. */
-export function TopicVisibility({ view, total, evidence, open }: { view: TopicView; total: number; evidence: Evidence; open: () => void }) {
+export function TopicVisibility({ view, total, evidence, open, awaitingFirstAnswers }: { view: TopicView; total: number; evidence: Evidence; open: () => void; awaitingFirstAnswers: boolean }) {
   const { topic, metrics, measurement, presentation } = view;
   return <>
     <div className="measurement-scope topic-scope"><span>Showing {topic.prompts.length} of {total} questions</span><button className="text-button" onClick={open}>Open topic<ArrowRight size={14} /></button></div>
-    {!measurement ? <Section><EmptyState icon={Flag} title="Not checked yet">Check these questions to see this topic's mentions and citations. A check of all your questions counts here too.</EmptyState></Section> : <>
+    {!measurement ? awaitingFirstAnswers ? null : <Section><EmptyState icon={Flag} title="Not checked yet">Check these questions to see this topic's mentions and citations. A check of all your questions counts here too.</EmptyState></Section> : <>
       <div className="metrics three">
         <MetricCard title="Brand mentions" value={percent(metrics.mentionRate)} detail="Answers naming your brand" />
         <MetricCard title="Website citations" value={percent(metrics.citationRate)} detail="Answers linking to your site" tone="citation" />
@@ -152,9 +158,9 @@ export function TopicVisibility({ view, total, evidence, open }: { view: TopicVi
 }
 
 /** Grouping is a reading aid: a question in two topics appears under both, and editing the list stays in one place. */
-export function PromptGroups({ project, topics, prompts, check, edit, create, renderPrompts }: {
+export function PromptGroups({ project, topics, prompts, topicCheckAction, edit, create, renderPrompts }: {
   project: Project; topics: TopicSummary[]; prompts: string[];
-  check: (id: string) => void; edit: (topic: Topic) => void; create: (prompts: string[]) => void;
+  topicCheckAction: (topic: Topic) => TopicCheckAction | null; edit: (topic: Topic) => void; create: (prompts: string[]) => void;
   renderPrompts: (prompts: string[]) => ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState<string[]>([]);
@@ -163,11 +169,12 @@ export function PromptGroups({ project, topics, prompts, check, edit, create, re
     { id: '', name: 'No topic', prompts: [...new Set(prompts)].filter(prompt => !active.some(topic => topic.prompts.includes(prompt))), topic: null, summary: undefined }].filter(group => group.prompts.length);
   return <div className="prompt-groups">{groups.map(group => {
     const open = !collapsed.includes(group.id);
+    const check = group.topic ? topicCheckAction(group.topic) : null;
     return <section className="prompt-group-card" key={group.id || 'none'} aria-label={group.name}>
       <div className="prompt-group-head">
         <button type="button" className="prompt-group-toggle" aria-expanded={open} onClick={() => setCollapsed(open ? [...collapsed, group.id] : collapsed.filter(id => id !== group.id))}><ChevronDown size={16} aria-hidden="true" /><strong>{group.name}</strong><span>{group.prompts.length} {group.prompts.length === 1 ? 'question' : 'questions'}</span></button>
         {group.summary && (group.summary.metrics ? <span className="prompt-group-rates"><span>Mentions {percent(group.summary.metrics.mentionRate)}</span><span>Citations {percent(group.summary.metrics.citationRate)}</span></span> : <span className="topic-pending">Not checked yet</span>)}
-        <div className="button-row">{group.topic ? <><button className="text-button" onClick={() => check(group.id)}>Check group</button><button className="text-button" onClick={() => edit(group.topic!)}>Edit</button></> : <button className="text-button" onClick={() => create(group.prompts)}>Start a topic with these</button>}</div>
+        <div className="button-row">{group.topic ? <>{check && <button className="text-button" onClick={check.action}>{check.label}</button>}<button className="text-button" onClick={() => edit(group.topic!)}>Edit</button></> : <button className="text-button" onClick={() => create(group.prompts)}>Start a topic with these</button>}</div>
       </div>
       {open && renderPrompts(group.prompts)}
     </section>;

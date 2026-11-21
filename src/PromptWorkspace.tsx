@@ -10,7 +10,7 @@ import { Select } from './Select';
 import { providerOptions } from './provider-ui';
 import { EmptyState, Section, Tabs, Toolbar } from './ui/Primitives';
 import type { EditState } from './useCloseProtection';
-import { PromptGroups } from './Topics';
+import { PromptGroups, type TopicCheckAction } from './Topics';
 import { PromptSearches } from './PromptSearches';
 import { dateTime } from './format';
 import { promptResults } from './prompt-results';
@@ -19,11 +19,11 @@ type Suggestion = { text: string; sources?: { url: string; title: string }[] };
 export type PromptTab = 'tracked' | 'suggested' | 'searches' | 'topics';
 
 /** The same durable discovery jobs power setup and later prompt selection. */
-export function PromptWorkspace({ project, jobs, connected, refresh, openConnections, runControls, onEditState, topics, checkTopic, editTopic, observations, evidence, tab, setTab, topicsContent }: {
+export function PromptWorkspace({ project, jobs, connected, refresh, openConnections, runControls, onEditState, topics, topicCheckAction, editTopic, observations, evidence, tab, setTab, topicsContent }: {
   project: Project; jobs: Job[]; connected: Record<string, boolean>; refresh: () => Promise<void>;
   openConnections: () => void; runControls: ReactNode;
   onEditState: (state: EditState) => void;
-  topics: TopicSummary[]; checkTopic: (id: string) => void; editTopic: (topic: Topic | null, prompts?: string[]) => void;
+  topics: TopicSummary[]; topicCheckAction: (topic: Topic) => TopicCheckAction | null; editTopic: (topic: Topic | null, prompts?: string[]) => void;
   observations: Observation[]; evidence: (ids: string[], label: string) => void;
   tab: PromptTab; setTab: (tab: PromptTab) => void; topicsContent: ReactNode;
 }) {
@@ -81,7 +81,7 @@ export function PromptWorkspace({ project, jobs, connected, refresh, openConnect
         await api('/projects/' + project.id, { prompts: [...new Set(rows.filter(row => row.selected).map(row => row.text.trim()).filter(Boolean))] }, 'PATCH');
         setEditing(false); setMessage('Prompts saved. Your next visibility check will use this list.');
       }); }}><QuestionRows rows={rows} onChange={setRows} disabled={busy} feedback={feedback} /><div className="button-row"><button className="primary" disabled={busy}><Save size={16} />Save prompts</button><button type="button" className="secondary" disabled={busy} onClick={() => setEditing(false)}>Cancel</button></div></form>
-      : project.prompts.length && grouping === 'topic' && project.topics.some(topic => topic.status === 'active') ? filtered.length ? <PromptGroups project={project} topics={topics} prompts={filtered} check={checkTopic} edit={editTopic} create={prompts => editTopic(null, prompts)} renderPrompts={renderPrompts} /> : <p>No prompts match your search.</p>
+      : project.prompts.length && grouping === 'topic' && project.topics.some(topic => topic.status === 'active') ? filtered.length ? <PromptGroups project={project} topics={topics} prompts={filtered} topicCheckAction={topicCheckAction} edit={editTopic} create={prompts => editTopic(null, prompts)} renderPrompts={renderPrompts} /> : <p>No prompts match your search.</p>
       : project.prompts.length ? <><div className="prompt-list-label"><span>Prompt</span><span>Current check</span></div>{renderPrompts(filtered)}{!filtered.length && <p>No prompts match your search.</p>}</>
       : <EmptyState icon={MessagesSquare} title="Start with prompts your customers would ask" action={<button className="primary" onClick={() => setTab('suggested')}><Sparkles size={16} />Find suggestions</button>}>Let your connected AI read your website and suggest relevant questions, or add your own.</EmptyState>}
     </Section> : <Section className="prompt-panel" title="Discover your next prompts" description="Suggestions use your website and brand details. Nothing is tracked until you choose it.">

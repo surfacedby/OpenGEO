@@ -70,7 +70,7 @@ import { ActivityNotice } from './ui/ActivityNotice';
 import { Dialog as Modal } from './ui/Dialog';
 import { completedBrandMeasurement, completedMeasurement, completedAnalysisResult, analysisInProgress, analysisMeasurementId, analysisBasisCheck, completedAnalysisBasis } from "../server/portable-results";
 import type { TopicSummary } from "../server/topics";
-import { TopicLens, Topics, TopicVisibility, useTopicView } from "./Topics";
+import { TopicLens, Topics, TopicVisibility, useTopicView, type TopicCheckAction } from "./Topics";
 import type { PublicObservation as Observation } from '../server/public-results';
 import { TopicDialog } from "./TopicDialog";
 import type { Presentation } from "../server/presentation";
@@ -243,7 +243,7 @@ export function App() {
   // Recommendations read the newest check from an engine that prepares them; a DeepSeek check never displaces them.
   const topicMeasurement = topicJobs.find(analysisBasisCheck);
   const topicAnalysis = topicMeasurement && topicJobs.find(job => completedAnalysisResult(job)?.measurementJobId === topicMeasurement.id);
-  const topicPending = topicJobs.find(job => analysisInProgress(job) || ['measure', 'recheck'].includes(job.kind) && ['queued', 'running', 'paused'].includes(job.status));
+  const topicPending = topicJobs.find(job => analysisInProgress(job) || isActiveCheck(job));
   const ownCitations = w?.presentation.outcomes.find((group) => group.kind === "cited");
   const ownWebsite = w ? { domain:w.project.domain, citationRate:w.metrics.citationRate, answersCiting:ownCitations?.count ?? 0, answersCollected:w.metrics.completed, observationIds:ownCitations?.observationIds ?? [] } : null;
   useEffect(() => { setScope(null); setTopicPage(null); setAskId(null); }, [selected]);
@@ -276,10 +276,15 @@ export function App() {
     if (unsavedDraft || editState.dirty) { setNavigationError(""); setPendingNavigation(() => action); }
     else action();
   }
-  const changePage = (label: string) => {
-    if (page === label) { mainRef.current?.scrollTo(0, 0); setTopicPage(null); setAskId(null); }
-    else navigate(() => { setPage(label); setQuery(""); setAnswerStatus('all'); setEvidenceFilter(null); setTopicPage(null); setAskId(null); if (label === 'Content') setSelectedContent(''); });
+  const changePage = (label: string, visibilityScope?: string | null) => {
+    if (page === label && (visibilityScope === undefined || visibilityScope === scope)) { mainRef.current?.scrollTo(0, 0); setTopicPage(null); setAskId(null); }
+    else navigate(() => {
+      setPage(label); setQuery(""); setAnswerStatus('all'); setEvidenceFilter(null); setTopicPage(null); setAskId(null);
+      if (visibilityScope !== undefined) chooseScope(visibilityScope);
+      if (label === 'Content') setSelectedContent('');
+    });
   };
+  const openCheck = (topicId?: string) => changePage('Visibility', topicId ?? null);
   const ask = useAskController(selected || undefined, (id) => navigate(() => { setPage("Ask history"); setAskId(id); }), JSON.stringify(connected) + profiles.active);
   const openConnections = () => navigate(() => { setPage("Settings"); setQuery(""); setEvidenceFilter(null); setConnectionsRequest(value => value + 1); });
   const openEvidence = (ids: string[], label: string) => navigate(() => {
@@ -294,7 +299,7 @@ export function App() {
   const comparison = w?.comparison?.status === "comparable" && w.jobs.find(completedBrandMeasurement)?.id === w.measurement?.id ? w.comparison as { previousAt: string; mentionPoints: number | null; citationPoints: number | null } : null;
   const analysisMeasurement = w?.jobs.find(completedAnalysisBasis);
   const activeMeasurement = w?.jobs.find(job => ['measure', 'recheck'].includes(job.kind) && !job.topicId && ['queued', 'running', 'paused'].includes(job.status) && !completedMeasurement(job));
-  const activeScan = w?.jobs.find(job => ['measure', 'recheck'].includes(job.kind) && !job.topicId && ['queued', 'running', 'paused'].includes(job.status) && (!completedMeasurement(job) || job.prepareRecommendations));
+  const activeScan = w?.jobs.find(job => !job.topicId && isActiveCheck(job));
   const completedAnalysis = analysisMeasurement && w!.jobs.find(job => completedAnalysisResult(job)?.measurementJobId === analysisMeasurement.id);
   const analyzed = !!completedAnalysis;
   const consoleFullCheckAnalyzed = completedAnalysis?.provider === 'console' && completedAnalysis.id === analysisMeasurement?.id;
@@ -306,23 +311,28 @@ export function App() {
   const activeAudit = w?.jobs.find((job) => job.kind === "audit" && ["running", "queued"].includes(job.status));
   const canMeasure = providerOptions(connected, ["chatgpt", "console", "dataforseo", "openrouter", "deepseek"]).length > 0;
   const measurementAction = activeScan
-    ? { label: activeScan.status === 'paused' ? 'Review paused check' : 'View current check', action: () => changePage('Visibility') }
+    ? { label: checkProgressLabel(activeScan), action: () => openCheck() }
     : canMeasure
     ? { label: "Check visibility", action: () => editState.dirty || editState.busy ? setError('Save your prompt changes before starting a check.') : setJobDialog("measure") }
     : { label: "Connect for AI checks", action: openConnections };
-  const checkTopic = (id: string) => {
-    const active = w?.jobs.find(job => job.topicId === id && ['measure', 'recheck'].includes(job.kind) && ['queued', 'running', 'paused'].includes(job.status));
-    if (active) { chooseScope(id); changePage('Visibility'); }
-    else if (!canMeasure) openConnections();
-    else if (editState.dirty || editState.busy) setError('Save your prompt changes before starting a check.');
-    else { setJobTopic(id); setJobDialog("measure"); }
+  const activeTopicCheck = (id: string) => w?.jobs.find(job => job.topicId === id && isActiveCheck(job));
+  const topicCheckAction = (topic: Topic): TopicCheckAction | null => {
+    const active = activeTopicCheck(topic.id);
+    if (active) return { label: checkProgressLabel(active), action: () => openCheck(topic.id) };
+    if (topic.status === 'closed' || !topic.prompts.length) return null;
+    if (!canMeasure) return { label: 'Connect for AI checks', action: openConnections };
+    return { label: 'Check this topic', action: () => {
+      if (editState.dirty || editState.busy) setError('Save your prompt changes before starting a check.');
+      else { setJobTopic(topic.id); setJobDialog('measure'); }
+    } };
   };
   const openTopic = page === "Topics" && topicPage ? p?.topics.find((topic) => topic.id === topicPage) : undefined;
-  const headingAction = page === "Topics" ? openTopic ? openTopic.prompts.length ? { label: "Check this topic", action: () => checkTopic(openTopic.id) } : null : { label: "New topic", action: () => setTopicEditor({ topic: null }) }
-    : lens ? lens.topic.prompts.length && !(lens.measurement && (!completedMeasurement(lens.measurement) || lens.measurement.prepareRecommendations) && ['queued', 'running', 'paused'].includes(lens.measurement.status)) ? { label: "Check these " + lens.topic.prompts.length + " questions", action: () => checkTopic(lens.topic.id) } : null
+  const lensCheck = lens ? activeTopicCheck(lens.topic.id) : undefined;
+  const headingAction = page === "Topics" ? openTopic ? topicCheckAction(openTopic) : { label: "New topic", action: () => setTopicEditor({ topic: null }) }
+    : lens ? page === 'Visibility' && lensCheck ? null : topicCheckAction(lens.topic)
     : page === "Prompts" ? activeScan ? null : measurementAction
     : page === "Visibility" ? activeScan ? null : measurementAction
-    : page === "Overview" ? activeMeasurement ? { label: "View current check", action: () => changePage('Visibility') } : !measured ? measurementAction : activeAnalysis ? null : pausedAnalysis ? { label: "Review paused analysis", action: () => changePage('Opportunities') } : !analyzed && canAnalyze ? { label: "Find opportunities", action: () => setJobDialog('diagnose') } : { label: "Review opportunities", action: () => changePage("Opportunities") }
+    : page === "Overview" ? activeMeasurement || !measured ? measurementAction : activeAnalysis ? null : pausedAnalysis ? { label: "Review paused analysis", action: () => changePage('Opportunities') } : !analyzed && canAnalyze ? { label: "Find opportunities", action: () => setJobDialog('diagnose') } : { label: "Review opportunities", action: () => changePage("Opportunities") }
     : page === "Opportunities" && measured && !activeAnalysis && !pausedAnalysis && !consoleFullCheckAnalyzed ? { label: "Find opportunities", action: () => canAnalyze ? setJobDialog("diagnose") : openConnections() }
     : page === "Content" && audited && !!w?.content.length ? { label: "Create content", action: () => { setContentFinding(null); setContentTopic(""); setJobDialog("content"); } } : null;
   return (
@@ -389,10 +399,10 @@ export function App() {
         {ask.open && p && page !== 'Settings' && <AskDrawer ask={ask} brand={p.brand} domain={p.domain} locale={p.locale} />}
         <DesktopUpdates compact />
         {w && page !== 'Settings' && (() => {
-          const active = w.jobs.find(job => ['measure', 'recheck'].includes(job.kind) && ['queued', 'running', 'paused'].includes(job.status));
+          const active = w.jobs.find(isActiveCheck);
           if (!active || (page === 'Overview' && active.id === activeScan?.id)) return null;
           const topic = p?.topics.find(topic => topic.id === active.topicId);
-          return <ActivityNotice title={topic ? topic.name + ' visibility check' : 'Visibility check'} detail={active.progress || 'Waiting to start'} paused={active.status === 'paused'} open={() => { chooseScope(active.topicId ?? null); changePage('Visibility'); }} />;
+          return <ActivityNotice title={topic ? topic.name + ' visibility check' : 'Visibility check'} detail={active.progress || 'Waiting to start'} paused={active.status === 'paused'} open={() => openCheck(active.topicId)} />;
         })()}
         {w && page !== 'Settings' && w.askActivity?.filter(active => page !== 'Ask history' || askId !== active.askId).slice(0, 1).map(active =>
           <ActivityNotice key={active.askId} title={active.question} detail={active.paused ? 'Ask needs your attention' : `Ask: ${active.collecting} collecting${active.needsAttention ? `, ${active.needsAttention} need attention` : ''}`}
@@ -400,7 +410,7 @@ export function App() {
         <main ref={mainRef} id="main-content" tabIndex={-1}>
           {profiles.welcome && page === 'Overview' && <section className="plan-welcome" aria-label="ChatGPT plan usage"><ProviderIcon provider="chatgpt" size={20} /><div><h2>Your ChatGPT plan is connected</h2><p>Your plan limits apply.</p></div><a href="https://chatgpt.com/settings/usage" target="_blank" rel="noreferrer">Manage usage <ArrowUpRight size={14} /></a><button className="icon-button" aria-label="Dismiss ChatGPT connection notice" onClick={() => void run(() => api("/connections/chatgpt/acknowledge-plan", {}))}><X size={16} /></button></section>}
           <PageHeader title={openTopic?.name ?? (page === 'Topics' ? 'Prompts' : page)} description={openTopic ? openTopic.goal || "Questions checked together toward one goal." : page === 'Overview' ? identity.tagline : descriptions[page]} icon={navigation.find(([label]) => label === (page === 'Topics' ? 'Prompts' : page))?.[1] ?? LayoutDashboard}>
-            {openTopic ? <div className="button-row page-heading-actions"><button className="secondary" onClick={() => setTopicEditor({ topic: openTopic })}>Edit topic</button>{headingAction && <button className="primary" disabled={busy} onClick={headingAction.action}><Play size={14} />{headingAction.label}</button>}</div>
+            {openTopic ? <div className="button-row page-heading-actions"><button className="secondary" onClick={() => setTopicEditor({ topic: openTopic })}>Edit topic</button>{headingAction && <button className="primary" disabled={busy} onClick={headingAction.action}>{headingAction.label === 'Check this topic' ? <Play size={14} /> : headingAction.label === 'Connect for AI checks' ? <Link size={15} /> : <ArrowRight size={15} />}{headingAction.label}</button>}</div>
             : p && headingAction && !(page === 'Overview' && activeScan) && (
               <button
                 className="primary"
@@ -557,10 +567,13 @@ export function App() {
                   )}
                 </section><WebsiteDiscovery key={p!.id} projectId={p!.id} jobs={w.jobs} run={run} /></>
               )}
-              {page === "Visibility" && lens && <TopicVisibility view={lens} total={p!.prompts.length} evidence={openEvidence} open={() => navigate(() => { setPage("Topics"); setTopicPage(lens.topic.id); })} />}
+              {page === "Visibility" && lens && <>
+                <RunsPanel jobs={runsNeedingAttention(w.jobs.filter(job => job.topicId === lens.topic.id), ['measure', 'recheck'])} run={run} />
+                <TopicVisibility view={lens} awaitingFirstAnswers={!!lensCheck && !lens.measurement} total={p!.prompts.length} evidence={openEvidence} open={() => navigate(() => { setPage("Topics"); setTopicPage(lens.topic.id); })} />
+              </>}
               {page === "Visibility" && !lens && !lensLoading && (
                 <>
-                  {!w.measurement && <section className="panel"><Empty title="Find out how AI answers your customers">
+                  {!w.measurement && !activeScan && <section className="panel"><Empty title="Find out how AI answers your customers">
                     Your saved questions define the check. Collect answers to measure brand mentions and website citations, then repeat the same questions to compare results.<br /><button className="primary" onClick={() => canMeasure ? setJobDialog('measure') : openConnections()}>{canMeasure ? 'Start visibility check' : 'Connect an answer provider'}</button>
                   </Empty></section>}
                   {measured && <div className="metrics three">
@@ -591,15 +604,14 @@ export function App() {
                 </>
               )}
               {page === 'Brand' && <BrandSettings key={p!.id} project={p!} refresh={refresh} onEditState={setEditState} />}
-              {(page === "Prompts" || page === "Topics") && <PromptWorkspace key={p!.id} project={p!} jobs={w.jobs} observations={w.observations} evidence={openEvidence} connected={connected} refresh={refresh} openConnections={openConnections} onEditState={setEditState} runControls={<RunsPanel jobs={runsNeedingAttention(w.jobs, ['discover'])} run={run} />} topics={w.topics} checkTopic={checkTopic} editTopic={(topic, prompts) => setTopicEditor({ topic, prompts })}
+              {(page === "Prompts" || page === "Topics") && <PromptWorkspace key={p!.id} project={p!} jobs={w.jobs} observations={w.observations} evidence={openEvidence} connected={connected} refresh={refresh} openConnections={openConnections} onEditState={setEditState} runControls={<RunsPanel jobs={runsNeedingAttention(w.jobs, ['discover'])} run={run} />} topics={w.topics} topicCheckAction={topicCheckAction} editTopic={(topic, prompts) => setTopicEditor({ topic, prompts })}
                 tab={page === 'Topics' ? 'topics' : promptTab} setTab={tab => navigate(() => { if (tab === 'topics') setPage('Topics'); else { setPromptTab(tab); setPage('Prompts'); } })}
-                topicsContent={<Topics project={p!} topics={w.topics} openId={topicPage} view={topicView} error={topicError} open={setTopicPage} edit={(topic) => setTopicEditor({ topic })}
+                topicsContent={<Topics project={p!} topics={w.topics} openId={topicPage} view={topicView} error={topicError} open={setTopicPage} edit={(topic) => setTopicEditor({ topic })} activeCheck={openTopic && activeTopicCheck(openTopic.id)}
                 opportunities={<>
-                  <RunsPanel jobs={runsNeedingAttention(topicJobs.filter(job => job.kind === 'diagnose' || job.prepareRecommendations))} run={run} />
+                  <RunsPanel jobs={runsNeedingAttention(topicJobs.filter(job => job.kind === 'diagnose' || job.prepareRecommendations || isActiveCheck(job)))} run={run} />
                   <section className="panel"><Findings key={topicPage} findings={topicOpportunities} projectId={p!.id} run={run} jobs={w.jobs} measurementId={topicView?.measurement?.id}
                     emptyTitle={topicPending ? 'This topic is still being reviewed' : topicAnalysis ? 'No new recommendations for this topic' : 'Find improvements for this topic'}
                     emptyMessage={topicPending ? 'Your saved answers and progress are kept. Follow the check above.' : topicAnalysis ? 'The review did not find a supported change from these answers. You can still explore their sources and target pages.' : 'Check this topic with ChatGPT or OpenRouter to review its answers against your website. Brand-wide advice remains in Opportunities.'}
-                    emptyAction={!topicPending && topicPage && topicView?.topic.status === 'active' ? <button className="primary" onClick={() => checkTopic(topicPage)}>Check this topic</button> : undefined}
                     drafts={w.content} openContent={id => navigate(() => { setPage('Content'); setSelectedContent(id); })}
                     createContent={finding => navigate(() => { setContentFinding(finding); setContentTopic(finding.opportunity?.topic ?? finding.title); setJobDialog('content'); })} /></section>
                 </>}
@@ -812,6 +824,10 @@ function WorkflowRow({
 }
 const jobLabels: Record<Job["kind"], string> = { audit: "Website health", discover: "Question suggestions", competitors: "Competitor review", measure: "Visibility check", recheck: "Visibility recheck", diagnose: "Recommendations", content: "Content draft", revise: "Draft revision", ask: "Ask" };
 const jobIcons: Record<Job["kind"], typeof ScanSearch> = { audit: ScanSearch, discover: Sparkles, competitors: Users, measure: ChartNoAxesCombined, recheck: RefreshCw, diagnose: Lightbulb, content: FileText, revise: FilePenLine, ask: Search };
+function isActiveCheck(job: Job) {
+  return ['measure', 'recheck'].includes(job.kind) && ['queued', 'running', 'paused'].includes(job.status) && (!completedMeasurement(job) || job.prepareRecommendations === true);
+}
+const checkProgressLabel = (job: Job) => job.status === 'paused' ? 'Review paused check' : 'View current check';
 /** A run's live status. A check with every answer saved is only finishing follow-up work. */
 function jobSummary(job: Job) {
   if (job.kind === 'audit' && ['queued', 'paused'].includes(job.status) && job.availableAt && Date.parse(job.availableAt) > Date.now())
