@@ -7,6 +7,13 @@ import type { AskController } from './useAsk';
 import './ask.css';
 
 const engineCount = (count: number) => count + (count === 1 ? ' engine' : ' engines');
+const creditCount = (count: number) => count + (count === 1 ? ' credit' : ' credits');
+
+function estimateDuration(seconds: number) {
+  const wholeMinutes = seconds % 60 === 0;
+  return new Intl.NumberFormat(undefined, { style: 'unit', unit: wholeMinutes ? 'minute' : 'second', unitDisplay: 'long' })
+    .format(wholeMinutes ? seconds / 60 : seconds);
+}
 
 /** Paid choices always return to the visible approval drawer before a header submission can spend. */
 export function AskBar({ ask, settingsButton }: { ask: AskController; settingsButton: RefObject<HTMLButtonElement> }) {
@@ -37,6 +44,7 @@ export function AskDrawer({ ask, brand, domain, locale }: {
   const language = (() => { try { return new Intl.DisplayNames(undefined, { type: 'language' }).of(locale) ?? locale; } catch { return locale; } })();
   const available = ask.catalog?.engines.filter(engine => engine.available) ?? [];
   const missing = ask.catalog?.engines.filter(engine => !engine.available) ?? [];
+  const consoleEstimateValidity = ask.catalog?.consoleEstimateValiditySeconds;
   const unavailableGroups = [...new Map(missing.map(engine => [engine.provider + '|' + engine.reason, missing.filter(row => row.provider === engine.provider && row.reason === engine.reason)])).values()];
   const providerName = (provider: string) => ({ chatgpt: 'ChatGPT', console: 'SurfacedBy', dataforseo: 'DataForSEO', deepseek: 'DeepSeek' } as Record<string, string>)[provider] ?? provider;
   const priceText = (id: string) => {
@@ -45,8 +53,11 @@ export function AskDrawer({ ask, brand, domain, locale }: {
     const value = ask.priceOf(id);
     if (value !== null && ask.menuPrices.includes(id)) return 'Up to ' + usd(value) + ' per answer';
     if (value === null && engine.estimateUsd !== undefined &&
-        (ask.question.trim().length < 3 || !ask.choice.includes(id)))
-      return (engine.provider === 'console' ? 'Up to ' : 'est. ') + usd(engine.estimateUsd) + ' per answer';
+        (ask.question.trim().length < 3 || !ask.choice.includes(id))) {
+      const price = usd(engine.estimateUsd);
+      if (engine.publishedCredits !== undefined) return 'Up to ' + creditCount(engine.publishedCredits) + ' (' + price + ') per answer';
+      return (engine.provider === 'console' ? 'Up to ' : 'est. ') + price + ' per answer';
+    }
     return value === null ? (ask.estimating ? 'Checking price...' : 'Estimate unavailable') : (engine.price === 'metered' ? 'Up to ' : 'est. ') + usd(value);
   };
   const askLabel = 'Ask ' + engineCount(ask.choice.length);
@@ -65,8 +76,8 @@ export function AskDrawer({ ask, brand, domain, locale }: {
         </label>
         <fieldset className="ask-engines" disabled={ask.busy}>
           <legend>Engines</legend>
-          {available.some(engine => engine.provider === 'console' && engine.estimateUsd !== undefined) &&
-            <p className="ask-muted">SurfacedBy estimates are free. Unused reserved credits are returned.</p>}
+          {consoleEstimateValidity !== undefined &&
+            <p className="ask-muted">SurfacedBy estimates are free and valid for {estimateDuration(consoleEstimateValidity)}. Unused reserved credits are returned.</p>}
           {!ask.catalog && <p className="ask-muted" role="status">Checking your connections...</p>}
           {ask.catalog?.availabilityNote && <p className="ask-muted" role="status">{ask.catalog.availabilityNote}</p>}
           <div className="ask-engine-grid">

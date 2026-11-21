@@ -51,10 +51,14 @@ test('engine discovery reads advertised prices without requesting a quote or pur
   } as unknown as AskDeps;
   const catalog = await engineCatalog(deps);
   assert.deepEqual(paths, ['/capabilities']);
-  assert.equal(catalog.engines.find(row => row.id === 'surfacedby-chatgpt')?.estimateUsd, 0.2);
+  const available = catalog.engines.find(row => row.id === 'surfacedby-chatgpt');
+  assert.equal(available?.estimateUsd, 0.2);
+  assert.equal(available?.publishedCredits, 2);
+  assert.equal(catalog.consoleEstimateValiditySeconds, 900);
   const unavailable = catalog.engines.find(row => row.id === 'surfacedby-gemini');
   assert.equal(unavailable?.available, false);
   assert.equal(unavailable?.estimateUsd, undefined);
+  assert.equal(unavailable?.publishedCredits, undefined);
 });
 
 for (const [key, name] of [['ai_mode', 'Google AI Mode'], ['future_engine', 'Future Engine']]) {
@@ -62,6 +66,7 @@ for (const [key, name] of [['ai_mode', 'Google AI Mode'], ['future_engine', 'Fut
     const value = capability();
     value.platforms = [{ key, name, enabled: true }];
     value.selected_question_platforms = [key];
+    value.pricing.measurement.estimate_validity_seconds = 90;
     value.pricing.measurement.platforms = [{ platform: key, one_answer_credits: 1, one_answer_usd: '0.10' }];
     const paths: string[] = [];
     const deps = {
@@ -74,6 +79,8 @@ for (const [key, name] of [['ai_mode', 'Google AI Mode'], ['future_engine', 'Fut
     const engine = catalog.engines.find(row => row.id === `surfacedby-${key}`);
     assert.equal(engine?.available, true);
     assert.equal(engine?.estimateUsd, 0.1);
+    assert.equal(engine?.publishedCredits, 1);
     assert.equal(engine?.label, name);
+    assert.equal(catalog.consoleEstimateValiditySeconds, 90);
   });
 }

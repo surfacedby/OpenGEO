@@ -61,6 +61,7 @@ export async function engineCatalog(deps: AskDeps) {
   const connected = deps.vault.status() as Record<string, boolean>;
   const surfacedBy = connected.console ? await surfacedByPlatforms(deps) : { platforms: [], selected: [] as string[] };
   if (surfacedBy.platforms.length) deps.store.set('consolePlatformNames', Object.fromEntries(surfacedBy.platforms.map(row => [localPlatformKey(row.key), row.name])));
+  const consolePriceMenu = surfacedBy.pricing?.measurement;
   const requestEstimate = deps.store.setting<number>("measurementRequestEstimateUsd", 0);
   const definitions: EngineDefinition[] = [
     ...Object.entries(directEngines).map(([id, engine]) => ({ id, ...engine })),
@@ -74,13 +75,14 @@ export async function engineCatalog(deps: AskDeps) {
       reason = "Single-question checks are not available for this engine on your SurfacedBy connection";
     else if (engine.provider === "dataforseo" && requestEstimate <= 0) reason = "Set a DataForSEO request estimate in Settings";
     const menu = engine.provider === 'console' && !reason
-      ? surfacedBy.pricing?.measurement?.platforms.find(row => row.platform === consolePlatformKey(engine.platform)) : undefined;
+      ? consolePriceMenu?.platforms.find(row => row.platform === consolePlatformKey(engine.platform)) : undefined;
     return { id, ...engine, available: !reason, ...(reason ? { reason } : {}),
       price: engine.provider === "chatgpt" ? "free" as const : engine.provider === "console" ? "quote" as const : engine.provider === 'deepseek' ? 'metered' as const : "per_request" as const,
       ...(engine.provider === "dataforseo" && requestEstimate > 0 ? { estimateUsd: requestEstimate } : {}),
-      ...(menu ? { estimateUsd: Number(menu.one_answer_usd) } : {}) };
+      ...(menu ? { estimateUsd: Number(menu.one_answer_usd), publishedCredits: menu.one_answer_credits } : {}) };
   });
   return { engines, availabilityNote: surfacedBy.reason ?? (!connected.console ? 'Connect SurfacedBy to see its available engines.' : undefined),
+    ...(consolePriceMenu?.platforms.length ? { consoleEstimateValiditySeconds: consolePriceMenu.estimate_validity_seconds } : {}),
     defaultLimitUsd: deps.store.setting<number>("askLimitUsd", defaultLimitUsd) };
 }
 
