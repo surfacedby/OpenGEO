@@ -468,7 +468,7 @@ test('tracking adds the question once, and deleting an ask removes its runs and 
   } finally { await f.close(); }
 });
 
-test('earlier tracked answers to the same question show beside an ask, and an unknown website is priced at the start', async () => {
+test('earlier tracked answers to the same question show beside an ask', async () => {
   const f = await fixture({ domainKnown: false });
   try {
     const check = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'measure', provider: 'chatgpt', model: 'fixture-model' }), 'history-check');
@@ -479,10 +479,27 @@ test('earlier tracked answers to the same question show beside an ask, and an un
     const result = await f.read(askId);
     assert.equal(result.history.length, 1);
     assert.equal(result.history[0].mentioned, true);
+  } finally { await f.close(); }
+});
+
+test('a new website without a published price cannot start a SurfacedBy Ask', async () => {
+  const f = await fixture({ domainKnown: false });
+  try {
+    const engines = ['chatgpt', 'surfacedby-chatgpt'];
     const estimate = (await f.app.inject({ method: 'POST', url: `/api/projects/${f.project.id}/asks/estimate`, headers,
-      payload: { question, engines: ['surfacedby-chatgpt'] } })).json();
-    assert.deepEqual(estimate.engines[0], { id: 'surfacedby-chatgpt', estimateUsd: null, note: 'Priced when the ask starts' });
+      payload: { question, engines } })).json();
+    assert.equal(estimate.engines[0].estimateUsd, 0);
+    assert.equal(estimate.engines[1].estimateUsd, null);
+    assert.equal(estimate.engines[1].blocked, true);
     assert.equal(estimate.totalUsd, null);
+    const denied = await f.ask({ question, engines, maxCostUsd: 1 });
+    assert.equal(denied.statusCode, 409);
+    assert.equal(denied.json().code, 'estimate');
+    assert.deepEqual(f.store.jobs(f.project.id), []);
+    assert.equal(f.state.registrations, 0);
+    assert.deepEqual(f.state.estimates, []);
+    assert.deepEqual(f.state.purchases, []);
+    assert.deepEqual(f.state.openai, []);
   } finally { await f.close(); }
 });
 

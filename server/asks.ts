@@ -136,7 +136,8 @@ function questionQuoter(deps: AskDeps, project: Project, text: string) {
       const domain = await domainLookup;
       if (domain) return await surfacedByQuote(deps, project, domain.id, text, engine.platform);
       if (engine.estimateUsd !== undefined) return { estimateUsd: engine.estimateUsd, publishedPrice: true };
-      return { estimateUsd: null, note: 'Priced when the ask starts' };
+      return { estimateUsd: null, blocked: true,
+        note: `SurfacedBy has not published a price for ${engine.label} on a new website. Refresh prices or choose another engine.` };
     } catch {
       return { estimateUsd: null, blocked: true,
         note: `SurfacedBy couldn't confirm a price for ${engine.label}. Refresh prices, edit your question or deselect that engine.` };
