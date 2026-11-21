@@ -61,6 +61,30 @@ test('scan recommendations and separate analysis replace each other without disc
   assert.deepEqual(currentFindings(findings, [scan, separate]).map(item => item.id), ['scan-advice', 'accepted']);
 });
 
+test('a later analysis of an older check cannot hide the current check recommendations', () => {
+  for (const topicId of [undefined, 'topic-a']) {
+    const oldCheck = { id: randomUUID(), topicId, kind: 'measure', status: 'completed', createdAt: '2026-11-01T00:00:00Z' } as Job;
+    const newCheck = { id: randomUUID(), topicId, kind: 'measure', status: 'completed', createdAt: '2026-11-02T00:00:00Z' } as Job;
+    const completedAnalysis = (check: Job, createdAt: string) => ({
+      id: randomUUID(), kind: 'diagnose', status: 'completed', createdAt,
+      result: { findings: 1, measurementJobId: check.id },
+    }) as Job;
+    const current = completedAnalysis(newCheck, '2026-11-02T01:00:00Z');
+    const previous = completedAnalysis(oldCheck, '2026-11-03T01:00:00Z');
+    const findings = [
+      { id: 'historical', jobId: previous.id, kind: 'console', status: 'open' },
+      { id: 'current', jobId: current.id, kind: 'console', status: 'open' },
+      { id: 'accepted', jobId: previous.id, kind: 'console', status: 'doing' },
+    ] as Finding[];
+    assert.deepEqual(currentFindings(findings, [previous, current, newCheck, oldCheck]).map(row => row.id), ['current', 'accepted']);
+
+    // A successfully reviewed check may yield no new recommendations.
+    const empty = completedAnalysis(newCheck, '2026-11-03T02:00:00Z');
+    empty.result = { findings: 0, measurementJobId: newCheck.id };
+    assert.deepEqual(currentFindings(findings, [empty, previous, current, newCheck, oldCheck]).map(row => row.id), ['accepted']);
+  }
+});
+
 test('Topic checks and their pinned analyses replace advice only within the same measurement scope', () => {
   const scan = (id: string, topicId?: string) => ({ id, topicId, kind: 'measure', status: 'completed', createdAt: '2026-11-04T00:00:00Z' }) as Job;
   const analysis = (id: string, measurementJobId: string) => ({ id, kind: 'diagnose', status: 'completed', measurementJobId, result: { measurementJobId }, createdAt: '2026-11-04T00:01:00Z' }) as Job;

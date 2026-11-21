@@ -61,9 +61,18 @@ export function currentFindings(findings: Finding[], jobs: Job[], auditJobId?: s
   // A newer partial check replaces advice only for its own Topic, never the brand or another Topic. Only a
   // check that can prepare advice starts a new period: a comparison-only check (DeepSeek) never retires it.
   for (const job of jobs) {
+    if (!analysisBasisCheck(job)) continue;
     const key = scope(job);
-    if (analysisBasisCheck(job) && !measurements.has(key)) measurements.set(key, job);
-    if ((completedAnalysisResult(job) || job.kind === 'diagnose' && job.status === 'completed') && !analyses.has(key)) analyses.set(key, job);
+    if (!measurements.has(key)) measurements.set(key, job);
+  }
+  // A review of an older check can finish later. Choose among analyses for the
+  // current check so that historical work cannot displace its recommendations.
+  for (const job of jobs) {
+    if (!completedAnalysisResult(job) && !(job.kind === 'diagnose' && job.status === 'completed')) continue;
+    const key = scope(job);
+    if (analyses.has(key)) continue;
+    const measurement = measurements.get(key), period = analysisMeasurementId(job);
+    if (!measurement || (period ? period === measurement.id : job.createdAt >= measurement.createdAt)) analyses.set(key, job);
   }
   return findings.filter(finding => {
     if (finding.kind === 'visibility') return false;
@@ -72,10 +81,7 @@ export function currentFindings(findings: Finding[], jobs: Job[], auditJobId?: s
     if (!job) return true;
     if (job.kind === 'audit') return job.id === audit?.id;
     const key = scope(job), measurement = measurements.get(key), analysis = analyses.get(key);
-    if (job.kind === 'diagnose' || job.prepareRecommendations || completedAnalysisResult(job)) {
-      const period = analysisMeasurementId(job);
-      return job.id === analysis?.id && (!measurement || (period ? period === measurement.id : job.createdAt >= measurement.createdAt));
-    }
+    if (job.kind === 'diagnose' || job.prepareRecommendations || completedAnalysisResult(job)) return job.id === analysis?.id;
     if (['measure', 'recheck'].includes(job.kind)) return job.id === measurement?.id;
     return true;
   });
