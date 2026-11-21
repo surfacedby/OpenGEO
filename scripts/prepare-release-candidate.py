@@ -102,13 +102,12 @@ if suffix == '.dmg':
     keychain_consent.update(cleanup)
     keychain_consent['fixtureSourceSha256'] = digest(root / 'scripts/mac-keychain-fixture.m')
 else:
-    old_executable = install(previous)
-    smoke(old_executable, 'seed')
     executable = install(candidate)
-    smoke(executable, 'verify')
     smoke(executable)
     subprocess.run(['pwsh', '-NoProfile', '-File', 'scripts/verify-installer-finish.ps1', '-Installer', str(candidate), '-Installation', str(installation), '-Receipt', str(out / 'installer-finish.json')], check=True, timeout=240)
-    subprocess.run(['node', 'scripts/desktop-update-smoke.mjs', str(executable), str(candidate), str(profile), str(out / 'automatic-update.json')], check=True, timeout=300)
+    old_executable = install(previous)
+    smoke(old_executable, 'seed')
+    subprocess.run(['node', 'scripts/desktop-update-smoke.mjs', str(old_executable), str(candidate), str(profile), str(out / 'automatic-update.json'), previous_version], check=True, timeout=300)
     smoke(executable, 'verify', 'verify-after-update')
 if suffix == '.exe':
     built = build / 'win-unpacked'

@@ -10,7 +10,9 @@ import { promisify } from 'node:util';
 import { once } from 'node:events';
 
 if (process.env.GITHUB_ACTIONS !== 'true' || process.platform !== 'win32') throw new Error('Requires an isolated Windows release runner.');
-const [executable, installer, profile, receipt] = process.argv.slice(2).map(value => resolve(value));
+const [executable, installer, profile, receipt] = process.argv.slice(2, 6).map(value => resolve(value));
+const previousVersion = process.argv[6];
+assert.match(previousVersion ?? '', /^\d+\.\d+\.\d+-beta\.\d+$/);
 for (const path of [executable, installer, profile, receipt]) {
   const child = relative(resolve(process.env.RUNNER_TEMP), path);
   assert.ok(child && !child.startsWith('..') && !isAbsolute(child));
@@ -39,19 +41,19 @@ try {
   application = await electron.launch({ executablePath: executable, env: { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => environmentNames.has(name.toUpperCase()))), OPENGEO_DESKTOP_DATA_DIR: profile }, timeout: 30000 });
   const page = await application.firstWindow();
   await page.waitForFunction(() => !!window.opengeoDesktop);
-  // Only transport, cache location and the version comparator are controlled. The packaged IPC,
-  // updater, checksum validation, install action and actual installer remain unchanged.
-  await application.evaluate(({ app }, { url, cache }) => {
+  // Isolate transport and caching while the previous package compares real release versions.
+  await application.evaluate(({ app }, { url, cache, previousVersion }) => {
     const require = process.mainModule.require.bind(process.mainModule);
     const updater = require('electron-updater').autoUpdater;
+    if (!app.isPackaged || app.getVersion() !== previousVersion || updater.currentVersion.version !== previousVersion) {
+      throw new Error('Must use the exact previous packaged release for the update');
+    }
     updater.setFeedURL({ provider: 'generic', url, channel: 'beta' });
-    updater.currentVersion = new updater.currentVersion.constructor('0.0.0');
     Object.defineProperty(updater.app, 'baseCachePath', { value: cache });
-    if (!app.isPackaged) throw new Error('Must use packaged application');
-  }, { url: 'http://127.0.0.1:' + server.address().port, cache: join(dirname(receipt), 'update-cache') });
+  }, { url: 'http://127.0.0.1:' + server.address().port, cache: join(dirname(receipt), 'update-cache'), previousVersion });
   await page.evaluate(() => window.opengeoDesktop.updates('preference', false));
   const available = await page.evaluate(() => window.opengeoDesktop.updates('check'));
-  assert.equal(available.status, 'available'); assert.equal(completeDownloads, 0);
+  assert.equal(available.status, 'available'); assert.equal(available.availableVersion, version); assert.equal(completeDownloads, 0);
   const ready = await page.evaluate(() => window.opengeoDesktop.updates('download'));
   assert.equal(ready.status, 'ready'); assert.equal(completeDownloads, 1);
   const downloaded = await application.evaluate(() => process.mainModule.require('electron-updater').autoUpdater.installerPath);
@@ -80,7 +82,7 @@ try {
   assert.deepEqual(observations[1], { state: 'exited', processId: applicationPid, exitCode: 0 });
   application = null;
   await promisify(execFile)('pwsh', ['-NoProfile', '-File', 'scripts/verify-installer-finish.ps1', '-Installer', downloaded, '-Installation', dirname(executable), '-Receipt', receipt + '.finish.json', '-Attach'], { windowsHide: true, timeout: 240000 });
-  writeFileSync(receipt, JSON.stringify({ packagedUpdateDownload: true, downloadSha512: sha512, completeDownloads, explicitInstallRequired: true, unsavedWorkBlockedInstall: true, applicationProcessExit: observations[1], actualInstallerCompleted: true, transport: 'isolated loopback feed serving the exact candidate', comparisonVersion: '0.0.0', relaunchedBySeparateWorkspaceVerification: true }, null, 2));
+  writeFileSync(receipt, JSON.stringify({ packagedUpdateDownload: true, downloadSha512: sha512, completeDownloads, explicitInstallRequired: true, unsavedWorkBlockedInstall: true, applicationProcessExit: observations[1], actualInstallerCompleted: true, transport: 'isolated loopback feed serving the exact candidate', comparisonVersion: previousVersion, relaunchedBySeparateWorkspaceVerification: true }, null, 2));
 } finally {
   if (exitObserver && exitObserver.exitCode === null) exitObserver.kill();
   // Failed verification must not hang cleanup on the same inherited installer handles.
