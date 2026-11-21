@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,7 +10,7 @@ import { createApp } from "../server/app.js";
 import { jobInput, projectInput } from "../server/contracts.js";
 import { exportProject, reportMarkdown } from "../server/export.js";
 import { importProject } from "../server/import.js";
-import { completedAnalysisResult } from "../server/portable-results.js";
+import { analysisInProgress, completedAnalysisResult, completedMeasurement } from "../server/portable-results.js";
 
 const json = (data: unknown) => new Response(JSON.stringify({ data }), {
   headers: { "Content-Type": "application/json" },
@@ -72,6 +73,7 @@ test("Console check totals and public citations survive project edits, dashboard
   const runtime = await createApp(store, vault, "synthetic-local-session");
   const original = globalThis.fetch;
   let submitted = 0, evidenceReads = 0, previewCount: unknown = 3, finalCount = 3, hasRecommendation = true;
+  let analysis = async () => json({ analysis_status: "available" });
   // Supplier HTTP fixtures exercise the production adapter, queue, projections and SQLite writes.
   globalThis.fetch = (async (url, init) => {
     const path = new URL(String(url)).pathname.replace("/api/v1/console", "");
@@ -86,8 +88,8 @@ test("Console check totals and public citations survive project edits, dashboard
       return json({ scan_id: "fixture-scan", credits_charged: 2 });
     }
     if (path === "/scans/fixture-scan") return json({ status: "completed", answers_total: finalCount,
-      visibility_score: 75, completed_at: "2026-10-01T10:00:00Z" });
-    if (path.endsWith("/analysis")) return json({ analysis_status: "available" });
+      visibility_score: 75, completed_at: "2026-10-01T10:00:00+00:00" });
+    if (path.endsWith("/analysis")) return analysis();
     if (path.endsWith("/observations")) {
       evidenceReads++;
       return json([
@@ -155,14 +157,17 @@ test("Console check totals and public citations survive project edits, dashboard
     assert.equal(store.job(inconsistent.id).requestedAnswers, 3);
     assert.equal(submitted, 2);
     assert.equal(completedAnalysisResult(store.job(inconsistent.id)), null);
-    // A check paused on beta.10 may already have saved the evidence without a finding count.
+    const savedAnswers = store.observations(project.id, inconsistent.id);
+    // A check paused on beta.10 could have saved both observations and findings before checking the total.
+    const [earlierFinding] = store.artifacts(project.id, "finding", job.id) as Record<string, unknown>[];
+    store.put("finding", project.id, inconsistent.id, { ...earlierFinding, id: randomUUID(), jobId: inconsistent.id,
+      evidenceIds: [savedAnswers.find(answer => answer.prompt === "First question?")?.id] });
     store.setStep(inconsistent.id, "console-evidence", "done", { observations: 3 });
-    const savedIds = store.observations(project.id, inconsistent.id).map(answer => answer.id);
     finalCount = 3;
     runtime.runner.resume(inconsistent.id, false);
     await runtime.runner.tick();
     assert.deepEqual(completedAnalysisResult(store.job(inconsistent.id)), { findings: 1, measurementJobId: inconsistent.id });
-    assert.deepEqual(store.observations(project.id, inconsistent.id).map(answer => answer.id), savedIds);
+    assert.deepEqual(store.observations(project.id, inconsistent.id), savedAnswers);
     assert.equal(evidenceReads, 2);
     assert.equal(submitted, 2);
     hasRecommendation = false;
@@ -171,6 +176,55 @@ test("Console check totals and public citations survive project edits, dashboard
     assert.deepEqual(completedAnalysisResult(store.job(reviewedWithoutChanges.id)),
       { findings: 0, measurementJobId: reviewedWithoutChanges.id });
     assert.equal(submitted, 3);
+
+    hasRecommendation = true;
+    let arrived!: () => void, release!: () => void;
+    const arrivedAtAnalysis = new Promise<void>(resolve => { arrived = resolve; });
+    const holdAnalysis = new Promise<void>(resolve => { release = resolve; });
+    analysis = async () => {
+      arrived();
+      await holdAnalysis;
+      return json({ analysis_status: "unavailable" });
+    };
+    const waiting = enqueue("console-answers-before-analysis");
+    const tick = runtime.runner.tick();
+    try {
+      await Promise.race([arrivedAtAnalysis, tick]);
+      const running = await workspace(project.id);
+      assert.equal(running.measurement.id, waiting.id);
+      assert.equal(running.measurement.status, "running");
+      assert.equal(completedMeasurement(running.measurement), true);
+      assert.equal(analysisInProgress(running.measurement), true);
+      assert.deepEqual(running.metrics, { requested: 3, completed: 2, missing: 1, mentionRate: 50, citationRate: 50, citations: 1 });
+      assert.equal(running.measurement.result.collectionCompletedAt, "2026-10-01T10:00:00.000Z");
+      assert.equal(running.observations.length, 2);
+      assert.throws(() => enqueue("console-cannot-submit-a-second-check"), /already in progress/);
+    } finally {
+      release();
+      await tick;
+    }
+    assert.equal(store.job(waiting.id).status, "paused");
+    assert.equal(runtime.runner.resumePreview(waiting.id).uncertainRequests, 0);
+    const gathered = store.observations(project.id, waiting.id);
+    const readsBeforeResume = evidenceReads;
+    analysis = async () => json({ analysis_status: "available" });
+    runtime.runner.resume(waiting.id, false);
+    await runtime.runner.tick();
+    assert.equal(submitted, 4);
+    assert.equal(evidenceReads, readsBeforeResume);
+    assert.deepEqual(store.observations(project.id, waiting.id), gathered);
+    const [recommendation] = store.artifacts<{ evidenceIds: string[] }>(project.id, "finding", waiting.id);
+    assert.deepEqual(recommendation.evidenceIds, [gathered.find(answer => answer.prompt === "First question?")?.id]);
+
+    analysis = async () => json({ analysis_status: "unavailable" });
+    const stopped = enqueue("console-stop-waiting-for-analysis");
+    await runtime.runner.tick();
+    await runtime.runner.cancel(stopped.id);
+    assert.equal(store.job(stopped.id).status, "cancelled");
+    assert.equal(store.job(stopped.id).error, null);
+    assert.equal(store.job(stopped.id).spentUsd, 0.2);
+    assert.equal(completedMeasurement(store.job(stopped.id)), true);
+    assert.equal(store.observations(project.id, stopped.id).length, 2);
   } finally {
     globalThis.fetch = original;
     await runtime.app.close(); store.close(); rmSync(directory, { recursive: true, force: true });

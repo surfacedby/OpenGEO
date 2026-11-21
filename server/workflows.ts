@@ -8,7 +8,7 @@ import { renderedFetch } from "./render.js";
 import { CrawlBackoff, CrawlDeferred, crawlFetch, publicUrl, sameSiteHost } from "./network.js";
 import { pageSearchExclusion } from './page-classification.js';
 import { scheduledBudgetCeiling } from "./scheduler.js";
-import { completedAnalysisBasis, completedMeasurement } from "./portable-results.js";
+import { completedAnalysisBasis, completedMeasurement, portableJobResult } from "./portable-results.js";
 import { topicScope } from "./topics.js";
 import { askScope } from "./ask-scope.js";
 import { deepseekAnswerEstimate } from "./deepseek.js";
@@ -39,6 +39,7 @@ import {
   type Model,
 } from "./contracts.js";
 const consoleDomainBinding = z.object({ id: z.string().uuid(), domain: z.string().min(1) });
+type ConsoleAnswerCheckpoint = { observations: number; observationIds: [string, string][] };
 
 function boundConsoleDomain(value: unknown, hostname: string) {
   const parsed = consoleDomainBinding.safeParse(value);
@@ -171,6 +172,8 @@ export class Runner {
       if (createdForAnalysis && !shared) await this.cancel(auditId);
     }
     if (job.provider === 'console') {
+      if (completedMeasurement(this.store.job(id)))
+        return this.store.updateJob(id, { error: null, progress: 'Stopped waiting for recommendations. Your answers and charges are saved.' });
       if (await cancelConsoleManaged(this, job)) {
         if (["measure", "recheck", "ask"].includes(job.kind)) {
           try {
@@ -1200,10 +1203,9 @@ export class Runner {
     if (!Number.isSafeInteger(scan.credits_charged) || scan.credits_charged < 0)
       throw new ProviderError('cost_unknown', 'SurfacedBy did not confirm the charge for this check. Review it in SurfacedBy Console before continuing.', true);
     this.store.updateJob(job.id, { spentUsd: creditsUsd(scan.credits_charged, unitUsd) });
-    let state;
     for (let n = 0; n < 180; n++) {
       signal.throwIfAborted();
-      state = (
+      const state = (
         await this.providers.console(
           "/scans/" + scanId,
           undefined,
@@ -1214,6 +1216,27 @@ export class Runner {
       if (state.status !== "completed" && Number.isSafeInteger(state.answers_total) && state.answers_total > 0)
         this.store.updateJob(job.id, { requestedAnswers: state.answers_total });
       if (state.status === "completed") {
+        const completedAt = z.string().datetime({ offset: true }).safeParse(state.completed_at);
+        const collectionCompletedAt = completedAt.success ? new Date(completedAt.data).toISOString() : new Date().toISOString();
+        const previous = this.store.step(job.id, "console-evidence");
+        // Before answers had a separate checkpoint, this step saved the answers and findings together.
+        const answers: ConsoleAnswerCheckpoint = previous?.state === "done"
+          ? { observations: JSON.parse(previous.body!).observations, observationIds: [] }
+          : await this.saveConsoleAnswers(job, project, scanId, collectionCompletedAt, signal);
+        const requested = state.answers_total;
+        if (!Number.isSafeInteger(requested) || requested < 1 || requested < answers.observations)
+          throw new ProviderError("invalid_response", "The collected answers are saved, but the API returned an inconsistent check total. Review this check before comparing results.");
+        const current = this.store.job(job.id);
+        let result = portableJobResult(current);
+        const progress = "Answers saved. Waiting for SurfacedBy recommendations.";
+        if (!result?.collectionCompletedAt) {
+          const observations = this.store.observations(project.id, job.id);
+          result = { metrics: summarize(observations, requested), consoleScore: state.visibility_score,
+            comparisonKey: comparisonKey(project, job, observations), collectionCompletedAt };
+          this.store.updateJob(job.id, { requestedAnswers: requested, result, prepareRecommendations: true, progress });
+        } else if (current.progress !== progress) {
+          this.store.updateJob(job.id, { progress });
+        }
         const analysis = (
           await this.providers.console(
             "/scans/" + scanId + "/analysis",
@@ -1222,17 +1245,15 @@ export class Runner {
             signal,
           )
         ).data;
-        if (analysis.analysis_status === "available") break;
+        if (analysis.analysis_status === "available") {
+          const findings = await this.saveConsoleFindings(job, project, domain.id, scanId, answers, signal);
+          return { ...result, analysis: { measurementJobId: job.id, findings } };
+        }
         if (analysis.analysis_status === "unavailable")
           throw new ProviderError(
             "analysis",
-            "SurfacedBy analysis is unavailable for this check. The collected answers remain in SurfacedBy.",
+            "Your answers are saved. SurfacedBy could not return recommendations for this check.",
           );
-        state = { ...state, status: "processing-analysis" };
-        this.store.updateJob(job.id, {
-          progress:
-            "Answers collected. Waiting for SurfacedBy recommendations.",
-        });
       }
       if (["failed", "cancelled"].includes(state.status))
         throw new ProviderError(
@@ -1241,102 +1262,82 @@ export class Runner {
         );
       await new Promise((r) => setTimeout(r, 5000));
     }
-    if (state?.status !== "completed")
-      throw new ProviderError(
-        "waiting",
-        "SurfacedBy is still processing. Resume later to collect results.",
-      );
-    const reviewed = await this.once<{ observations: number; findings?: number }>(job, "console-evidence", async () => {
-      const evidence = await this.consolePages(
-        "/scans/" + scanId + "/observations",
-        signal,
-      );
-      const findings: any[] = [];
-      for (const kind of ["diagnoses", "opportunities"])
-        findings.push(
-          ...(await this.consolePages(
-            "/domains/" +
-              domain.id +
-              "/insights/" +
-              kind +
-              "?scan_id=" +
-              scanId,
-            signal,
-          )),
-        );
-      const receipt = { observations: evidence.length, findings: findings.length };
-      this.store.db.transaction(() => {
-        const observationIds = new Map<string, string>();
-        for (const row of evidence) {
-          if (row.status === "missing_observation" || !row.answer_text?.trim())
-            continue;
-          const citations = safeCitations(Array.isArray(row.citations) ? row.citations : []);
-          const o: Observation = {
-            id: randomUUID(),
-            projectId: project.id,
-            jobId: job.id,
-            prompt: row.prompt,
-            provider: "console",
-            platform: row.platform,
-            model: row.model ?? "not-disclosed",
-            locale: row.locale ?? project.locale,
-            observedAt: row.observed_at ?? state.completed_at,
-            answer: row.answer_text,
-            citations,
-            retrievedSources: otherSearchLinks(row.retrieved_sources, citations),
-            surface: ["api", "consumer_interface"].includes(row.surface) ? row.surface : "unknown",
-            mentioned: ["cited", "named"].includes(row.presence),
-            cited: row.presence === "cited",
-            costUsd: null,
-          };
-          this.store.put("observation", project.id, job.id, o);
-          observationIds.set(row.id, o.id);
-        }
-        for (const row of findings)
-          this.store.put("finding", project.id, job.id, {
-            id: randomUUID(),
-            projectId: project.id,
-            jobId: job.id,
-            title: row.title,
-            description: row.description,
-            priority: row.priority ?? "medium",
-            targetUrl: row.target_url ?? "https://" + project.domain,
-            evidenceIds: (row.evidence ?? [])
-              .map((e: any) => observationIds.get(e.observation_id))
-              .filter(Boolean),
-            steps: row.steps ?? [],
-            confidence: "inferred",
-            status: "open",
-            kind: "console",
-            remoteId: row.id,
-            evidenceAsOf: row.evidence_as_of,
-            remoteScanId: row.scan_id,
-          });
-        this.store.setStep(job.id, "console-evidence", "done", receipt);
-      })();
-      return receipt;
-    });
-    const requested = state.answers_total;
-    if (!Number.isSafeInteger(requested) || requested < 1 || requested < reviewed.observations)
-      throw new ProviderError("invalid_response", "The collected answers are saved, but the API returned an inconsistent check total. Review this check before comparing results.");
-    this.store.updateJob(job.id, { requestedAnswers: requested });
-    return {
-      metrics: summarize(
-        this.store.observations(project.id, job.id),
-        requested,
-      ),
-      consoleScore: state.visibility_score,
-      analysis: {
-        measurementJobId: job.id,
-        // Older checkpoints already saved the findings atomically without recording their count.
-        findings: reviewed.findings ?? this.store.artifacts(project.id, "finding", job.id).length,
-      },
-      comparisonKey: comparisonKey(
-        project,
-        job,
-        this.store.observations(project.id, job.id),
-      ),
-    };
+    throw new ProviderError("waiting", completedMeasurement(this.store.job(job.id))
+      ? "Your answers are saved. Resume later to collect SurfacedBy recommendations."
+      : "SurfacedBy is still processing. Resume later to collect results.");
+  }
+
+  /** Save settled answers before asking whether the separate recommendation pass has finished. */
+  private async saveConsoleAnswers(job: Job, project: Project, scanId: string, completedAt: string, signal: AbortSignal): Promise<ConsoleAnswerCheckpoint> {
+    const saved = this.store.step(job.id, "console-answers");
+    if (saved?.state === "done") return JSON.parse(saved.body!);
+    const evidence = await this.consolePages("/scans/" + scanId + "/observations", signal);
+    signal.throwIfAborted();
+    return this.store.db.transaction(() => {
+      const observationIds: [string, string][] = [];
+      for (const row of evidence) {
+        if (row.status === "missing_observation" || !row.answer_text?.trim()) continue;
+        const citations = safeCitations(Array.isArray(row.citations) ? row.citations : []);
+        const answer: Observation = {
+          id: randomUUID(),
+          projectId: project.id,
+          jobId: job.id,
+          prompt: row.prompt,
+          provider: "console",
+          platform: row.platform,
+          model: row.model ?? "not-disclosed",
+          locale: row.locale ?? project.locale,
+          observedAt: row.observed_at ?? completedAt,
+          answer: row.answer_text,
+          citations,
+          retrievedSources: otherSearchLinks(row.retrieved_sources, citations),
+          surface: ["api", "consumer_interface"].includes(row.surface) ? row.surface : "unknown",
+          mentioned: ["cited", "named"].includes(row.presence),
+          cited: row.presence === "cited",
+          costUsd: null,
+        };
+        this.store.put("observation", project.id, job.id, answer);
+        observationIds.push([row.id, answer.id]);
+      }
+      const saved = { observations: evidence.length, observationIds };
+      this.store.setStep(job.id, "console-answers", "done", saved);
+      return saved;
+    })();
+  }
+
+  private async saveConsoleFindings(job: Job, project: Project, domainId: string, scanId: string, answers: ConsoleAnswerCheckpoint, signal: AbortSignal) {
+    const saved = this.store.step(job.id, "console-evidence");
+    if (saved?.state === "done")
+      return (JSON.parse(saved.body!).findings as number | undefined) ?? this.store.artifacts(project.id, "finding", job.id).length;
+    const findings: any[] = [];
+    for (const kind of ["diagnoses", "opportunities"])
+      findings.push(...await this.consolePages("/domains/" + domainId + "/insights/" + kind + "?scan_id=" + scanId, signal));
+    signal.throwIfAborted();
+    const observationIds = new Map(answers.observationIds);
+    this.store.db.transaction(() => {
+      for (const row of findings)
+        this.store.put("finding", project.id, job.id, {
+          id: randomUUID(),
+          projectId: project.id,
+          jobId: job.id,
+          title: row.title,
+          description: row.description,
+          priority: row.priority ?? "medium",
+          targetUrl: row.target_url ?? "https://" + project.domain,
+          evidenceIds: (row.evidence ?? [])
+            .map((e: any) => observationIds.get(e.observation_id))
+            .filter(Boolean),
+          steps: row.steps ?? [],
+          confidence: "inferred",
+          status: "open",
+          kind: "console",
+          remoteId: row.id,
+          evidenceAsOf: row.evidence_as_of,
+          remoteScanId: row.scan_id,
+        });
+      this.store.setStep(job.id, "console-evidence", "done", { observations: answers.observations, findings: findings.length });
+    })();
+    return findings.length;
   }
   private consoleScanCreditUnit(job: Job) {
     const price = this.store.step(job.id, 'console-scan-credit-usd');

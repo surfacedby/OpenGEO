@@ -51,7 +51,8 @@ export function completedMeasurement(job: Job) {
   if (!["measure", "recheck"].includes(job.kind)) return false;
   if (job.status === "completed") return true;
   const result = portableJobResult(job);
-  return !!result && result.metrics.missing === 0 && !!result.collectionCompletedAt;
+  // A settled Console check can report missing answers without more collection still pending.
+  return !!result?.collectionCompletedAt && (job.provider === 'console' || result.metrics.missing === 0);
 }
 
 /** Brand-wide readings skip topic checks, which ask only part of the brand's questions. */
