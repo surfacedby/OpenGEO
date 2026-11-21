@@ -36,7 +36,7 @@ import {
   competitorEvidence,
 } from "./analysis.js";
 import { exportProject, reportMarkdown } from "./export.js";
-import { publicObservation, publicJob, publicArtifact } from './public-results.js';
+import { publicObservation, publicJob, publicArtifact, publicSchedule } from './public-results.js';
 import { askActivity, registerAsks } from "./asks.js";
 import { htmlDocument } from "./markdown.js";
 import { RemoteAccess, securityHeaders, type RemoteConfig } from "./remote-access.js";
@@ -623,8 +623,11 @@ export async function createApp(
     connections.acknowledgePlan();
     return { acknowledged: true };
   });
-  app.get("/api/schedules", () => scheduler.list());
-  app.post("/api/schedules", (req) => scheduler.add(req.body, z.string().min(8).max(200).parse(req.headers["idempotency-key"])));
+  app.get("/api/schedules", () => scheduler.list().map(publicSchedule));
+  app.post("/api/schedules", (req) => {
+    const key = z.string().min(8).max(200).parse(req.headers["idempotency-key"]);
+    return publicSchedule(scheduler.add(req.body, key));
+  });
   app.delete("/api/schedules/:id", (req) => {
     scheduler.remove((req.params as any).id);
     return { removed: true };

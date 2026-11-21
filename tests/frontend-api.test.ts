@@ -44,6 +44,18 @@ test('browser request helper can remove schedules and connections over actual HT
     await assert.rejects(api('/schedules', request, 'POST', key), /was removed/);
     assert.equal(scheduler.list().length, 0);
     assert.ok(!JSON.stringify(await api('/backup')).includes(key));
+    const privateModel = 'private-scheduled-model';
+    const scheduledCheck = { ...request, monthlyBudgetUsd: 3, job: {
+      projectId: project.id, kind: 'recheck', provider: 'openrouter', platform: 'chat_gpt', model: privateModel, maxCostUsd: 1,
+    } };
+    const scheduledCheckKey = 'check-schedule-approved-fixture';
+    const check = await api('/schedules', scheduledCheck, 'POST', scheduledCheckKey);
+    assert.equal(Object.hasOwn(check.job, 'model'), false);
+    assert.deepEqual(await api('/schedules', scheduledCheck, 'POST', scheduledCheckKey), check);
+    assert.deepEqual(await api('/schedules'), [check]);
+    assert.equal(scheduler.list()[0].job.model, privateModel);
+    scheduler.tick(new Date(check.nextAt));
+    assert.equal(store.jobs(project.id)[0].model, privateModel);
     vault.set('openrouter', { key: ['synthetic', 'fixture', 'key'].join('-') });
     await api('/providers/openrouter', undefined, 'DELETE');
     assert.equal(vault.status().openrouter, false);

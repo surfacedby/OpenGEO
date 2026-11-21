@@ -1,4 +1,5 @@
 import type { Job, Observation } from './contracts.js';
+import type { Schedule } from './scheduler.js';
 export type PublicObservation = Omit<Observation, 'model' | 'surface'>;
 
 /** Keep collection details in local evidence for comparison integrity, outside the presentation contract. */
@@ -16,4 +17,10 @@ export function publicArtifact<T>(value: T): T {
 
 export function publicJob({ model: _model, ...job }: Job) {
   return { ...job, result: publicArtifact(job.result) };
+}
+
+/** Keep the execution choice in the scheduler without echoing it to the client. */
+export function publicSchedule(schedule: Schedule) {
+  const { model: _model, ...job } = schedule.job;
+  return { ...schedule, job };
 }
