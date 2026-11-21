@@ -241,18 +241,27 @@ export class Runner {
     }
     return this.store.job(id);
   }
+  private consoleResumeBlock(id: string) {
+    if (this.store.unconfirmedConsoleScan(id)) return unconfirmedConsoleScanError();
+    const saved = this.store.step(id, 'console-scan');
+    if (saved?.state === 'done' && !consoleScanReceipt.safeParse(JSON.parse(saved.body!)).success)
+      return unconfirmedConsoleScanError();
+    return null;
+  }
   resumePreview(id: string) {
     const job = this.store.job(id);
     const uncertain = this.store.db.prepare("SELECT COUNT(*) AS count FROM steps WHERE job_id=? AND " +
       "(state='started' OR (step='console-scan' AND state='approved-retry'))").get(id) as { count: number };
-    return { maxCostUsd: job.maxCostUsd, spentUsd: job.spentUsd, uncertainRequests: uncertain.count, provider: job.provider, reason: job.error, scheduledBudgetCeilingUsd: scheduledBudgetCeiling(this.store, job) };
+    return { maxCostUsd: job.maxCostUsd, spentUsd: job.spentUsd, uncertainRequests: uncertain.count, provider: job.provider, reason: job.error,
+      scheduledBudgetCeilingUsd: scheduledBudgetCeiling(this.store, job), blockedReason: this.consoleResumeBlock(id)?.message ?? null };
   }
   resume(id: string, reviewed: boolean, maxCostUsd?: number) {
     const job = this.store.job(id);
     const stoppedDiscovery = job.status === 'cancelled' && job.kind === 'audit' && job.background && !job.provider;
     if (job.status !== "paused" && !stoppedDiscovery) throw new Error("Only paused jobs or stopped website discovery can resume");
     if (this.cancelling.has(id)) throw new ProviderError('in_progress', 'Wait for website discovery to finish stopping before resuming.');
-    if (this.store.unconfirmedConsoleScan(id)) throw unconfirmedConsoleScanError();
+    const block = this.consoleResumeBlock(id);
+    if (block) throw block;
     if (this.resumePreview(id).uncertainRequests && !reviewed)
       throw new ProviderError("review", "Review uncertain provider requests before resuming.");
     if (job.error === "approval" && !reviewed)

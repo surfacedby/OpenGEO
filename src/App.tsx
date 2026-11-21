@@ -74,6 +74,7 @@ import { TopicLens, Topics, TopicVisibility, useTopicView, type TopicCheckAction
 import type { PublicObservation as Observation } from '../server/public-results';
 import { TopicDialog } from "./TopicDialog";
 import type { Presentation } from "../server/presentation";
+import type { Runner } from "../server/workflows";
 import identity from "../brand/identity.json";
 import type {
   Topic,
@@ -847,7 +848,20 @@ function Jobs({
   jobs: Job[];
   run: (f: () => Promise<unknown>) => Promise<void>;
 }) {
-  const [review, setReview] = useState<{ id: string; uncertainRequests: number; maxCostUsd: number; spentUsd: number; provider: Provider; reason: string; scheduledBudgetCeilingUsd?: number } | null>(null), [reviewError, setReviewError] = useState(""), [resuming, setResuming] = useState(false);
+  type ResumePreview = ReturnType<Runner['resumePreview']>;
+  const [review, setReview] = useState<(ResumePreview & { id: string }) | null>(null);
+  const [reviewError, setReviewError] = useState("");
+  const [resuming, setResuming] = useState(false);
+
+  function reviewJob(id: string, checkCancellation = false) {
+    setReviewError("");
+    void run(async () => {
+      const preview = await api<ResumePreview>("/jobs/" + id + "/resume-preview");
+      if (checkCancellation && !preview.blockedReason) await api("/jobs/" + id + "/cancel", {});
+      else setReview({ ...preview, id });
+    });
+  }
+
   return jobs.length ? (
     <ul className="jobs">
       {jobs.map((j) => (
@@ -866,9 +880,9 @@ function Jobs({
           {j.status === "paused" && (
             <button
               className="secondary"
-              onClick={() => { setReviewError(""); void run(async () => { const receipt = await api<Omit<NonNullable<typeof review>, "id">>("/jobs/" + j.id + "/resume-preview"); setReview({ ...receipt, id: j.id }); }); }}
+              onClick={() => reviewJob(j.id)}
             >
-              {j.error === "approval" ? "Review price" : "Resume"}
+              {j.error === "approval" ? "Review price" : j.provider === 'console' && ['measure', 'recheck'].includes(j.kind) ? "Review check" : "Resume"}
             </button>
           )}
           {["running", "queued", "paused"].includes(j.status) && (
@@ -883,8 +897,16 @@ function Jobs({
             </button>
           )}
           {j.status === "failed" && <button className="text-button" onClick={() => void run(() => api("/jobs/" + j.id + "/dismiss", {}))}>Dismiss</button>}
-          {j.status === 'cancelled' && j.error === 'cancel_remote' && <button className="secondary" onClick={() => void run(() => api('/jobs/' + j.id + '/cancel', {}))}>Check cancellation</button>}
-          {review?.id === j.id && <form className="resume-review" onSubmit={(event) => {
+          {j.status === 'cancelled' && j.error === 'cancel_remote' && <button className="secondary" onClick={() => reviewJob(j.id, true)}>Check cancellation</button>}
+          {review?.id === j.id && review.blockedReason && <section className="resume-review">
+            <h3>Check needs review</h3>
+            <p role="status">{review.blockedReason}</p>
+            <div className="button-row">
+              <a className="secondary" href="https://console.surfacedby.com/dashboard" target="_blank" rel="noreferrer">Open SurfacedBy Console <ArrowUpRight size={14} /></a>
+              <button type="button" className="secondary" onClick={() => setReview(null)}>Close</button>
+            </div>
+          </section>}
+          {review?.id === j.id && !review.blockedReason && <form className="resume-review" onSubmit={(event) => {
             event.preventDefault(); const data = new FormData(event.currentTarget); setResuming(true); setReviewError("");
             void run(async () => { try { await api("/jobs/" + j.id + "/resume", { reviewed: review.reason === "approval" || data.get("reviewed") === "on", ...(data.has("budget") ? { maxCostUsd: Number(data.get("budget")) } : {}) }); setReview(null); } catch (failure) { setReviewError((failure as Error).message); } }).finally(() => setResuming(false));
           }}><h3>{review.reason === "approval" ? "Approve this run" : "Resume this run"}</h3><p>{review.reason === "approval" ? j.progress : review.uncertainRequests ? "A previous request may have completed. Check your provider's activity before allowing another attempt." : j.error === "quota" ? "Resume when your provider's limits allow requests again. Saved results will be kept." : "Saved results will be kept. Resolve the issue shown above before continuing."}</p>
