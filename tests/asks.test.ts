@@ -212,6 +212,8 @@ test('the whole ask request is immutable across concurrent retries and unavailab
   const f = await fixture();
   try {
     const input = { question, engines: ['chatgpt', 'surfacedby-chatgpt'], maxCostUsd: 1 };
+    const receipt = (projectId = f.project.id) => f.app.inject({ url: `/api/projects/${projectId}/asks/receipts/stable-request`, headers });
+    assert.deepEqual((await receipt()).json(), { askId: null, deleted: false });
     const responses = await Promise.all([f.ask(input, 'stable-request'), f.ask(input, 'stable-request')]);
     assert.deepEqual(responses.map(row => row.statusCode), [200, 200]);
     assert.deepEqual(responses[0].json(), responses[1].json());
@@ -225,8 +227,13 @@ test('the whole ask request is immutable across concurrent retries and unavailab
       assert.equal(refused.json().code, 'idempotency');
     }
     f.state.platforms = [];
+    const earlier = f.state.estimates.length;
+    assert.deepEqual((await receipt()).json(), { askId: responses[0].json().askId, deleted: false });
+    const other = f.store.createProject(projectInput.parse({ domain: 'example.org', brand: 'Other' }));
+    assert.deepEqual((await receipt(other.id)).json(), { askId: null, deleted: false });
     assert.deepEqual((await f.ask(input, 'stable-request')).json(), responses[0].json());
     assert.equal(f.store.jobs(f.project.id).length, 2);
+    assert.equal(f.state.estimates.length, earlier);
     assert.equal(f.state.purchases.length, 0);
   } finally { await f.close(); }
 });
@@ -239,6 +246,8 @@ test('deleting an ask leaves a content-free retry tombstone and deleting its bra
     await f.runner.tick();
     f.store.deleteAsk(f.project.id, askId);
     assert.equal((await f.ask(input, 'delete-retry')).statusCode, 409);
+    assert.deepEqual((await f.app.inject({ url: `/api/projects/${f.project.id}/asks/receipts/delete-retry`, headers })).json(),
+      { askId: null, deleted: true });
     assert.equal(f.store.jobs(f.project.id).length, 0);
     const receipt = f.store.db.prepare('SELECT * FROM ask_requests WHERE id=?').get(askId);
     assert.ok(receipt);

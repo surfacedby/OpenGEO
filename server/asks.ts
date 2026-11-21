@@ -92,6 +92,7 @@ export const askEngineKey = z.union([
 const engineList = z.array(askEngineKey).min(1, "Choose at least one engine").max(44)
   .refine(list => new Set(list).size === list.length, "Choose each engine once");
 const askInput = z.object({ question, engines: engineList, maxCostUsd: z.number().finite().min(0).max(1000).default(0) }).strict();
+const askRequestKey = z.string().min(8).max(200);
 
 /** Quote the same single question without submitting a measurement job. */
 async function surfacedByQuote(deps: AskDeps, project: Project, domainId: string, text: string, platform: string) {
@@ -284,12 +285,20 @@ export function trackAsk(deps: AskDeps, projectId: string, askId: string, body: 
 }
 
 export function registerAsks(app: FastifyInstance, deps: AskDeps) {
-  const ids = (req: { params: unknown }) => req.params as { id: string; ask: string };
+  const ids = (req: { params: unknown }) => req.params as { id: string; ask: string; key: string };
   app.get("/api/projects/:id/asks/engines", async (req) => { deps.store.project(ids(req).id); return engineCatalog(deps); });
   app.post("/api/projects/:id/asks/estimate", (req) => estimateAsk(deps, ids(req).id, req.body));
   app.get("/api/projects/:id/asks", (req) => listAsks(deps.store, ids(req).id));
   app.post("/api/projects/:id/asks", (req) =>
-    createAsk(deps, ids(req).id, req.body, z.string().min(8).max(200).parse(req.headers["idempotency-key"])));
+    createAsk(deps, ids(req).id, req.body, askRequestKey.parse(req.headers["idempotency-key"])));
+  app.get("/api/projects/:id/asks/receipts/:key", (req) => {
+    const { id, key } = ids(req);
+    deps.store.project(id);
+    const askId = askIdFor(id, askRequestKey.parse(key));
+    const row = deps.store.db.prepare("SELECT result FROM ask_requests WHERE id=? AND project_id=?")
+      .get(askId, id) as { result: string | null } | undefined;
+    return { askId: row?.result ? askId : null, deleted: row?.result === null };
+  });
   app.get("/api/projects/:id/asks/:ask", (req) => readAsk(deps.store, ids(req).id, ids(req).ask));
   app.post("/api/projects/:id/asks/:ask/track", (req) => trackAsk(deps, ids(req).id, ids(req).ask, req.body));
   app.delete("/api/projects/:id/asks/:ask", (req) => {

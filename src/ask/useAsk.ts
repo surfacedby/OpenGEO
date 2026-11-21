@@ -11,6 +11,31 @@ export type AskDetail = ReturnType<typeof readAsk>;
 export type AskEngine = AskDetail['engines'][number];
 export type AskList = ReturnType<typeof listAsks>;
 
+type AskReceipt = { askId: string | null; deleted: boolean };
+const pendingAskKey = (projectId: string) => 'opengeo.pending-asks.' + projectId;
+
+/** Keep only request identifiers and input digests across a reload of this tab. */
+function savedAskAttempts(projectId: string): Map<string, string> {
+  try {
+    const entries: unknown = JSON.parse(sessionStorage.getItem(pendingAskKey(projectId)) ?? '[]');
+    return new Map(Array.isArray(entries) ? entries.filter(entry => Array.isArray(entry)
+      && typeof entry[0] === 'string' && /^[a-f0-9]{64}$/.test(entry[0])
+      && typeof entry[1] === 'string' && /^[a-f0-9-]{36}$/.test(entry[1])) : []);
+  } catch { return new Map(); }
+}
+
+function saveAskAttempt(projectId: string, fingerprint: string, key?: string) {
+  try {
+    const saved = savedAskAttempts(projectId);
+    if (key) saved.set(fingerprint, key); else saved.delete(fingerprint);
+    if (saved.size) sessionStorage.setItem(pendingAskKey(projectId), JSON.stringify([...saved]));
+    else sessionStorage.removeItem(pendingAskKey(projectId));
+  } catch { /* In-memory retries still work if the browser denies storage. */ }
+}
+
+const readAskReceipt = (projectId: string, key: string) =>
+  api<AskReceipt>('/projects/' + projectId + '/asks/receipts/' + encodeURIComponent(key));
+
 /** One ask in progress: the question, the chosen engines and the limit, shared by the header and the settings drawer. */
 export function useAskController(projectId: string | undefined, onAsked: (askId: string) => void, connectionRevision = '') {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
@@ -28,6 +53,10 @@ export function useAskController(projectId: string | undefined, onAsked: (askId:
   const scope = projectId + '|' + connectionRevision;
   const currentScope = useRef(scope);
   currentScope.current = scope;
+  const onAskedRef = useRef(onAsked);
+  onAskedRef.current = onAsked;
+  const editingAsk = useRef(false);
+  editingAsk.current = open || !!question.trim();
   const submitting = useRef(false);
   const preselected = useRef<{ scope: string; engines: string[] } | null>(null);
   const attempts = useRef(new Map<string, string>());
@@ -61,6 +90,27 @@ export function useAskController(projectId: string | undefined, onAsked: (askId:
   useEffect(() => { cache.current = null; setCatalog(null); setChoice([]); setOpen(false); setEstimate(null); setError(''); }, [scope]);
   useEffect(() => { setQuestion(''); }, [projectId]);
   useEffect(() => { if (open) void ensureCatalog(); }, [open, ensureCatalog]);
+  useEffect(() => {
+    if (!projectId) return;
+    let active = true;
+    void (async () => {
+      for (const [fingerprint, key] of [...savedAskAttempts(projectId)].reverse()) {
+        const receipt = await readAskReceipt(projectId, key).catch(() => null);
+        if (!active || currentScope.current !== scope || submitting.current || editingAsk.current) return;
+        if (receipt?.askId || receipt?.deleted) {
+          attempts.current.delete(fingerprint);
+          saveAskAttempt(projectId, fingerprint);
+        }
+        if (receipt?.askId) {
+          preselected.current = null;
+          setOpen(false); setQuestion(''); setEstimate(null);
+          onAskedRef.current(receipt.askId);
+          return;
+        }
+      }
+    })();
+    return () => { active = false; };
+  }, [projectId, scope]);
 
   const chosen = catalog?.engines.filter(engine => choice.includes(engine.id)) ?? [];
   const paid = chosen.filter(engine => engine.price !== 'free');
@@ -117,12 +167,16 @@ export function useAskController(projectId: string | undefined, onAsked: (askId:
       if (!picked.length) { setOpen(true); setError('Choose at least one engine.'); return; }
       if (paying && (!catalog || !priced || fit.overLimit)) { setOpen(true); return; }
       const input = { question: trimmed, engines: [...engines].sort(), maxCostUsd: paying ? limitUsd : 0 };
-      const fingerprint = projectId + '|' + JSON.stringify(input);
-      const requestKey = attempts.current.get(fingerprint) ?? crypto.randomUUID();
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(projectId + '|' + JSON.stringify(input)));
+      if (currentScope.current !== scope) return;
+      const fingerprint = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+      const requestKey = attempts.current.get(fingerprint) ?? savedAskAttempts(projectId).get(fingerprint) ?? crypto.randomUUID();
       attempts.current.set(fingerprint, requestKey);
+      saveAskAttempt(projectId, fingerprint, requestKey);
       const result = await api<{ askId: string }>('/projects/' + projectId + '/asks',
         input, 'POST', requestKey);
       attempts.current.delete(fingerprint);
+      saveAskAttempt(projectId, fingerprint);
       if (currentScope.current !== scope) return;
       // The engine choice resets to the free engine after every ask, so Enter in the header never spends money.
       setOpen(false); setChoice(freeOf(loaded)); setEstimate(null); setQuestion('');
