@@ -27,7 +27,7 @@ type Fake = {
   advertised?: { key: string; name: string; enabled: boolean }[]; publicResults?: boolean;
   quotedUsd?: string; quoteExpiry?: Record<string, string>; creditsByPlatform?: Record<string, number>;
   waiting?: boolean; balanceCredits?: number; rejectedPlatform?: string;
-  advertisedCredits?: Record<string, number>; domainReads: number; registrations: number;
+  advertisedCredits?: Record<string, number>; domainReads: number; registrations: number; brandWrites: number;
   registrationResult?: 'concurrent' | 'wrong-domain' | 'other-conflict';
 };
 function fakeProviders(state: Fake) {
@@ -73,7 +73,10 @@ function fakeProviders(state: Fake) {
       if (duplicate) return json({ type: 'https://docs.surfacedby.com/v1/api/errors#domain_already_tracked' }, 409);
       return json({ data: { id: domain, domain: state.registrationResult === 'wrong-domain' ? 'other.example' : body.domain } }, 201);
     }
-    if (path.endsWith('/brand')) return json({ data: {} });
+    if (path.endsWith('/brand')) {
+      state.brandWrites++;
+      return json({ data: {} });
+    }
     if (path.endsWith('/measurement/estimate')) {
       if (body.platform === state.rejectedPlatform)
         return json({ type: 'https://docs.surfacedby.com/errors#validation_error', detail: 'Question unsupported' }, 422);
@@ -112,7 +115,7 @@ async function fixture(overrides: Partial<Fake> = {}) {
   vault.set('chatgpt', { active: 'test-account', profiles: [{ id: 'test-account', access_token: 'synthetic-access', expiresAt: Date.now() + 3600000, scopes: ['chatgpt.tokens.use.direct'] }] });
   vault.set('console', { key: 'synthetic-console-credential' });
   const state: Fake = { credits: 1, platforms: ['chatgpt', 'gemini'], missing: [], chatgptFails: false, domainKnown: true,
-    estimates: [], purchases: [], openai: [], domainReads: 0, registrations: 0, ...overrides };
+    estimates: [], purchases: [], openai: [], domainReads: 0, registrations: 0, brandWrites: 0, ...overrides };
   const original = globalThis.fetch;
   globalThis.fetch = fakeProviders(state);
   const { app, runner } = await createApp(store, vault, session);
@@ -152,7 +155,7 @@ test('Console discovers new engines without a client release and rejects unavail
   } finally { await f.close(); }
 });
 
-test('an ask collects each engine once and keeps its answers out of the website\'s evidence', async () => {
+test('an ask collects each engine once without changing website settings or tracked evidence', async () => {
   const f = await fixture();
   try {
     const check = f.store.enqueue(jobInput.parse({ projectId: f.project.id, kind: 'measure', provider: 'chatgpt', model: 'fixture-model' }), 'evidence-check');
@@ -180,6 +183,7 @@ test('an ask collects each engine once and keeps its answers out of the website\
     assert.equal('surface' in app.answer, false);
     assert.equal('model' in app.answer, false);
     assert.equal(app.answer.cited, true);
+    assert.equal(f.state.brandWrites, 0);
     assert.deepEqual(f.state.purchases.map(row => row.approved_credits), [1, 1]);
     assert.ok(f.state.estimates.every(row => row.questions.length === 1 && row.questions[0].question === question));
     assert.equal(result.spentUsd, .2);

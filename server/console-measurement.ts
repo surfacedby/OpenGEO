@@ -63,12 +63,16 @@ export async function consoleMeasurement(runner: Runner, job: Job, project: Proj
   const { output, input } = await consoleManaged(runner, job, project, signal, async () => {
     if (project.prompts.length > 100 || project.prompts.some(question => question.length > 500))
       throw new ProviderError("evidence", "This connection supports up to 100 questions of 500 characters each per selected-question check.");
-    const domain = JSON.parse(runner.store.step(job.id, "console-domain")!.body!);
-    await runner.once(job, "console-brand", () => runner.providers.console("/domains/" + domain.id + "/brand",
-      { brand_name: project.brand, aliases: project.aliases, country: new Intl.Locale(project.locale).region }, job.id + ":brand", signal, "PATCH"));
+    const country = new Intl.Locale(project.locale).region;
+    // Ask scores mentions locally. Its question and country travel with the quote, so it need not edit shared settings.
+    if (job.kind !== "ask") {
+      const domain = JSON.parse(runner.store.step(job.id, "console-domain")!.body!);
+      await runner.once(job, "console-brand", () => runner.providers.console("/domains/" + domain.id + "/brand",
+        { brand_name: project.brand, aliases: project.aliases, country }, job.id + ":brand", signal, "PATCH"));
+    }
     return { questions: project.prompts.map(question => ({ id: randomUUID(), question })),
       platform: job.platform === "chat_gpt" ? "chatgpt" : job.platform, locale: project.locale,
-      country: new Intl.Locale(project.locale).region ?? null };
+      country: country ?? null };
   }, resultSchema, true);
   const result = save(runner, job, project, input, output);
   if (output.job.status !== "completed")
