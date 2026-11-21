@@ -8,6 +8,25 @@ foreach ($reviewPath in @($Installer, $Installation, $Receipt)) {
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 Add-Type -Path (Join-Path $PSScriptRoot 'installer-controls.cs')
+
+function Read-InstallerControls($Elements) {
+    $page = @{launch=0; shortcut=0; finish=0; next=0; observed=@()}
+    foreach ($element in $Elements) {
+        $current = $element.Current
+        $label = ([string]$current.Name).Replace('&', '').Trim()
+        $handle = $current.NativeWindowHandle
+        $nativeClass = if ($handle) { [InstallerControls]::ClassName($handle) } else { '' }
+        $enabled = $current.IsEnabled
+        $page.observed += @{label=$label; nativeClass=$nativeClass; enabled=$enabled}
+        if ($nativeClass -ne 'Button' -or !$enabled) { continue }
+        if ($label -eq 'Open OpenGEO') { $page.launch = $handle }
+        if ($label -eq 'Create a desktop shortcut') { $page.shortcut = $handle }
+        if ($label -eq 'Finish') { $page.finish = $handle }
+        if ($label -in @('Next >', 'Next', 'Install')) { $page.next = $handle }
+    }
+    return $page
+}
+
 $process = $null
 if ($Attach) {
     $attachDeadline = [DateTime]::UtcNow.AddSeconds(30)
@@ -25,36 +44,35 @@ $finishVerified = $false
 $observed = @()
 try {
     while ([DateTime]::UtcNow -lt $deadline -and -not $process.HasExited) {
-        $window = [Windows.Automation.AutomationElement]::RootElement.FindFirst([Windows.Automation.TreeScope]::Children, [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ProcessIdProperty, $process.Id))
-        if ($null -eq $window) { Start-Sleep -Milliseconds 200; continue }
-        $elements = $window.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition)
-        $launch = $null; $shortcut = $null; $finish = $null; $next = $null
-        $observed = @()
-        foreach ($element in $elements) {
-            $label = $element.Current.Name.Replace('&', '').Trim()
-            $handle = $element.Current.NativeWindowHandle
-            $nativeClass = if ($handle) { [InstallerControls]::ClassName($handle) } else { '' }
-            $observed += @{label=$label; nativeClass=$nativeClass; enabled=$element.Current.IsEnabled}
-            if ($label -eq 'Open OpenGEO') { $launch = $element }
-            if ($label -eq 'Create a desktop shortcut') { $shortcut = $element }
-            if ($nativeClass -eq 'Button' -and $element.Current.IsEnabled) {
-                if ($label -eq 'Finish') { $finish = $element }
-                if ($label -in @('Next >', 'Next', 'Install')) { $next = $element }
+        try {
+            $window = [Windows.Automation.AutomationElement]::RootElement.FindFirst([Windows.Automation.TreeScope]::Children, [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ProcessIdProperty, $process.Id))
+            if ($null -eq $window) { Start-Sleep -Milliseconds 200; continue }
+            $elements = $window.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition)
+            $page = Read-InstallerControls $elements
+            $observed = $page.observed
+        } catch {
+            # NSIS destroys the outgoing page's controls when it opens the next one.
+            $errorCause = $_.Exception.GetBaseException()
+            if ($errorCause -isnot [Windows.Automation.ElementNotAvailableException] -and
+                ($errorCause -isnot [ComponentModel.Win32Exception] -or $errorCause.NativeErrorCode -ne 1400)) {
+                throw
             }
+            Start-Sleep -Milliseconds 200
+            continue
         }
-        if ($finish -and $launch -and $shortcut) {
-            $launchHandle = $launch.Current.NativeWindowHandle
-            $shortcutHandle = $shortcut.Current.NativeWindowHandle
+        if ($page.finish -and $page.launch -and $page.shortcut) {
+            $launchHandle = $page.launch
+            $shortcutHandle = $page.shortcut
             if ([InstallerControls]::CheckState($launchHandle) -ne 0) { [InstallerControls]::Click($launchHandle) }
             if ([InstallerControls]::CheckState($shortcutHandle) -ne 1) { [InstallerControls]::Click($shortcutHandle) }
             $toggleDeadline = [DateTime]::UtcNow.AddSeconds(5)
             while (([InstallerControls]::CheckState($launchHandle) -ne 0 -or [InstallerControls]::CheckState($shortcutHandle) -ne 1) -and [DateTime]::UtcNow -lt $toggleDeadline) { Start-Sleep -Milliseconds 50 }
             if ([InstallerControls]::CheckState($launchHandle) -ne 0 -or [InstallerControls]::CheckState($shortcutHandle) -ne 1) { throw 'Finish checkboxes did not retain independent selections.' }
-            [InstallerControls]::Click($finish.Current.NativeWindowHandle)
+            [InstallerControls]::Click($page.finish)
             $finishVerified = $true
             break
         }
-        if ($next) { [InstallerControls]::Click($next.Current.NativeWindowHandle) }
+        if ($page.next) { [InstallerControls]::Click($page.next) }
         Start-Sleep -Milliseconds 200
     }
     if (-not $finishVerified -or -not $process.WaitForExit(30000) -or $process.ExitCode -ne 0) { throw 'The actual installer finish screen did not complete successfully.' }

@@ -5,7 +5,7 @@ using System.Text;
 
 // NSIS controls can appear as UI Automation panes. Use their actual Win32 class and state.
 public static class InstallerControls {
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr handle, StringBuilder name, int count);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern int GetClassName(IntPtr handle, StringBuilder name, int count);
     [DllImport("user32.dll", SetLastError = true)] static extern bool PostMessage(IntPtr handle, uint message, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SendMessageTimeout(IntPtr handle, uint message, IntPtr wParam, IntPtr lParam, uint flags, uint timeout, out IntPtr result);
     public static string ClassName(int handle) {
