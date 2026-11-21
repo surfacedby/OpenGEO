@@ -47,7 +47,7 @@ Engine availability comes from your connected account. Full checks and single-qu
 
 DeepSeek runs visibility checks (all questions or one topic, on demand or on a schedule) and one-off Asks. It collects answers only: recommendations, question suggestions, competitor reviews and content stay with your other connections. Paste an API key from the [DeepSeek platform](https://platform.deepseek.com/api_keys); OpenGEO checks it against DeepSeek's balance endpoint before saving it. The key is sent to `api.deepseek.com` and nowhere else.
 
-An answer uses DeepSeek's chat API with its [search API](https://api-docs.deepseek.com/guides/search) offered to the model as a tool. The model decides what to search, up to four searches per answer, and OpenGEO runs each search and returns the results. After the fourth search the model must answer with what it has. `deepseek-flash` is the default model, and thinking mode is off.
+DeepSeek can search the web automatically during a check or Ask, with up to four searches per answer. OpenGEO shows the reported searches and cited pages with the answer.
 
 DeepSeek bills input tokens (less when its cache is hit), output tokens, and $0.75 per 1,000 searches that return results. Peak-hour rates, 01:00 to 04:00 and 06:00 to 10:00 UTC on weekdays, are twice the off-peak rates. OpenGEO keeps a dated copy of the [published prices](https://api-docs.deepseek.com/quick_start/pricing) and costs each answer from the token counts DeepSeek reports, at the rate in force when each request started. DeepSeek does not report a charge, so the recorded cost is labelled as an estimate. DeepSeek bills Chinese public holidays off-peak; OpenGEO costs them at peak, which errs high.
 

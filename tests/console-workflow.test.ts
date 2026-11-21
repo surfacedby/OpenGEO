@@ -73,7 +73,7 @@ test("Console check totals and public citations survive project edits, dashboard
   const runtime = await createApp(store, vault, "synthetic-local-session");
   const original = globalThis.fetch;
   let submitted = 0, evidenceReads = 0, previewCount: unknown = 3, finalCount = 3, hasRecommendation = true;
-  let analysis = async () => json({ analysis_status: "available" });
+  let analysis = async () => json({ scan_id: "fixture-scan", analysis_status: "available" });
   // Supplier HTTP fixtures exercise the production adapter, queue, projections and SQLite writes.
   globalThis.fetch = (async (url, init) => {
     const path = new URL(String(url)).pathname.replace("/api/v1/console", "");
@@ -93,23 +93,23 @@ test("Console check totals and public citations survive project edits, dashboard
     if (path.endsWith("/observations")) {
       evidenceReads++;
       return json([
-        { id: "remote-answer-1", prompt: "First question?", platform: "chatgpt", model: "fixture-model", status: "collected",
+        { id: "remote-answer-1", scan_id: "fixture-scan", prompt: "First question?", platform: "chatgpt", model: "fixture-model", status: "collected",
           surface: "consumer_interface",
           answer_text: "Example provides examples.", presence: "cited", citations: [null, "unusable annotation", { url_citation: "unusable nested annotation" },
             { url: "https://example.com/", title: null, supplier_secret: "synthetic-hidden-field" }, { url: "javascript:alert(1)" }, { url: "https://example.com/" }] },
-        { id: "remote-answer-2", prompt: "Second question?", platform: "chatgpt", model: "fixture-model", status: "collected",
+        { id: "remote-answer-2", scan_id: "fixture-scan", prompt: "Second question?", platform: "chatgpt", model: "fixture-model", status: "collected",
           answer_text: "Other examples.", presence: "missing", citations: [] },
-        { id: "remote-answer-3", prompt: "Third question?", platform: "chatgpt", status: "missing_observation", answer_text: null },
+        { id: "remote-answer-3", scan_id: "fixture-scan", prompt: "Third question?", platform: "chatgpt", status: "missing_observation", answer_text: null },
       ]);
     }
     if (path.endsWith("/insights/opportunities")) return json([
       {
-        id: "historical-gap", title: "AI answers without citing you", description: "No page action is decided for this question yet.",
+        id: "historical-gap", scan_id: "fixture-scan", title: "AI answers without citing you", description: "No page action is decided for this question yet.",
         priority: "medium", target_url: null, recommendation_eligible: false,
         evidence: [{ observation_id: "remote-answer-1" }], steps: [],
       },
       ...(hasRecommendation ? [{
-        id: "remote-finding-1", title: "Compare the available examples", description: "Show which examples fit each use case.",
+        id: "remote-finding-1", scan_id: "fixture-scan", title: "Compare the available examples", description: "Show which examples fit each use case.",
         priority: "medium", target_url: "https://example.com/examples", recommendation_eligible: true,
         evidence: [{ observation_id: "remote-answer-1" }], steps: ["Explain who each example is for."],
       }] : []),
@@ -194,7 +194,7 @@ test("Console check totals and public citations survive project edits, dashboard
     analysis = async () => {
       arrived();
       await holdAnalysis;
-      return json({ analysis_status: "unavailable" });
+      return json({ scan_id: "fixture-scan", analysis_status: "unavailable" });
     };
     const waiting = enqueue("console-answers-before-analysis");
     const tick = runtime.runner.tick();
@@ -217,7 +217,7 @@ test("Console check totals and public citations survive project edits, dashboard
     assert.equal(runtime.runner.resumePreview(waiting.id).uncertainRequests, 0);
     const gathered = store.observations(project.id, waiting.id);
     const readsBeforeResume = evidenceReads;
-    analysis = async () => json({ analysis_status: "available" });
+    analysis = async () => json({ scan_id: "fixture-scan", analysis_status: "available" });
     runtime.runner.resume(waiting.id, false);
     await runtime.runner.tick();
     assert.equal(submitted, 4);
@@ -226,7 +226,7 @@ test("Console check totals and public citations survive project edits, dashboard
     const [recommendation] = store.artifacts<{ evidenceIds: string[] }>(project.id, "finding", waiting.id);
     assert.deepEqual(recommendation.evidenceIds, [gathered.find(answer => answer.prompt === "First question?")?.id]);
 
-    analysis = async () => json({ analysis_status: "unavailable" });
+    analysis = async () => json({ scan_id: "fixture-scan", analysis_status: "unavailable" });
     const stopped = enqueue("console-stop-waiting-for-analysis");
     await runtime.runner.tick();
     await runtime.runner.cancel(stopped.id);
@@ -235,6 +235,74 @@ test("Console check totals and public citations survive project edits, dashboard
     assert.equal(store.job(stopped.id).spentUsd, 0.2);
     assert.equal(completedMeasurement(store.job(stopped.id)), true);
     assert.equal(store.observations(project.id, stopped.id).length, 2);
+  } finally {
+    globalThis.fetch = original;
+    await runtime.app.close(); store.close(); rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('a Console check rejects mixed scopes and duplicate answers without replacing its receipt', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'opengeo-console-evidence-scope-')), store = new Store(directory);
+  const vault = new Vault(directory, { encrypt: text => Buffer.from(text), decrypt: bytes => bytes.toString() });
+  vault.set('console', { key: 'synthetic-console-key' });
+  const runtime = await createApp(store, vault, 'synthetic-local-session');
+  const original = globalThis.fetch;
+  const scanId = randomUUID(), other = randomUUID();
+  const answer = { id: randomUUID(), scan_id: scanId, status: 'collected', platform: 'chatgpt', prompt: 'What is an example?',
+    answer_text: 'A locally scoped answer.', presence: 'named', citations: [] };
+  const second = { ...answer, id: randomUUID(), prompt: 'Which other examples exist?' };
+  const finding = { id: randomUUID(), scan_id: scanId, recommendation_eligible: true, title: 'Show an example', description: 'Explain how it works.',
+    target_url: 'https://example.com/examples', evidence: [{ observation_id: answer.id }], steps: ['Add a concrete example.'] };
+  let observations = [answer, { ...second, scan_id: other }], analysisScan = other, findings = [{ ...finding, scan_id: other }];
+  let submissions = 0, evidenceReads = 0;
+  globalThis.fetch = (async (url) => {
+    const path = new URL(String(url)).pathname.replace('/api/v1/console', '');
+    if (path === '/capabilities') return json({ platforms: [{ key: 'chatgpt', name: 'ChatGPT', enabled: true }], pricing: { credit_usd: .1 } });
+    if (path === '/domains') return json([{ id: 'd373ba88-779f-41ce-926e-28a40103c97e', domain: 'example.com' }]);
+    if (path.endsWith('/brand')) return json({});
+    if (path === '/scans/preview') return json({ credits_required: 2, query_count: 2 });
+    if (path === '/scans') { submissions++; return json({ scan_id: scanId, credits_charged: 2 }); }
+    if (path === `/scans/${scanId}`) return json({ status: 'completed', answers_total: 2 });
+    if (path === `/scans/${scanId}/observations`) { evidenceReads++; return json(observations); }
+    if (path === `/scans/${scanId}/analysis`) return json({ scan_id: analysisScan, analysis_status: 'available' });
+    if (path.endsWith('/insights/diagnoses')) return json([]);
+    if (path.endsWith('/insights/opportunities')) return json(findings);
+    throw new Error('Unexpected external request ' + path);
+  }) as typeof fetch;
+  try {
+    const project = store.createProject(projectInput.parse({ domain: 'example.com', brand: 'Example', prompts: [answer.prompt, second.prompt] }));
+    const job = store.enqueue(jobInput.parse({ projectId: project.id, kind: 'measure', provider: 'console', maxCostUsd: .2 }), 'scope-guard');
+    const resume = async () => { runtime.runner.resume(job.id, false); await runtime.runner.tick(); };
+    const refuse = () => {
+      assert.equal(store.job(job.id).status, 'paused');
+      assert.equal(store.job(job.id).error, 'invalid_response');
+      assert.equal(store.findings(project.id).length, 0);
+      assert.equal(store.job(job.id).spentUsd, .2);
+    };
+    await runtime.runner.tick();
+    refuse();
+    assert.equal(store.observations(project.id, job.id).length, 0);
+    observations = [answer, { ...second, id: answer.id }];
+    await resume();
+    refuse();
+    assert.equal(store.observations(project.id, job.id).length, 0);
+    observations = [answer, second];
+    await resume();
+    refuse();
+    const saved = store.observations(project.id, job.id);
+    assert.equal(saved.length, 2);
+    assert.equal(completedMeasurement(store.job(job.id)), true);
+    analysisScan = scanId;
+    await resume();
+    refuse();
+    assert.deepEqual(store.observations(project.id, job.id), saved);
+    findings = [finding];
+    await resume();
+    assert.deepEqual(completedAnalysisResult(store.job(job.id)), { findings: 1, measurementJobId: job.id });
+    assert.deepEqual(store.findings(project.id)[0].evidenceIds, [saved.find(row => row.prompt === answer.prompt)?.id]);
+    assert.deepEqual(store.observations(project.id, job.id), saved);
+    assert.equal(submissions, 1);
+    assert.equal(evidenceReads, 3);
   } finally {
     globalThis.fetch = original;
     await runtime.app.close(); store.close(); rmSync(directory, { recursive: true, force: true });

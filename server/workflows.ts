@@ -39,6 +39,7 @@ import {
   type Model,
 } from "./contracts.js";
 const consoleDomainBinding = z.object({ id: z.string().uuid(), domain: z.string().min(1) });
+const consoleScanBinding = z.object({ scan_id: z.string() });
 type ConsoleAnswerCheckpoint = { observations: number; observationIds: [string, string][] };
 
 function boundConsoleDomain(value: unknown, hostname: string) {
@@ -46,6 +47,13 @@ function boundConsoleDomain(value: unknown, hostname: string) {
   if (!parsed.success || parsed.data.domain !== hostname)
     throw new ProviderError('invalid_response', 'SurfacedBy did not confirm the requested website.');
   return parsed.data;
+}
+
+/** A response must attest the scan before the app treats it as this check's evidence. */
+function verifyConsoleScan(value: unknown, scanId: string) {
+  const parsed = consoleScanBinding.safeParse(value);
+  if (!parsed.success || parsed.data.scan_id !== scanId)
+    throw new ProviderError('invalid_response', 'SurfacedBy did not confirm these results belong to this check. Saved results were kept.');
 }
 const factsSchema = z.object({
   facts: z.array(
@@ -1245,6 +1253,7 @@ export class Runner {
             signal,
           )
         ).data;
+        verifyConsoleScan(analysis, scanId);
         if (analysis.analysis_status === "available") {
           const findings = await this.saveConsoleFindings(job, project, domain.id, scanId, answers, signal);
           return { ...result, analysis: { measurementJobId: job.id, findings } };
@@ -1273,6 +1282,13 @@ export class Runner {
     if (saved?.state === "done") return JSON.parse(saved.body!);
     const evidence = await this.consolePages("/scans/" + scanId + "/observations", signal);
     signal.throwIfAborted();
+    const ids = new Set<string>();
+    for (const row of evidence) {
+      verifyConsoleScan(row, scanId);
+      if (typeof row.id !== 'string' || !row.id.trim() || ids.has(row.id))
+        throw new ProviderError('invalid_response', 'SurfacedBy returned duplicate or incomplete answer identifiers. Resume to reread this check.');
+      ids.add(row.id);
+    }
     return this.store.db.transaction(() => {
       const observationIds: [string, string][] = [];
       for (const row of evidence) {
@@ -1312,6 +1328,7 @@ export class Runner {
     const findings: any[] = [];
     for (const kind of ["diagnoses", "opportunities"]) {
       const rows = await this.consolePages("/domains/" + domainId + "/insights/" + kind + "?scan_id=" + scanId, signal);
+      for (const row of rows) verifyConsoleScan(row, scanId);
       // A historical gap may explain an answer before SurfacedBy has qualified a change.
       findings.push(...rows.filter(row => row.recommendation_eligible === true));
     }
