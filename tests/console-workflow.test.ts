@@ -246,7 +246,9 @@ test("Console check totals and public citations survive project edits, dashboard
         { id: "remote-answer-3", scan_id: "fixture-scan", prompt: "Third question?", platform: "chatgpt", status: "missing_observation", answer_text: null },
       ]);
     }
-    if (path.endsWith("/insights/opportunities")) return json([
+    if (path.endsWith("/insights/opportunities")) {
+      assert.equal(new URL(String(url)).searchParams.get('published_recommendations'), 'true');
+      return json([
       {
         id: "historical-gap", scan_id: "fixture-scan", title: "AI answers without citing you", description: "No page action is decided for this question yet.",
         priority: "medium", target_url: null, recommendation_eligible: false,
@@ -257,7 +259,8 @@ test("Console check totals and public citations survive project edits, dashboard
         priority: "medium", target_url: "https://example.com/examples", recommendation_eligible: true,
         evidence: [{ observation_id: "remote-answer-1" }], steps: ["Explain who each example is for."],
       }] : []),
-    ]);
+      ]);
+    }
     if (path.includes("/insights/")) return json([]);
     throw new Error("Unexpected external request: " + path);
   }) as typeof fetch;

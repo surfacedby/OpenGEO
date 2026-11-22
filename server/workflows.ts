@@ -1417,7 +1417,8 @@ export class Runner {
       return (JSON.parse(saved.body!).findings as number | undefined) ?? this.store.artifacts(project.id, "finding", job.id).length;
     const findings: any[] = [];
     for (const kind of ["diagnoses", "opportunities"]) {
-      const rows = await this.consolePages("/domains/" + domainId + "/insights/" + kind + "?scan_id=" + scanId, signal);
+      const published = kind === 'opportunities' ? '&published_recommendations=true' : '';
+      const rows = await this.consolePages("/domains/" + domainId + "/insights/" + kind + "?scan_id=" + scanId + published, signal);
       for (const row of rows) verifyConsoleScan(row, scanId);
       // A historical gap may explain an answer before SurfacedBy has qualified a change.
       findings.push(...rows.filter(row => row.recommendation_eligible === true));
