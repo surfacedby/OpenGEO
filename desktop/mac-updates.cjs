@@ -1,7 +1,26 @@
 const { EventEmitter } = require('node:events');
-const { mkdir, open, rename, unlink } = require('node:fs/promises');
+const { constants, createReadStream } = require('node:fs');
+const { lstat, mkdir, open, rename, unlink } = require('node:fs/promises');
 const { join } = require('node:path');
 const { createHash, randomUUID } = require('node:crypto');
+
+async function cachedInstallerMatches(path, file, signal) {
+  try {
+    const stat = await lstat(path);
+    if (!stat.isFile() || stat.size !== file.size) return false;
+    const hash = createHash('sha512');
+    let bytes = 0;
+    const flags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
+    for await (const chunk of createReadStream(path, { flags, end: file.size, signal })) {
+      bytes += chunk.length;
+      hash.update(chunk);
+    }
+    return bytes === file.size && hash.digest('base64') === file.sha512;
+  } catch (error) {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
 
 /** Unsigned Mac builds can download a verified disk image, but cannot use signed-app replacement. */
 class MacUpdates extends EventEmitter {
@@ -27,16 +46,26 @@ class MacUpdates extends EventEmitter {
     const name = `OpenGEO-${info.version}-macos-${this.architecture}.dmg`;
     const file = info.files?.find(file => file.url === name);
     if (!file || !Number.isSafeInteger(file.size) || file.size <= 0 || file.size > 2 * 1024 ** 3 || typeof file.sha512 !== 'string' || Buffer.from(file.sha512, 'base64').length !== 64) throw new Error('Invalid installer metadata.');
-    await mkdir(this.directory, { recursive: true, mode: 0o700 });
-    const temporary = join(this.directory, randomUUID() + '.part');
-    let handle;
+    const destination = join(this.directory, name);
+    let handle, temporary;
     const abort = new AbortController();
     const cancel = () => abort.abort();
     cancellationToken?.onCancel(cancel);
     try {
+      // Recheck downloaded bytes against the current release before letting a new app session reuse them.
+      if (await cachedInstallerMatches(destination, file, abort.signal)) {
+        abort.signal.throwIfAborted();
+        this.installer = destination;
+        this.emit('update-downloaded');
+        return;
+      }
+      abort.signal.throwIfAborted();
+      await mkdir(this.directory, { recursive: true, mode: 0o700 });
       const response = await this.fetcher(`https://github.com/surfacedby/OpenGEO/releases/download/v${info.version}/${name}`, { signal: AbortSignal.any([abort.signal, AbortSignal.timeout(30 * 60 * 1000)]) });
       if (!response.ok || !response.body) throw new Error('Installer download failed.');
-      handle = await open(temporary, 'wx', 0o600);
+      const partial = join(this.directory, randomUUID() + '.part');
+      handle = await open(partial, 'wx', 0o600);
+      temporary = partial;
       const hash = createHash('sha512');
       let bytes = 0, lastProgress = 0;
       for await (const chunk of response.body) {
@@ -50,11 +79,15 @@ class MacUpdates extends EventEmitter {
       if (bytes !== file.size || hash.digest('base64') !== file.sha512) throw new Error('Installer checksum mismatch.');
       await handle.close(); handle = null;
       abort.signal.throwIfAborted();
-      const destination = join(this.directory, name);
       await rename(temporary, destination);
+      temporary = undefined;
       this.installer = destination;
       this.emit('update-downloaded');
-    } finally { cancellationToken?.removeListener('cancel', cancel); await handle?.close(); await unlink(temporary).catch(error => { if (error.code !== 'ENOENT') throw error; }); }
+    } finally {
+      cancellationToken?.removeListener('cancel', cancel);
+      await handle?.close();
+      if (temporary) await unlink(temporary).catch(error => { if (error.code !== 'ENOENT') throw error; });
+    }
   }
 }
 module.exports = { MacUpdates };

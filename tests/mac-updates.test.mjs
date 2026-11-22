@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { EventEmitter } from 'node:events';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 const { MacUpdates } = createRequire(import.meta.url)('../desktop/mac-updates.cjs');
@@ -23,6 +23,41 @@ test('Mac download selects the current architecture and verifies bytes before of
     assert.deepEqual(await readdir(directory), [file.url]);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+test('a later Mac session reuses only the matching verified installer', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'opengeo-mac-update-cache-'));
+  const content = Buffer.from('first installer');
+  const file = { url: 'OpenGEO-0.2.0-macos-arm64.dmg', size: content.length, sha512: createHash('sha512').update(content).digest('base64') };
+  let requests = 0;
+  const newSession = () => {
+    const updater = new EventEmitter();
+    const mac = new MacUpdates(updater, directory, 'arm64', async () => {
+      requests++;
+      return new Response(content);
+    });
+    updater.emit('update-available', { version: '0.2.0', files: [file] });
+    return mac;
+  };
+  try {
+    const first = newSession();
+    await first.downloadUpdate();
+    assert.equal(requests, 1);
+
+    const reopened = newSession();
+    await reopened.downloadUpdate();
+    assert.equal(requests, 1);
+    assert.equal(reopened.installer, first.installer);
+    assert.deepEqual(await readFile(reopened.installer), content);
+
+    await writeFile(first.installer, Buffer.alloc(content.length));
+    const repaired = newSession();
+    await repaired.downloadUpdate();
+    assert.equal(requests, 2);
+    assert.deepEqual(await readFile(repaired.installer), content);
+    assert.deepEqual(await readdir(directory), [file.url]);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
 test('Mac download rejects corrupt payloads and unsafe metadata without retaining a partial installer', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'opengeo-mac-update-'));
   const updater = new EventEmitter();
