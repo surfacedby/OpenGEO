@@ -1,4 +1,14 @@
 // Keep update decisions in the main process: the renderer never supplies a URL or path.
+function updateInstallBlock({ store, runner }, draftProtectionPending) {
+  if (draftProtectionPending) return 'Save your changes before restarting.';
+  if (store.projects().some(project => runner.hasActiveProject(project.id)) ||
+      store.jobs().some(job => job.status === 'queued' || job.status === 'running'))
+    return 'Finish or stop your active scans before restarting.';
+  // A paused or unresolved cancellation record is already saved. Restarting
+  // keeps its receipt, and an update can be how the user gets recovery support.
+  return null;
+}
+
 function createUpdates({ updater, installed, version, manualInstall = false, canInstall, install, publish, readPreference, savePreference }) {
   let state = { status: installed ? 'idle' : 'unavailable', version, manualInstall, availableVersion: null, progress: 0, autoDownload: readPreference(), message: '' };
   let busy = false;
@@ -52,4 +62,4 @@ function createUpdates({ updater, installed, version, manualInstall = false, can
     },
   };
 }
-module.exports = { createUpdates };
+module.exports = { createUpdates, updateInstallBlock };

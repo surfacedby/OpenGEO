@@ -90,7 +90,8 @@ else {
       const updateTransport = process.platform === 'darwin'
         ? new (require('./mac-updates.cjs').MacUpdates)(autoUpdater, path.join(app.getPath('userData'), 'update-downloads'), process.arch)
         : autoUpdater;
-      const updates = require('./updates.cjs').createUpdates({
+      const { createUpdates, updateInstallBlock } = require('./updates.cjs');
+      const updates = createUpdates({
         updater: updateTransport,
         installed: app.isPackaged && ['win32', 'darwin'].includes(process.platform),
         version: app.getVersion(),
@@ -98,7 +99,7 @@ else {
         readPreference: () => runtime.store.setting('desktopAutoDownload', true),
         savePreference: (value) => runtime.store.set('desktopAutoDownload', value),
         publish: (state) => { if (!window.isDestroyed()) window.webContents.send('opengeo:update-state', state); },
-        canInstall: () => draftProtectionPending ? 'Save your changes before restarting.' : runtime.store.projects().some(project => runtime.runner.hasActiveProject(project.id)) || runtime.store.jobs().some(job => ['queued', 'running', 'paused'].includes(job.status) || job.error === 'cancel_remote') ? 'Finish or resolve your active scans before restarting.' : null,
+        canInstall: () => updateInstallBlock(runtime, draftProtectionPending),
         install: async () => {
           if (process.platform === 'darwin') {
             const failure = await shell.openPath(updateTransport.installer);
