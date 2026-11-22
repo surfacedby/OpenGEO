@@ -901,7 +901,15 @@ function Jobs({
           {review?.id === j.id && review.blockedReason && <section className="resume-review">
             <h3>Check needs review</h3>
             <p role="status">{review.blockedReason}</p>
+            {reviewError && <p className="inline-error" role="alert">{reviewError}</p>}
             <div className="button-row">
+              {review.canRecoverConsoleSubmission && <button type="button" className="primary" disabled={resuming} onClick={() => {
+                setResuming(true); setReviewError("");
+                void run(async () => {
+                  try { await api("/jobs/" + j.id + "/recover-console-submission", {}); setReview(null); }
+                  catch (failure) { setReviewError((failure as Error).message); }
+                }).finally(() => setResuming(false));
+              }}>{resuming ? "Checking..." : "Find original check"}</button>}
               <a className="secondary" href="https://console.surfacedby.com/dashboard" target="_blank" rel="noreferrer">Open SurfacedBy Console <ArrowUpRight size={14} /></a>
               <button type="button" className="secondary" onClick={() => setReview(null)}>Close</button>
             </div>

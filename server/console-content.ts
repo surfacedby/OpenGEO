@@ -45,7 +45,8 @@ export async function consoleContent(runner: Runner, job: Job, project: Project,
       source_urls: [...new Set([...required, ...urls])].slice(0, 5),
       ...(recommendation ? { task: { action: task.mode === "page_update" ? "improve_page" : "create_page", ...recommendation } } : {}),
       ...(required.length ? { target_url: required[0] } : {}),
-      ...(finding?.kind === "console" && finding.remoteId ? { opportunity_id: finding.remoteId } : {}),
+      ...(finding?.kind === "console" && finding.remoteId ? { opportunity_id: finding.remoteId,
+        ...(finding.remoteScanId ? { opportunity_scan_id: finding.remoteScanId } : {}) } : {}),
       ...(original ? { original_draft: original.markdown } : {}),
     };
   }, result);

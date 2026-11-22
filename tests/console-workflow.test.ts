@@ -24,15 +24,23 @@ test('an unconfirmed full-check submission cannot be resubmitted or discarded by
   const runtime = await createApp(store, vault, 'synthetic-local-session');
   const original = globalThis.fetch;
   const domain = { id: randomUUID(), domain: 'example.com' };
+  const scanId = randomUUID();
+  let receipt: { request_key: string; domain_id: string; scan_id: string; credits_charged: number } | undefined;
   const requests: string[] = [];
-  globalThis.fetch = (async (url) => {
-    const path = new URL(String(url)).pathname.replace('/api/v1/console', '');
+  globalThis.fetch = (async (url, init) => {
+    const request = new URL(String(url));
+    const path = request.pathname.replace('/api/v1/console', '');
     requests.push(path);
     if (path === '/capabilities') return json({ platforms: [{ key: 'chatgpt', enabled: true }], pricing: { credit_usd: .25 } });
     if (path === '/domains') return json([domain]);
     if (path.endsWith('/brand')) return json({});
     if (path === '/scans/preview') return json({ credits_required: 2, query_count: 1 });
-    if (path === '/scans') return json({ scan_id: randomUUID() });
+    if (path === '/scans') return json({ scan_id: scanId });
+    if (path === '/scans/submission') {
+      assert.equal(init?.method, 'GET');
+      assert.equal(request.searchParams.get('request_key'), receipt?.request_key);
+      return json(receipt);
+    }
     throw new Error('Unexpected request ' + path);
   }) as typeof fetch;
   try {
@@ -66,6 +74,16 @@ test('an unconfirmed full-check submission cannot be resubmitted or discarded by
     assert.throws(() => store.deleteProject(previousBrand.id, previousBrand.domain), /unfinished/);
     assert.equal((await runtime.runner.cancel(previouslyStopped.id)).error, 'cancel_remote');
     assert.deepEqual(requests, ['/capabilities', '/domains', `/domains/${domain.id}/brand`, '/scans/preview', '/scans']);
+
+    receipt = { request_key: newJob.id, domain_id: randomUUID(), scan_id: scanId, credits_charged: 2 };
+    await assert.rejects(() => runtime.runner.recoverConsoleSubmission(newJob.id), /submission is still unconfirmed/i);
+    assert.equal(store.step(newJob.id, 'console-scan')?.state, 'started');
+    receipt.domain_id = domain.id;
+    const recovered = await runtime.runner.recoverConsoleSubmission(newJob.id);
+    assert.equal(recovered.spentUsd, .5);
+    assert.equal(recovered.error, 'cancel_remote');
+    assert.equal(store.step(newJob.id, 'console-scan')?.state, 'done');
+    assert.equal(requests.filter(path => path === '/scans').length, 1);
   } finally {
     globalThis.fetch = original;
     await runtime.app.close(); store.close(); rmSync(directory, { recursive: true, force: true });
@@ -220,6 +238,7 @@ test("Console check totals and public citations survive project edits, dashboard
       return json([
         { id: "remote-answer-1", scan_id: "fixture-scan", prompt: "First question?", platform: "chatgpt", model: "fixture-model", status: "collected",
           surface: "consumer_interface",
+          web_search_used: true, search_queries: ["weekly reports", "weekly reports", "compare reporting tools"],
           answer_text: "Example provides examples.", presence: "cited", citations: [null, "unusable annotation", { url_citation: "unusable nested annotation" },
             { url: "https://example.com/", title: null, supplier_secret: "synthetic-hidden-field" }, { url: "javascript:alert(1)" }, { url: "https://example.com/" }] },
         { id: "remote-answer-2", scan_id: "fixture-scan", prompt: "Second question?", platform: "chatgpt", model: "fixture-model", status: "collected",
@@ -271,8 +290,13 @@ test("Console check totals and public citations survive project edits, dashboard
     assert.equal('model' in portable.observations[0], false);
     assert.equal('surface' in portable.observations[1], false);
     assert.deepEqual(portable.observations[1].citations, [{ url: "https://example.com/" }]);
+    assert.equal(portable.observations[0].webSearchConfirmed, undefined);
+    assert.equal(portable.observations[1].webSearchConfirmed, true);
+    assert.deepEqual(portable.observations[1].searchQueries, ["weekly reports", "weekly reports", "compare reporting tools"]);
     const restored = importProject(store, portable).project;
     const restoredCheck = await workspace(restored.id);
+    assert.deepEqual(restoredCheck.observations.find((row: { prompt: string }) => row.prompt === "First question?").searchQueries,
+      ["weekly reports", "weekly reports", "compare reporting tools"]);
     assert.equal(restoredCheck.metrics.requested, 3);
     assert.equal(restoredCheck.comparison.status, "incomplete");
     const restoredAnalysis = completedAnalysisResult(restoredCheck.measurement);

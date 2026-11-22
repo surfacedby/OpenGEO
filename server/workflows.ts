@@ -248,12 +248,42 @@ export class Runner {
       return unconfirmedConsoleScanError();
     return null;
   }
+  async recoverConsoleSubmission(id: string) {
+    const job = this.store.job(id);
+    const step = this.store.step(id, 'console-domain');
+    if (job.provider !== 'console' || !['paused', 'cancelled'].includes(job.status) ||
+        !this.consoleResumeBlock(id) || step?.state !== 'done' || !step.body)
+      throw unconfirmedConsoleScanError();
+    const domain = consoleDomainBinding.parse(JSON.parse(step.body));
+    const original = this.store.step(id, 'console-scan');
+    const existing = original?.state === 'done' ? consoleScanBinding.safeParse(JSON.parse(original.body!)) : undefined;
+    let response;
+    try {
+      response = await this.providers.console('/scans/submission?request_key=' + encodeURIComponent(id),
+        undefined, undefined, AbortSignal.timeout(20000));
+    } catch (error) {
+      if (error instanceof ProviderError && error.httpStatus === 404) throw unconfirmedConsoleScanError();
+      throw error;
+    }
+    const receipt = consoleScanReceipt.extend({ request_key: z.literal(id), domain_id: z.literal(domain.id) }).safeParse(response.data);
+    if (!receipt.success || (existing?.success && receipt.data.scan_id !== existing.data.scan_id))
+      throw unconfirmedConsoleScanError();
+    const paid = creditsUsd(receipt.data.credits_charged, this.consoleScanCreditUnit(job));
+    if (!withinUsdBudget(job.maxCostUsd, [paid])) throw unconfirmedConsoleScanError();
+    return this.store.db.transaction(() => {
+      if (this.cancelling.has(id) || !['paused', 'cancelled'].includes(this.store.job(id).status) || !this.consoleResumeBlock(id))
+        throw new ProviderError('in_progress', 'Wait for the check to finish changing before recovering it.');
+      this.store.setStep(id, 'console-scan', 'done', receipt.data);
+      return this.store.updateJob(id, { spentUsd: paid, progress: 'Original check and charge confirmed.' });
+    })();
+  }
   resumePreview(id: string) {
     const job = this.store.job(id);
     const uncertain = this.store.db.prepare("SELECT COUNT(*) AS count FROM steps WHERE job_id=? AND " +
       "(state='started' OR (step='console-scan' AND state='approved-retry'))").get(id) as { count: number };
     return { maxCostUsd: job.maxCostUsd, spentUsd: job.spentUsd, uncertainRequests: uncertain.count, provider: job.provider, reason: job.error,
-      scheduledBudgetCeilingUsd: scheduledBudgetCeiling(this.store, job), blockedReason: this.consoleResumeBlock(id)?.message ?? null };
+      scheduledBudgetCeilingUsd: scheduledBudgetCeiling(this.store, job), blockedReason: this.consoleResumeBlock(id)?.message ?? null,
+      canRecoverConsoleSubmission: job.provider === 'console' && this.store.step(id, 'console-domain')?.state === 'done' };
   }
   resume(id: string, reviewed: boolean, maxCostUsd?: number) {
     const job = this.store.job(id);
@@ -1262,9 +1292,11 @@ export class Runner {
           )
         ).data;
         verifyConsoleScan(analysis, scanId);
-        if (analysis.analysis_status === "available") {
+        if (analysis.analysis_status === "available" && analysis.recommendations_status !== 'pending') {
           const findings = await this.saveConsoleFindings(job, project, domain.id, scanId, answers, signal);
-          return { ...result, analysis: { measurementJobId: job.id, findings } };
+          const uncertainties = ['partial', 'unavailable'].includes(analysis.recommendations_status)
+            ? ['SurfacedBy could not confirm that all recommendations for this check were published.'] : undefined;
+          return { ...result, analysis: { measurementJobId: job.id, findings, ...(uncertainties ? { uncertainties } : {}) } };
         }
         if (analysis.analysis_status === "unavailable")
           throw new ProviderError(
@@ -1362,6 +1394,9 @@ export class Runner {
           answer: row.answer_text,
           citations,
           retrievedSources: otherSearchLinks(row.retrieved_sources, citations),
+          ...(typeof row.web_search_used === 'boolean' ? { webSearchConfirmed: row.web_search_used } : {}),
+          ...(Array.isArray(row.search_queries) ? { searchQueries: row.search_queries.flatMap((query: unknown) =>
+            typeof query === 'string' && query.trim() ? [query.trim()] : []) } : {}),
           surface: ["api", "consumer_interface"].includes(row.surface) ? row.surface : "unknown",
           mentioned: ["cited", "named"].includes(row.presence),
           cited: row.presence === "cited",

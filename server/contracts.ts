@@ -149,6 +149,8 @@ export type Finding = {
   planOrder?: number;
   /** SurfacedBy's identifier for an opportunity it produced. */
   remoteId?: string;
+  /** The check that published this advice, even after the opportunity is measured again. */
+  remoteScanId?: string;
   opportunity?: z.infer<typeof opportunityDetails>;
 };
 export const contentTask = z.object({

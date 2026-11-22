@@ -520,6 +520,8 @@ export async function createApp(
   );
   app.post("/api/jobs/:id/dismiss", (req) => publicJob(store.dismissJob((req.params as any).id)));
   app.get("/api/jobs/:id/resume-preview", (req) => runner.resumePreview((req.params as any).id));
+  app.post("/api/jobs/:id/recover-console-submission", async (req) =>
+    publicJob(await runner.recoverConsoleSubmission((req.params as any).id)));
   app.post("/api/jobs/:id/resume", (req) => {
     const input = z.object({ reviewed: z.boolean().default(false), maxCostUsd: z.number().finite().min(0).max(10000).optional() }).strict().parse(req.body ?? {});
     return publicJob(runner.resume((req.params as any).id, input.reviewed, input.maxCostUsd));
